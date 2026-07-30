@@ -1,3 +1,3 @@
 export default function Home() {
-  return <main>Doubloon</main>;
+  return <main>SubSentry</main>;
 }
