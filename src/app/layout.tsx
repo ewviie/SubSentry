@@ -3,6 +3,7 @@ import "./globals.css";
 import { Geist, Geist_Mono, Space_Grotesk } from "next/font/google";
 import { cn } from "@/lib/utils";
 import { Toaster } from "@/components/ui/sonner";
+import { ThemeProvider } from "@/components/theme-provider";
 import { MotionConfig } from "framer-motion";
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-sans" });
@@ -13,7 +14,7 @@ const spaceGrotesk = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
-  title: "Doubloon",
+  title: "SubSentry",
   description: "AI-powered subscription management",
 };
 
@@ -23,6 +24,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
+      suppressHydrationWarning
       className={cn(
         "font-sans",
         geist.variable,
@@ -31,8 +33,10 @@ export default function RootLayout({
       )}
     >
       <body>
-        <MotionConfig reducedMotion="user">{children}</MotionConfig>
-        <Toaster />
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+          <MotionConfig reducedMotion="user">{children}</MotionConfig>
+          <Toaster />
+        </ThemeProvider>
       </body>
     </html>
   );

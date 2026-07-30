@@ -41,7 +41,7 @@ export function SubscriptionsTable({ subscriptions }: { subscriptions: Subscript
       <TableHeader>
         <TableRow>
           <TableHead>Name</TableHead>
-          <TableHead>Amount</TableHead>
+          <TableHead className="text-right">Amount</TableHead>
           <TableHead>Category</TableHead>
           <TableHead>Next renewal</TableHead>
           <TableHead>Status</TableHead>
@@ -56,14 +56,22 @@ export function SubscriptionsTable({ subscriptions }: { subscriptions: Subscript
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.15 }}
-              className="cursor-pointer border-b transition-colors last:border-0 hover:bg-muted/50 data-[state=selected]:bg-muted"
+              className="relative border-b transition-colors last:border-0 hover:bg-muted/50 data-[state=selected]:bg-muted"
             >
-              <TableCell className="p-0">
-                <Link href={`/subscriptions/${s.id}`} className="block px-2 py-2 font-medium">
+              <TableCell className="font-medium">
+                {/* Stretched link: one real, keyboard-accessible <a> per row,
+                    its ::after expanded to cover the whole <tr> (which has
+                    position:relative) — so the entire row is a single click
+                    target with correct semantics, not a second competing
+                    interactive element layered on top of it. */}
+                <Link
+                  href={`/subscriptions/${s.id}`}
+                  className="after:absolute after:inset-0 after:content-['']"
+                >
                   {s.name}
                 </Link>
               </TableCell>
-              <TableCell className="font-mono">
+              <TableCell className="text-right font-mono tabular-nums">
                 {formatCents(s.amountCents, s.currency)}
                 <span className="text-muted-foreground"> / {BILLING_CYCLE_LABELS[s.billingCycle]}</span>
               </TableCell>
@@ -74,7 +82,11 @@ export function SubscriptionsTable({ subscriptions }: { subscriptions: Subscript
               </TableCell>
               <TableCell className="text-muted-foreground">{s.nextRenewalDate}</TableCell>
               <TableCell>
-                <Badge variant={s.status === "active" ? "default" : "secondary"}>
+                <Badge
+                  variant={
+                    s.status === "active" ? "default" : s.status === "paused" ? "secondary" : "outline"
+                  }
+                >
                   {STATUS_LABELS[s.status]}
                 </Badge>
               </TableCell>

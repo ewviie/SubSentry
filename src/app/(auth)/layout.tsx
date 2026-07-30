@@ -14,7 +14,7 @@ export default async function AuthLayout({ children }: { children: React.ReactNo
     <div className="flex min-h-svh flex-col items-center justify-center gap-6 bg-background px-4">
       <div className="flex items-center gap-2 font-heading text-lg font-semibold">
         <Anchor className="size-5" aria-hidden="true" />
-        Doubloon
+        SubSentry
       </div>
       <AuthShell>{children}</AuthShell>
     </div>

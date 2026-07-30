@@ -54,7 +54,7 @@ export default function LoginPage() {
     <Card>
       <CardHeader>
         <CardTitle className="font-heading text-2xl">Welcome back</CardTitle>
-        <CardDescription>Log in to your Doubloon dashboard.</CardDescription>
+        <CardDescription>Log in to your SubSentry dashboard.</CardDescription>
       </CardHeader>
       <form onSubmit={handleSubmit}>
         <CardContent className="space-y-4">

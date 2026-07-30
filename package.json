@@ -2,7 +2,7 @@
   "name": "doubloon",
   "version": "0.1.0",
   "private": true,
-  "description": "Doubloon — AI-powered subscription management",
+  "description": "SubSentry — AI-powered subscription management",
   "type": "module",
   "scripts": {
     "dev": "next dev",

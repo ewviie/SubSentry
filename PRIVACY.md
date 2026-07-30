@@ -1,4 +1,4 @@
-# Doubloon Privacy Policy
+# SubSentry Privacy Policy
 
 **DRAFT — not yet reviewed by legal counsel. Do not publish or link to this
 document from the app until a qualified lawyer has reviewed it.** Placeholder
@@ -8,20 +8,20 @@ _Last updated: [DATE]_
 
 ## Who we are
 
-Doubloon ("Doubloon," "we," "us") provides a subscription-tracking web
+SubSentry ("SubSentry," "we," "us") provides a subscription-tracking web
 application. This policy explains what personal data we collect through the
 app, why, and what rights you have over it.
 
-Doubloon does not currently operate as a formal registered legal entity. If
+SubSentry does not currently operate as a formal registered legal entity. If
 you incorporate before publishing this policy, replace this section with your
 registered company name, registration number, and registered address.
 
-**Contact for privacy requests:** privacy@doubloon.app _(placeholder address
+**Contact for privacy requests:** privacy@subsentry.app _(placeholder address
 — replace with a real, monitored mailbox before publishing)_
 
 ## What we collect
 
-When you create an account and use Doubloon, we collect:
+When you create an account and use SubSentry, we collect:
 
 - **Account data**: your email address, your password (see "How we protect
   your data" below — we never store this in readable form), and an optional
@@ -29,7 +29,7 @@ When you create an account and use Doubloon, we collect:
 - **Subscription data you enter**: the name, price, currency, billing cycle,
   category, renewal date, status, and any notes you add for each subscription
   you track. This is data *about the other services you pay for* — it is not
-  payment data for Doubloon itself.
+  payment data for SubSentry itself.
 - **Session data**: a record that you're logged in, so you don't have to
   re-enter your password on every page. See "Cookies" below.
 - **Billing records**: if you upgrade to Pro, we record that a checkout
@@ -42,7 +42,7 @@ any tracking pixel. We do not sell your data to anyone, for any reason.
 
 ## Cookies
 
-Doubloon uses exactly one cookie: a session token that keeps you logged in.
+SubSentry uses exactly one cookie: a session token that keeps you logged in.
 It is:
 - **HttpOnly** — inaccessible to JavaScript, reducing exposure if a script on
   the page is ever compromised.
@@ -57,7 +57,7 @@ third-party trackers.
 ## Who we share data with
 
 We share the minimum data necessary with two third-party service providers
-so Doubloon can function:
+so SubSentry can function:
 
 - **Stripe**, for billing. If you upgrade to Pro, Stripe handles your
   payment details directly — we never see or store your card number.
@@ -121,8 +121,8 @@ Regardless of where you live, you can ask us to:
 - **Export** your data in a portable format ("right to data portability").
 - **Object to or restrict** certain processing.
 
-**How to exercise these rights today:** email privacy@doubloon.app with your
-account email and the request. As Doubloon does not yet have a self-service
+**How to exercise these rights today:** email privacy@subsentry.app with your
+account email and the request. As SubSentry does not yet have a self-service
 "delete my account" or "export my data" button, we will action your request
 manually. We aim to respond within 30 days.
 
@@ -151,7 +151,7 @@ GDPR). In addition:
 
 _[Add CCPA/CPRA-specific disclosures here if you expect California users —
 categories of data collected/shared, and the right to opt out of sale/share
-(Doubloon does not sell data, but CCPA has specific disclosure requirements
+(SubSentry does not sell data, but CCPA has specific disclosure requirements
 even to state that).]_
 
 ## Changes to this policy
@@ -166,4 +166,4 @@ NOT YET SPECIFIED]**, without regard to conflict-of-law principles.
 
 ## Contact
 
-Questions about this policy or your data: privacy@doubloon.app
+Questions about this policy or your data: privacy@subsentry.app

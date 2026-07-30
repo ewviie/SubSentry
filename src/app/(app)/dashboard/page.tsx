@@ -2,12 +2,11 @@ import Link from "next/link";
 import { DollarSign, TrendingUp, Layers, CalendarClock } from "lucide-react";
 import { requireUser } from "@/lib/auth/session";
 import { getDashboardData } from "@/lib/subscriptions/queries";
-import { formatCents } from "@/lib/subscriptions/money";
-import { CATEGORY_LABELS } from "@/lib/subscriptions/labels";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CountUp } from "@/components/ui/count-up";
 import { StatCard } from "@/components/dashboard/stat-card";
+import { CategorySpendBar } from "@/components/dashboard/category-spend-bar";
 import { QuickAddBar } from "@/components/subscriptions/quick-add-bar";
 import { InsightsSection } from "@/components/dashboard/insights-section";
 import { RenewalsList } from "@/components/dashboard/renewals-list";
@@ -50,23 +49,31 @@ export default async function DashboardPage() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard icon={DollarSign} label="Monthly spend" accentClassName="bg-gold-muted text-gold">
+      <div className="space-y-4">
+        <StatCard
+          icon={DollarSign}
+          label="Monthly spend"
+          accentClassName="bg-gold-muted text-gold"
+          caption={`Across ${data.activeCount} active subscription${data.activeCount === 1 ? "" : "s"}`}
+          emphasis
+        >
           <CountUp value={data.monthlyTotalCents} format="currency" />
         </StatCard>
-        <StatCard icon={TrendingUp} label="Annual spend" accentClassName="bg-chart-2/10 text-chart-2">
-          <CountUp value={data.annualTotalCents} format="currency" />
-        </StatCard>
-        <StatCard icon={Layers} label="Active subscriptions" accentClassName="bg-chart-3/10 text-chart-3">
-          <CountUp value={data.activeCount} format="integer" />
-        </StatCard>
-        <StatCard icon={CalendarClock} label="Next renewal" accentClassName="bg-chart-4/10 text-chart-4">
-          {data.upcomingRenewals[0] ? (
-            data.upcomingRenewals[0].nextRenewalDate
-          ) : (
-            <span className="text-muted-foreground">—</span>
-          )}
-        </StatCard>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <StatCard icon={TrendingUp} label="Annual spend" accentClassName="bg-chart-2/10 text-chart-2">
+            <CountUp value={data.annualTotalCents} format="currency" />
+          </StatCard>
+          <StatCard icon={Layers} label="Active subscriptions" accentClassName="bg-chart-3/10 text-chart-3">
+            <CountUp value={data.activeCount} format="integer" />
+          </StatCard>
+          <StatCard icon={CalendarClock} label="Next renewal" accentClassName="bg-chart-4/10 text-chart-4">
+            {data.upcomingRenewals[0] ? (
+              data.upcomingRenewals[0].nextRenewalDate
+            ) : (
+              <span className="text-muted-foreground">—</span>
+            )}
+          </StatCard>
+        </div>
       </div>
 
       <InsightsSection insights={insights} />
@@ -86,22 +93,7 @@ export default async function DashboardPage() {
             <CardTitle>Spend by category</CardTitle>
           </CardHeader>
           <CardContent>
-            {data.categoryBreakdown.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Add a subscription to see your breakdown.
-              </p>
-            ) : (
-              <ul className="space-y-2">
-                {data.categoryBreakdown.map((entry) => (
-                  <li key={entry.category} className="flex items-center justify-between text-sm">
-                    <span>{CATEGORY_LABELS[entry.category]}</span>
-                    <span className="font-mono text-muted-foreground">
-                      {formatCents(entry.monthlyCents)}/mo
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <CategorySpendBar entries={data.categoryBreakdown} />
           </CardContent>
         </Card>
       </div>

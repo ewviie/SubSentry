@@ -15,7 +15,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <header className="border-b border-border">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-4 sm:px-6">
           <Link href="/dashboard" className="font-heading text-lg font-semibold">
-            Doubloon
+            SubSentry
           </Link>
           <div className="flex items-center gap-3 sm:gap-4">
             <Link href="/settings" className="text-sm text-muted-foreground hover:text-foreground hover:underline">
