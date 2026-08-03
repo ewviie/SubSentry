@@ -15,6 +15,13 @@
       "when": 1785666891380,
       "tag": "0001_past_bastion",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785790728506,
+      "tag": "0002_cloudy_red_hulk",
+      "breakpoints": true
     }
   ]
 }
