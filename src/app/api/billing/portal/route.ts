@@ -26,7 +26,7 @@ export async function POST(request: Request) {
   const customerId = session.user.stripeCustomerId;
   if (!customerId) {
     return NextResponse.json(
-      { error: "no_billing_account", message: "No billing account on file yet — try again after your upgrade finishes processing." },
+      { error: "no_billing_account", message: "No billing account on file yet. Try again after your upgrade finishes processing." },
       { status: 400 },
     );
   }

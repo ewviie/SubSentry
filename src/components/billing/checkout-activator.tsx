@@ -34,7 +34,7 @@ export function CheckoutActivator() {
           toast.error(data?.message ?? "Couldn't confirm your upgrade. Contact support if this persists.");
           return;
         }
-        toast.success("You're on Pro — unlimited subscriptions unlocked.");
+        toast.success("You're on Pro. Unlimited subscriptions unlocked.");
         router.refresh();
       })
       .catch(() => {

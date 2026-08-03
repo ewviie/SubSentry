@@ -38,7 +38,7 @@ export async function POST(request: Request) {
     // The webhook may not have landed yet — this isn't necessarily wrong,
     // just early. The client can retry shortly.
     return NextResponse.json(
-      { error: "not_found", message: "Still processing your upgrade — try again in a moment." },
+      { error: "not_found", message: "Still processing your upgrade. Try again in a moment." },
       { status: 404 },
     );
   }

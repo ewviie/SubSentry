@@ -58,8 +58,8 @@ export function SavingsCard({
               </p>
               <p className="text-sm text-muted-foreground">
                 {duplicateInsights.length === 1
-                  ? "1 likely duplicate is flagged below — canceling it gets you this back."
-                  : `${duplicateInsights.length} likely duplicates are flagged below — canceling them gets you this back.`}
+                  ? "1 likely duplicate is flagged below. Canceling it gets you this back."
+                  : `${duplicateInsights.length} likely duplicates are flagged below. Canceling them gets you this back.`}
               </p>
               {firstDuplicateSubscriptionId ? (
                 <Button
@@ -77,7 +77,7 @@ export function SavingsCard({
             <>
               <p className="text-2xl font-semibold">No duplicates found</p>
               <p className="text-sm text-muted-foreground">
-                Nothing here looks redundant — you&apos;re not paying twice for the same thing.
+                Nothing here looks redundant. You&apos;re not paying twice for the same thing.
               </p>
             </>
           )}

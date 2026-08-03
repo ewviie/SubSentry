@@ -8,7 +8,7 @@ const SIGNALS = [
   {
     icon: Lock,
     title: "Passwords hashed with Argon2id",
-    description: "The password-hashing algorithm recommended for new systems — never stored or logged in readable form.",
+    description: "The password-hashing algorithm recommended for new systems. Never stored or logged in readable form.",
   },
   {
     icon: EyeOff,
