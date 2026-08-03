@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { checkoutSessions, stripeEvents, users } from "@/lib/db/schema";
-import { verifyStripeSignature, stripeCheckoutEventSchema } from "@/lib/billing/stripe-webhook";
+import { verifyStripeSignature, stripeEventSchema } from "@/lib/billing/stripe-webhook";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -19,7 +19,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "invalid_signature" }, { status: 400 });
   }
 
-  const parsed = stripeCheckoutEventSchema.safeParse(JSON.parse(rawBody));
+  let body: unknown;
+  try {
+    body = JSON.parse(rawBody);
+  } catch {
+    // Signature verification above already proved this came from Stripe, so
+    // malformed JSON here is a genuine anomaly (not a spoofed request) —
+    // worth a 4xx that triggers Stripe's retry, unlike the 200 below for a
+    // validly-shaped event this endpoint just doesn't act on.
+    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+  }
+
+  const parsed = stripeEventSchema.safeParse(body);
   if (!parsed.success) {
     // Not a shape this endpoint cares about (e.g. an event type we don't
     // act on) — acknowledge so Stripe doesn't retry indefinitely.
@@ -71,6 +82,32 @@ export async function POST(request: Request) {
           status: "completed",
         })
         .onConflictDoNothing();
+
+      // Stored now (ahead of /api/billing/activate redeeming this checkout)
+      // so the Billing Portal route has a customer id to open a session
+      // against as soon as activation runs — activation itself doesn't need
+      // to touch this column.
+      if (userId && session.customer) {
+        await tx
+          .update(users)
+          .set({ stripeCustomerId: session.customer, updatedAt: new Date() })
+          .where(eq(users.id, userId));
+      }
+    }
+
+    // Fires once a subscription is actually terminated — either canceled
+    // immediately or a scheduled cancel-at-period-end reaching its end date.
+    // Matched by customer id, not subscription id: this app never stores a
+    // Stripe subscription id (see schema.ts's stripeCustomerId comment), and
+    // the Payment Link flow only ever creates one subscription per customer.
+    if (event.type === "customer.subscription.deleted") {
+      const customerId = event.data.object.customer;
+      if (customerId) {
+        await tx
+          .update(users)
+          .set({ plan: "free", updatedAt: new Date() })
+          .where(eq(users.stripeCustomerId, customerId));
+      }
     }
   });
 

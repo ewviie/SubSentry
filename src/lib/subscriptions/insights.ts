@@ -14,6 +14,13 @@ export interface ComputedInsight {
   description: string;
   severity: "info" | "warning";
   subscriptionIds: string[];
+  // Only set on possible_overlap insights that identify a specific
+  // subscription as the actionable "cancel this one" candidate — the
+  // same-category "N subscriptions in this category" variant below doesn't
+  // recommend which one to cancel, so it's never attached there. Keeps the
+  // aggregate savings figure traceable to a genuine, specific opportunity
+  // rather than a guess.
+  potentialSavingsMonthlyCents?: number;
 }
 
 function todayISO(): string {
@@ -140,12 +147,14 @@ export function computeInsights(allSubscriptions: Subscription[]): ComputedInsig
   for (let i = 0; i < active.length; i++) {
     for (let j = i + 1; j < active.length; j++) {
       if (namesLikelyMatch(normalizedNames[i], normalizedNames[j])) {
+        const savings = monthlyCents(active[j].amountCents, active[j].billingCycle);
         insights.push({
           type: "possible_overlap",
           title: `Possible duplicate: ${active[i].name} and ${active[j].name}`,
-          description: `These look like the same service. If one is stale, canceling it saves ${formatCents(monthlyCents(active[j].amountCents, active[j].billingCycle))}/mo.`,
+          description: `These look like the same service. If one is stale, canceling it saves ${formatCents(savings)}/mo.`,
           severity: "warning",
           subscriptionIds: [active[i].id, active[j].id],
+          potentialSavingsMonthlyCents: savings,
         });
       }
     }
@@ -168,4 +177,71 @@ export function computeInsights(allSubscriptions: Subscription[]): ComputedInsig
   }
 
   return insights;
+}
+
+// Sums each *distinct* subscription's cost at most once, even if it turns
+// up as the redundant half of more than one duplicate pair (e.g. three
+// near-identical names all matching each other) — otherwise the same
+// subscription's cost could be counted two or three times and the headline
+// figure would overstate what canceling the flagged duplicates actually
+// saves.
+export function computePotentialSavingsMonthlyCents(insights: ComputedInsight[]): number {
+  const countedIds = new Set<string>();
+  let total = 0;
+  for (const insight of insights) {
+    if (insight.potentialSavingsMonthlyCents === undefined) continue;
+    const redundantId = insight.subscriptionIds[1];
+    if (countedIds.has(redundantId)) continue;
+    countedIds.add(redundantId);
+    total += insight.potentialSavingsMonthlyCents;
+  }
+  return total;
+}
+
+export interface HealthScoreResult {
+  score: number;
+  label: "Excellent" | "Good" | "Fair" | "Needs attention";
+  factors: { label: string; passed: boolean }[];
+}
+
+// Deterministic 0-100 score built from the same real signals computeInsights
+// already checks — not a fabricated or LLM-guessed number. Returns null when
+// there's nothing to score yet (no active subscriptions), rather than an
+// artificial 100 that would imply "healthy" for an empty account.
+export function computeHealthScore(
+  insights: ComputedInsight[],
+  activeCount: number,
+): HealthScoreResult | null {
+  if (activeCount === 0) return null;
+
+  const overdueCount = insights.filter((i) => i.type === "overdue_renewal").length;
+  // Same identity rule as computePotentialSavingsMonthlyCents — count each
+  // distinct redundant subscription once, not once per pair it matched in
+  // (three near-identical names produce three pairwise insights but only
+  // two actually-redundant subscriptions).
+  const duplicateCount = new Set(
+    insights
+      .filter((i) => i.type === "possible_overlap" && i.potentialSavingsMonthlyCents !== undefined)
+      .map((i) => i.subscriptionIds[1]),
+  ).size;
+  const hasConcentration = insights.some((i) => i.type === "expensive_category");
+
+  let score = 100;
+  score -= Math.min(overdueCount * 15, 30);
+  score -= Math.min(duplicateCount * 10, 30);
+  score -= hasConcentration ? 10 : 0;
+  score = Math.max(0, Math.min(100, score));
+
+  const label: HealthScoreResult["label"] =
+    score >= 90 ? "Excellent" : score >= 70 ? "Good" : score >= 50 ? "Fair" : "Needs attention";
+
+  return {
+    score,
+    label,
+    factors: [
+      { label: "No overdue renewals", passed: overdueCount === 0 },
+      { label: "No likely duplicate subscriptions", passed: duplicateCount === 0 },
+      { label: "Spend isn't concentrated in one category", passed: !hasConcentration },
+    ],
+  };
 }

@@ -1,0 +1,18 @@
+"use client";
+
+import { motion } from "framer-motion";
+import { fadeInUp, liftOnHover, springSnappy } from "@/lib/motion";
+import { cn } from "@/lib/utils";
+
+// Thin client boundary so StatCard (rendered from Server Component pages
+// with a raw icon COMPONENT prop — a function reference, which can't cross
+// the server/client boundary) can stay a Server Component itself. Only the
+// already-rendered `children` element crosses the boundary here, which RSC
+// allows.
+export function MotionCard({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <motion.div variants={fadeInUp} whileHover={liftOnHover} transition={springSnappy} className={cn("h-full", className)}>
+      {children}
+    </motion.div>
+  );
+}

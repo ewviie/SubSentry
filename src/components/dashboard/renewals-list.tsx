@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
+import { fadeQuick } from "@/lib/motion";
 import type { Subscription } from "@/lib/db/schema";
 
 export function RenewalsList({ renewals }: { renewals: Subscription[] }) {
@@ -19,7 +20,7 @@ export function RenewalsList({ renewals }: { renewals: Subscription[] }) {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
+            transition={fadeQuick}
             className="flex items-center justify-between py-2 text-sm"
           >
             <Link href={`/subscriptions/${s.id}`} className="font-medium hover:underline">

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { SubscriptionForm, type SubscriptionFormValues } from "@/components/subscriptions/subscription-form";
@@ -28,6 +29,12 @@ export default function NewSubscriptionPage() {
 
   return (
     <div className="max-w-xl">
+      <Link
+        href="/subscriptions"
+        className="mb-4 inline-flex items-center gap-1 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+      >
+        ← Back to subscriptions
+      </Link>
       <Card>
         <CardHeader>
           <CardTitle className="font-heading text-2xl">Add a subscription</CardTitle>

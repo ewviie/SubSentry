@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { MotionCard } from "@/components/dashboard/motion-card";
 import { cn } from "@/lib/utils";
 
 export function StatCard({
@@ -22,38 +23,40 @@ export function StatCard({
   children: React.ReactNode;
 }) {
   return (
-    <Card
-      className={cn(
-        "relative overflow-hidden transition-shadow hover:shadow-sm",
-        emphasis && "shadow-sm ring-foreground/[0.08] before:absolute before:inset-x-0 before:top-0 before:h-[3px] before:bg-gold before:content-['']",
-      )}
-    >
-      <CardHeader>
-        <CardTitle className="text-sm font-normal text-muted-foreground">{label}</CardTitle>
-        <CardAction>
-          <div
-            aria-hidden="true"
+    <MotionCard>
+      <Card
+        className={cn(
+          "relative h-full overflow-hidden shadow-elevation-low transition-shadow duration-200 hover:shadow-elevation-medium",
+          emphasis && "shadow-sm ring-foreground/[0.08] before:absolute before:inset-x-0 before:top-0 before:h-[3px] before:bg-gold before:content-['']",
+        )}
+      >
+        <CardHeader>
+          <CardTitle className="text-sm font-normal text-muted-foreground">{label}</CardTitle>
+          <CardAction>
+            <div
+              aria-hidden="true"
+              className={cn(
+                "flex items-center justify-center rounded-full",
+                emphasis ? "size-9" : "size-8",
+                accentClassName,
+              )}
+            >
+              <Icon className={emphasis ? "size-4.5" : "size-4"} />
+            </div>
+          </CardAction>
+        </CardHeader>
+        <CardContent>
+          <p
             className={cn(
-              "flex items-center justify-center rounded-full",
-              emphasis ? "size-9" : "size-8",
-              accentClassName,
+              "font-mono font-semibold tabular-nums",
+              emphasis ? "text-4xl" : "text-2xl",
             )}
           >
-            <Icon className={emphasis ? "size-4.5" : "size-4"} />
-          </div>
-        </CardAction>
-      </CardHeader>
-      <CardContent>
-        <p
-          className={cn(
-            "font-mono font-semibold tabular-nums",
-            emphasis ? "text-4xl" : "text-2xl",
-          )}
-        >
-          {children}
-        </p>
-        {caption ? <p className="mt-1 text-xs text-muted-foreground">{caption}</p> : null}
-      </CardContent>
-    </Card>
+            {children}
+          </p>
+          {caption ? <p className="mt-1 text-xs text-muted-foreground">{caption}</p> : null}
+        </CardContent>
+      </Card>
+    </MotionCard>
   );
 }

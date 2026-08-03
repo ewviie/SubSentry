@@ -25,8 +25,17 @@ export async function POST(request: Request) {
 
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
+    const issue = parsed.error.issues[0];
     return NextResponse.json(
-      { error: "invalid_request", message: parsed.error.issues[0]?.message ?? "Invalid input." },
+      {
+        error: "invalid_request",
+        message: issue?.message ?? "Invalid input.",
+        // Lets the client mark the specific field aria-invalid and move
+        // focus to it instead of just announcing a generic banner. Only
+        // ever "email" | "password" | "name" here — bodySchema has no
+        // nested fields, so path[0] is always the top-level key itself.
+        field: typeof issue?.path[0] === "string" ? issue.path[0] : undefined,
+      },
       { status: 400 },
     );
   }
@@ -40,7 +49,7 @@ export async function POST(request: Request) {
     .limit(1);
   if (existing.length > 0) {
     return NextResponse.json(
-      { error: "email_taken", message: "An account with that email already exists." },
+      { error: "email_taken", message: "An account with that email already exists.", field: "email" },
       { status: 409 },
     );
   }
@@ -63,7 +72,7 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "23505") {
       return NextResponse.json(
-        { error: "email_taken", message: "An account with that email already exists." },
+        { error: "email_taken", message: "An account with that email already exists.", field: "email" },
         { status: 409 },
       );
     }

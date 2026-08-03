@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { formatCents } from "@/lib/subscriptions/money";
+import { fadeQuick } from "@/lib/motion";
 import type { Subscription } from "@/lib/db/schema";
 
 export function AllSubscriptionsList({ subscriptions }: { subscriptions: Subscription[] }) {
@@ -40,7 +41,7 @@ export function AllSubscriptionsList({ subscriptions }: { subscriptions: Subscri
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
+            transition={fadeQuick}
           >
             <Link
               href={`/subscriptions/${s.id}`}

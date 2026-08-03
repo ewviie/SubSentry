@@ -14,6 +14,12 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash").notNull(),
   name: text("name"),
   plan: text("plan", { enum: ["free", "pro"] }).notNull().default("free"),
+  // Set from the Checkout Session's `customer` field once a Payment Link
+  // checkout completes (see stripe/webhook/route.ts) — the only thing the
+  // Billing Portal route needs to open a session, and how the webhook maps
+  // a subscription-cancelled event back to a user without ever storing a
+  // Stripe subscription id we'd otherwise have to keep in sync.
+  stripeCustomerId: text("stripe_customer_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

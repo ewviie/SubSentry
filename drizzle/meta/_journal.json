@@ -8,6 +8,13 @@
       "when": 1785193129658,
       "tag": "0000_gray_the_watchers",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785666891380,
+      "tag": "0001_past_bastion",
+      "breakpoints": true
     }
   ]
 }

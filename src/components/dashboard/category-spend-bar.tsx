@@ -1,6 +1,10 @@
+"use client";
+
+import { motion } from "framer-motion";
 import { CATEGORY_LABELS } from "@/lib/subscriptions/labels";
 import { CATEGORY_BAR_CLASSES } from "@/lib/subscriptions/category-colors";
 import { formatCents } from "@/lib/subscriptions/money";
+import { springSmooth } from "@/lib/motion";
 import type { CategoryBreakdownEntry } from "@/lib/subscriptions/queries";
 
 // Bar width is relative to the largest category, not the monthly total —
@@ -27,15 +31,17 @@ export function CategorySpendBar({ entries }: { entries: CategoryBreakdownEntry[
             </span>
           </div>
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-            <div
+            <motion.div
               className={`h-full rounded-full ${CATEGORY_BAR_CLASSES[entry.category]}`}
-              style={{
+              initial={{ width: 0 }}
+              animate={{
                 width: `${
                   max > 0 && entry.monthlyCents > 0
                     ? Math.max((entry.monthlyCents / max) * 100, 3)
                     : 0
                 }%`,
               }}
+              transition={springSmooth}
             />
           </div>
         </li>
