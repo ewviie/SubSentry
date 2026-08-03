@@ -47,6 +47,9 @@ export default async function DashboardPage() {
               Upgrade to Pro
             </Button>
           ) : null}
+          <Button variant="outline" render={<Link href="/subscriptions/import" />} nativeButton={false}>
+            Import subscriptions
+          </Button>
           <Button render={<Link href="/subscriptions/new" />} nativeButton={false}>
             Add subscription
           </Button>

@@ -31,11 +31,19 @@ function todayISO(): string {
 // and stripped of punctuation/whitespace, one contains the other (catches
 // "Netflix" vs "Netflix Premium", "Disney+" vs "disney plus"-ish variants)
 // or they're within a small edit distance of each other.
-function normalizeName(name: string): string {
+//
+// Exported for reuse by src/lib/imports/merchant-normalizer.ts, which needs
+// the same edit-distance primitive but NOT this exact matching threshold —
+// raw bank-statement merchant strings ("SQ *SPOTIFY 858-402-1234 CA") need an
+// aggressive noise-stripping pass before edit distance is meaningful, which
+// this function was never designed for (it's tuned for comparing two already
+// clean, user-typed subscription names). The importer writes its own
+// stripping + matching logic and imports only the low-level primitives below.
+export function normalizeName(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-function levenshtein(a: string, b: string): number {
+export function levenshtein(a: string, b: string): number {
   const dp: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [
     i,
     ...Array(b.length).fill(0),

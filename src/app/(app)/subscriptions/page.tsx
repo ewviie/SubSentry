@@ -19,9 +19,14 @@ export default async function SubscriptionsPage() {
     <div>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="font-heading text-h1 font-semibold">Subscriptions</h1>
-        <Button render={<Link href="/subscriptions/new" />} nativeButton={false}>
-          Add subscription
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" render={<Link href="/subscriptions/import" />} nativeButton={false}>
+            Import subscriptions
+          </Button>
+          <Button render={<Link href="/subscriptions/new" />} nativeButton={false}>
+            Add subscription
+          </Button>
+        </div>
       </div>
 
       {data.subscriptions.length > 0 ? (
