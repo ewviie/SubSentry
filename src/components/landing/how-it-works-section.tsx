@@ -6,15 +6,15 @@ import { fadeInUp, revealViewport, staggerContainer } from "@/lib/motion";
 const STEPS = [
   {
     title: "Add what you're paying for",
-    description: "Type it in plain English, or fill in the details yourself — name, amount, billing cycle, category.",
+    description: "Type it in plain English, or fill in the details yourself: name, amount, billing cycle, category.",
   },
   {
     title: "See it laid out clearly",
-    description: "Monthly and annual totals, upcoming renewals, and spend broken down by category — updated the moment you add something.",
+    description: "Monthly and annual totals, upcoming renewals, and spend broken down by category, updated the moment you add something.",
   },
   {
     title: "Act on what it finds",
-    description: "Duplicate services, subscriptions renewing this week, categories eating more than expected — surfaced automatically, not buried in a spreadsheet.",
+    description: "Duplicate services, subscriptions renewing this week, categories eating more than expected: surfaced automatically, not buried in a spreadsheet.",
   },
 ];
 

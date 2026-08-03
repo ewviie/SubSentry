@@ -109,7 +109,7 @@ export default async function SettingsPage() {
               </div>
               {upgradeUrl ? (
                 <div className="rounded-lg border border-gold/20 bg-gold-muted/40 p-4">
-                  <p className="text-sm font-medium">Upgrade to Pro — £4.99/mo</p>
+                  <p className="text-sm font-medium">Upgrade to Pro: £4.99/mo</p>
                   <ul className="mt-2 space-y-1.5">
                     {PRO_BENEFITS.map((benefit) => (
                       <li key={benefit} className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -136,7 +136,7 @@ export default async function SettingsPage() {
             <CardDescription>
               {aiConfigured
                 ? "Quick-add and insight narration are powered by Claude."
-                : "Running in demo mode — quick-add and insight narration return realistic canned responses. Set ANTHROPIC_API_KEY to enable live AI."}
+                : "Running in demo mode. Quick-add and insight narration return realistic canned responses. Set ANTHROPIC_API_KEY to enable live AI."}
             </CardDescription>
           </CardHeader>
           <CardContent>

@@ -166,7 +166,7 @@ export function SubscriptionsExplorer({
     );
     const failedIds = ids.filter((_, i) => results[i].status === "rejected");
     if (failedIds.length > 0) {
-      toast.error(`Updated ${ids.length - failedIds.length} of ${ids.length} — ${failedIds.length} failed. Try again.`);
+      toast.error(`Updated ${ids.length - failedIds.length} of ${ids.length}. ${failedIds.length} failed. Try again.`);
     } else {
       toast.success(`${ids.length} subscription${ids.length === 1 ? "" : "s"} updated`);
     }
@@ -188,7 +188,7 @@ export function SubscriptionsExplorer({
     );
     const failedIds = ids.filter((_, i) => results[i].status === "rejected");
     if (failedIds.length > 0) {
-      toast.error(`Deleted ${ids.length - failedIds.length} of ${ids.length} — ${failedIds.length} failed. Try again.`);
+      toast.error(`Deleted ${ids.length - failedIds.length} of ${ids.length}. ${failedIds.length} failed. Try again.`);
     } else {
       toast.success(`${ids.length} subscription${ids.length === 1 ? "" : "s"} deleted`);
     }

@@ -60,7 +60,7 @@ export function HeroSection() {
           <motion.p variants={fadeInUp} className="mt-5 max-w-lg text-lg text-muted-foreground">
             Type a subscription in plain English, or add it by hand. SubSentry
             tracks the spend, flags the overlaps and overdue renewals, and
-            tells you where your money is actually going — no bank
+            tells you where your money is actually going, with no bank
             connection required.
           </motion.p>
 

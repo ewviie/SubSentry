@@ -14,21 +14,21 @@ const FAQS = [
   {
     question: "Do I have to connect my bank account?",
     answer:
-      "No. SubSentry doesn't link to your bank or card. You add subscriptions yourself — by typing them in plain English or filling in the details — so nothing about your accounts ever leaves your control.",
+      "No. SubSentry doesn't link to your bank or card. You add subscriptions yourself, by typing them in plain English or filling in the details, so nothing about your accounts ever leaves your control.",
   },
   {
     question: "What happens when I hit the free plan limit?",
-    answer: `The free plan tracks up to ${FREE_PLAN_SUBSCRIPTION_LIMIT} active subscriptions. Past that, you can still edit or cancel existing ones — adding a new one requires upgrading to Pro, or canceling one you're no longer tracking.`,
+    answer: `The free plan tracks up to ${FREE_PLAN_SUBSCRIPTION_LIMIT} active subscriptions. Past that, you can still edit or cancel existing ones. Adding a new one requires upgrading to Pro, or canceling one you're no longer tracking.`,
   },
   {
     question: "Is the AI quick-add required?",
     answer:
-      "No — it's optional. Every subscription can be added by hand with a plain form. Quick-add just saves you the typing when you'd rather describe it in a sentence.",
+      "No, it's optional. Every subscription can be added by hand with a plain form. Quick-add just saves you the typing when you'd rather describe it in a sentence.",
   },
   {
     question: "Can I cancel anytime?",
     answer:
-      "Yes. There's no contract — open Settings → Plan & billing → Manage billing to cancel or update payment details directly through Stripe's billing portal, no phone call required.",
+      "Yes. There's no contract. Open Settings → Plan & billing → Manage billing to cancel or update payment details directly through Stripe's billing portal, no phone call required.",
   },
   {
     question: "Is my data sold or shared?",

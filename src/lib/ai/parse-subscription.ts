@@ -45,7 +45,7 @@ export async function quickAddSubscription(text: string): Promise<QuickAddResult
   if (!validated.success) {
     return {
       ok: false,
-      error: "Couldn't quite understand that — try rephrasing, or enter it manually below.",
+      error: "Couldn't quite understand that. Try rephrasing, or enter it manually below.",
     };
   }
 

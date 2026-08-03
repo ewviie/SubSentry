@@ -125,7 +125,7 @@ export function QuickAddBar() {
               Confirm subscription
             </DialogTitle>
             <DialogDescription>
-              Review what the AI understood before saving —{" "}
+              Review what the AI understood before saving:{" "}
               <Badge variant="secondary" className="align-middle">
                 {confidence} confidence
               </Badge>

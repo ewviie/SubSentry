@@ -112,7 +112,7 @@ export function computeInsights(allSubscriptions: Subscription[]): ComputedInsig
     insights.push({
       type: "overdue_renewal",
       title: `${s.name}'s renewal date has passed`,
-      description: `${s.name} was due to renew on ${s.nextRenewalDate}. If it's still active, update the date — if not, mark it canceled.`,
+      description: `${s.name} was due to renew on ${s.nextRenewalDate}. If it's still active, update the date. If not, mark it canceled.`,
       severity: "warning",
       subscriptionIds: [s.id],
     });
@@ -134,7 +134,7 @@ export function computeInsights(allSubscriptions: Subscription[]): ComputedInsig
       insights.push({
         type: "high_yearly_spend",
         title: `${sub.name} adds up fast`,
-        description: `${sub.name} costs ${formatCents(annual)}/year — more than double what you spend on a typical subscription here.`,
+        description: `${sub.name} costs ${formatCents(annual)}/year, more than double what you spend on a typical subscription here.`,
         severity: "info",
         subscriptionIds: [sub.id],
       });
@@ -169,7 +169,7 @@ export function computeInsights(allSubscriptions: Subscription[]): ComputedInsig
       insights.push({
         type: "possible_overlap",
         title: `${subs.length} active ${CATEGORY_LABELS[category].toLowerCase()} subscriptions`,
-        description: `${subs.map((s) => s.name).join(", ")} — ${formatCents(combined)}/mo combined. Worth checking for overlap.`,
+        description: `${subs.map((s) => s.name).join(", ")}: ${formatCents(combined)}/mo combined. Worth checking for overlap.`,
         severity: "info",
         subscriptionIds: subs.map((s) => s.id),
       });
