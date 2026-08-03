@@ -11,7 +11,13 @@ import { QuickAddBar } from "@/components/subscriptions/quick-add-bar";
 import { InsightsSection } from "@/components/dashboard/insights-section";
 import { RenewalsList } from "@/components/dashboard/renewals-list";
 import { AllSubscriptionsList } from "@/components/dashboard/all-subscriptions-list";
-import { computeInsights } from "@/lib/subscriptions/insights";
+import { DashboardHeroRow } from "@/components/dashboard/dashboard-hero-row";
+import { StaggerSection } from "@/components/dashboard/stagger-section";
+import {
+  computeHealthScore,
+  computeInsights,
+  computePotentialSavingsMonthlyCents,
+} from "@/lib/subscriptions/insights";
 import { getUpgradeUrl } from "@/lib/billing/plan";
 
 export default async function DashboardPage() {
@@ -20,11 +26,15 @@ export default async function DashboardPage() {
   const insights = computeInsights(data.subscriptions);
   const upgradeUrl = user.plan === "free" ? getUpgradeUrl(user.id) : null;
 
+  const potentialSavingsMonthlyCents = computePotentialSavingsMonthlyCents(insights);
+  const duplicateInsights = insights.filter((i) => i.potentialSavingsMonthlyCents !== undefined);
+  const healthScore = computeHealthScore(insights, data.activeCount);
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-10">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="font-heading text-3xl font-semibold">
+          <h1 className="font-heading text-h1 font-semibold">
             Welcome, {user.name || user.email}
           </h1>
           <p className="mt-1 text-muted-foreground">
@@ -49,7 +59,15 @@ export default async function DashboardPage() {
         </CardContent>
       </Card>
 
-      <div className="space-y-4">
+      {data.activeCount > 0 ? (
+        <DashboardHeroRow
+          potentialYearlySavingsCents={potentialSavingsMonthlyCents * 12}
+          duplicateInsights={duplicateInsights}
+          healthScore={healthScore}
+        />
+      ) : null}
+
+      <StaggerSection className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           icon={DollarSign}
           label="Monthly spend"
@@ -59,22 +77,20 @@ export default async function DashboardPage() {
         >
           <CountUp value={data.monthlyTotalCents} format="currency" />
         </StatCard>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <StatCard icon={TrendingUp} label="Annual spend" accentClassName="bg-chart-2/10 text-chart-2">
-            <CountUp value={data.annualTotalCents} format="currency" />
-          </StatCard>
-          <StatCard icon={Layers} label="Active subscriptions" accentClassName="bg-chart-3/10 text-chart-3">
-            <CountUp value={data.activeCount} format="integer" />
-          </StatCard>
-          <StatCard icon={CalendarClock} label="Next renewal" accentClassName="bg-chart-4/10 text-chart-4">
-            {data.upcomingRenewals[0] ? (
-              data.upcomingRenewals[0].nextRenewalDate
-            ) : (
-              <span className="text-muted-foreground">—</span>
-            )}
-          </StatCard>
-        </div>
-      </div>
+        <StatCard icon={TrendingUp} label="Annual spend" accentClassName="bg-chart-2/10 text-chart-2">
+          <CountUp value={data.annualTotalCents} format="currency" />
+        </StatCard>
+        <StatCard icon={Layers} label="Active subscriptions" accentClassName="bg-chart-3/10 text-chart-3">
+          <CountUp value={data.activeCount} format="integer" />
+        </StatCard>
+        <StatCard icon={CalendarClock} label="Next renewal" accentClassName="bg-chart-4/10 text-chart-4">
+          {data.upcomingRenewals[0] ? (
+            data.upcomingRenewals[0].nextRenewalDate
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          )}
+        </StatCard>
+      </StaggerSection>
 
       <InsightsSection insights={insights} />
 
@@ -100,7 +116,7 @@ export default async function DashboardPage() {
 
       <div>
         <div className="flex items-center justify-between">
-          <h2 className="font-heading text-xl font-semibold">All subscriptions</h2>
+          <h2 className="font-heading text-h2 font-semibold">All subscriptions</h2>
           <Link href="/subscriptions" className="text-sm text-muted-foreground hover:underline">
             View all
           </Link>

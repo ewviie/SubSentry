@@ -4,6 +4,7 @@ import {
   MAX_ACTIVE_SUBSCRIPTIONS,
   hasReachedSubscriptionLimit,
   getUpgradeUrl,
+  isBillingPortalConfigured,
 } from "./plan";
 
 describe("MAX_ACTIVE_SUBSCRIPTIONS", () => {
@@ -53,5 +54,27 @@ describe("getUpgradeUrl", () => {
     process.env.STRIPE_PAYMENT_LINK = "https://buy.stripe.com/test_abc123";
     const url = getUpgradeUrl("user-1");
     expect(url).toBe("https://buy.stripe.com/test_abc123?client_reference_id=user-1");
+  });
+});
+
+describe("isBillingPortalConfigured", () => {
+  const originalEnv = process.env.STRIPE_SECRET_KEY;
+
+  afterEach(() => {
+    if (originalEnv === undefined) {
+      delete process.env.STRIPE_SECRET_KEY;
+    } else {
+      process.env.STRIPE_SECRET_KEY = originalEnv;
+    }
+  });
+
+  it("is false when no secret key is configured", () => {
+    delete process.env.STRIPE_SECRET_KEY;
+    expect(isBillingPortalConfigured()).toBe(false);
+  });
+
+  it("is true when a secret key is configured", () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_abc123";
+    expect(isBillingPortalConfigured()).toBe(true);
   });
 });

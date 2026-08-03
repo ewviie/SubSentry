@@ -30,3 +30,13 @@ export function getUpgradeUrl(userId: string): string | null {
   url.searchParams.set("client_reference_id", userId);
   return url.toString();
 }
+
+// Unlike getUpgradeUrl above (a Payment Link the browser can hit directly),
+// opening the Billing Portal requires an authenticated server-to-server
+// Stripe API call to mint a one-time session URL — see api/billing/portal.
+// STRIPE_SECRET_KEY is a distinct credential from STRIPE_WEBHOOK_SECRET and
+// isn't required for the rest of this app to function, so its absence is a
+// normal "not configured yet" state, not an error.
+export function isBillingPortalConfigured(): boolean {
+  return Boolean(process.env.STRIPE_SECRET_KEY);
+}

@@ -55,6 +55,7 @@ export const getSession = cache(async (): Promise<{ user: SafeUser } | null> => 
       email: users.email,
       name: users.name,
       plan: users.plan,
+      stripeCustomerId: users.stripeCustomerId,
       createdAt: users.createdAt,
       updatedAt: users.updatedAt,
       expiresAt: sessions.expiresAt,

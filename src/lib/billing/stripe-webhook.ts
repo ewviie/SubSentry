@@ -42,7 +42,12 @@ export function verifyStripeSignature(
 
 // Only the fields this app actually reads from a Stripe event — deliberately
 // not the full Stripe API type surface, since we don't depend on the SDK.
-export const stripeCheckoutEventSchema = z.object({
+// One lenient object shape covers every event type this endpoint handles
+// (checkout.session.completed and customer.subscription.deleted) rather than
+// a schema per type, since Stripe's checkout Session and Subscription
+// objects both carry a top-level `customer` id and this app never reads
+// anything from either beyond the fields listed here.
+export const stripeEventSchema = z.object({
   id: z.string(),
   type: z.string(),
   data: z.object({
@@ -53,8 +58,9 @@ export const stripeCheckoutEventSchema = z.object({
         .object({ email: z.string().nullable().optional() })
         .nullable()
         .optional(),
+      customer: z.string().nullable().optional(),
     }),
   }),
 });
 
-export type StripeCheckoutEvent = z.infer<typeof stripeCheckoutEventSchema>;
+export type StripeEvent = z.infer<typeof stripeEventSchema>;

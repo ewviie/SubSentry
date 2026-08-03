@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeInsights } from "./insights";
+import { computeHealthScore, computeInsights, computePotentialSavingsMonthlyCents } from "./insights";
 import type { Subscription } from "@/lib/db/schema";
 
 let nextId = 1;
@@ -96,5 +96,78 @@ describe("computeInsights", () => {
     ];
     const insights = computeInsights(subs);
     expect(insights.some((i) => i.type === "possible_overlap" && i.title.includes("streaming"))).toBe(true);
+  });
+});
+
+describe("computePotentialSavingsMonthlyCents", () => {
+  it("returns 0 when there are no duplicate insights", () => {
+    const insights = computeInsights([sub({ name: "Netflix" }), sub({ name: "Spotify" })]);
+    expect(computePotentialSavingsMonthlyCents(insights)).toBe(0);
+  });
+
+  it("sums the redundant subscription's cost for a flagged duplicate", () => {
+    const a = sub({ name: "Netflix", amountCents: 1599 });
+    const b = sub({ name: "Netflix Premium", amountCents: 999 });
+    const insights = computeInsights([a, b]);
+    expect(computePotentialSavingsMonthlyCents(insights)).toBe(999);
+  });
+
+  it("does not double-count a subscription flagged as redundant in more than one pair", () => {
+    // Three near-identical names: a~b, a~c, and b~c all match, so the
+    // O(n^2) loop produces multiple insights that could double-count b's
+    // and c's cost if not deduplicated by subscription id.
+    const a = sub({ name: "Netflix", amountCents: 1000 });
+    const b = sub({ name: "Netflix ", amountCents: 900 });
+    const c = sub({ name: "netflix", amountCents: 800 });
+    const insights = computeInsights([a, b, c]);
+    const total = computePotentialSavingsMonthlyCents(insights);
+    // b and c are each counted exactly once (never a, never twice) — a
+    // range assertion here would silently accept undercounting (e.g. 800
+    // alone) as a false pass, so assert the exact expected total.
+    expect(total).toBe(900 + 800);
+  });
+
+  it("never counts the same-category informational insight as savings", () => {
+    const subs = [
+      sub({ name: "Netflix", category: "streaming", amountCents: 1000 }),
+      sub({ name: "Disney+", category: "streaming", amountCents: 1000 }),
+    ];
+    const insights = computeInsights(subs);
+    expect(computePotentialSavingsMonthlyCents(insights)).toBe(0);
+  });
+});
+
+describe("computeHealthScore", () => {
+  it("returns null when there are no active subscriptions", () => {
+    expect(computeHealthScore([], 0)).toBeNull();
+  });
+
+  it("scores 100 with no negative signals", () => {
+    const insights = computeInsights([sub({ name: "Netflix" })]);
+    const result = computeHealthScore(insights, 1);
+    expect(result?.score).toBe(100);
+    expect(result?.label).toBe("Excellent");
+    expect(result?.factors.every((f) => f.passed)).toBe(true);
+  });
+
+  it("deducts points for an overdue renewal", () => {
+    const overdue = sub({ name: "Gym", nextRenewalDate: "2020-01-01" });
+    const insights = computeInsights([overdue]);
+    const result = computeHealthScore(insights, 1);
+    expect(result?.score).toBe(85);
+    expect(result?.factors.find((f) => f.label.includes("overdue"))?.passed).toBe(false);
+  });
+
+  it("stays within 0-100 even with many negative signals", () => {
+    const overdue1 = sub({ name: "Gym", nextRenewalDate: "2020-01-01" });
+    const overdue2 = sub({ name: "Gym2", nextRenewalDate: "2020-01-01" });
+    const overdue3 = sub({ name: "Gym3", nextRenewalDate: "2020-01-01" });
+    const dup1 = sub({ name: "Netflix", amountCents: 1000 });
+    const dup2 = sub({ name: "Netflix Premium", amountCents: 1000 });
+    const big = sub({ name: "Big", category: "streaming", amountCents: 100000 });
+    const subs = [overdue1, overdue2, overdue3, dup1, dup2, big];
+    const insights = computeInsights(subs);
+    const result = computeHealthScore(insights, subs.length);
+    expect(result?.score).toBeGreaterThanOrEqual(0);
   });
 });

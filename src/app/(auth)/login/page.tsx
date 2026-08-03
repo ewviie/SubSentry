@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PasswordField } from "@/components/auth/password-field";
 import {
   Card,
   CardContent,
@@ -22,6 +23,14 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const errorRef = useRef<HTMLParagraphElement>(null);
+
+  // Runs after the DOM commits, so this can't race the fields' still-true
+  // disabled={loading} the way a synchronous focus() call inside
+  // handleSubmit would (see the equivalent effect on the signup page).
+  useEffect(() => {
+    if (error) errorRef.current?.focus();
+  }, [error]);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -37,6 +46,11 @@ export default function LoginPage() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => null);
+        // The API deliberately never says whether the email or the password
+        // was wrong (see login/route.ts's DUMMY_HASH comment — that's an
+        // anti-enumeration measure, not an oversight), so there's no single
+        // field to send focus to; the error banner is the right landing
+        // spot for both keyboard and screen-reader users here.
         setError(data?.message ?? "Something went wrong. Try again.");
         return;
       }
@@ -67,21 +81,22 @@ export default function LoginPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              disabled={loading}
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? "auth-error" : undefined}
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="password">Password</Label>
-            <Input
-              id="password"
-              type="password"
-              autoComplete="current-password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </div>
+          <PasswordField
+            autoComplete="current-password"
+            required
+            value={password}
+            onChange={setPassword}
+            disabled={loading}
+            ariaInvalid={Boolean(error)}
+            ariaDescribedBy={error ? "auth-error" : undefined}
+          />
           {error ? (
-            <p role="alert" className="text-sm text-destructive">
+            <p ref={errorRef} id="auth-error" role="alert" tabIndex={-1} className="text-sm text-destructive outline-none">
               {error}
             </p>
           ) : null}
@@ -90,7 +105,7 @@ export default function LoginPage() {
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? (
               <>
-                <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
                 Logging in…
               </>
             ) : (

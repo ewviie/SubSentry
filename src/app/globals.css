@@ -22,6 +22,7 @@
     --color-sidebar-primary: var(--sidebar-primary);
     --color-sidebar-foreground: var(--sidebar-foreground);
     --color-sidebar: var(--sidebar);
+    --color-chart-6: var(--chart-6);
     --color-chart-5: var(--chart-5);
     --color-chart-4: var(--chart-4);
     --color-chart-3: var(--chart-3);
@@ -52,6 +53,28 @@
     --radius-2xl: calc(var(--radius) * 1.8);
     --radius-3xl: calc(var(--radius) * 2.2);
     --radius-4xl: calc(var(--radius) * 2.6);
+
+    /* Elevation — see :root/.dark for the actual shadow values. Dark mode
+       needs a different recipe (a hairline highlight + deep diffuse shadow)
+       since a black shadow is invisible against a dark navy background. */
+    --shadow-elevation-low: var(--elevation-low);
+    --shadow-elevation-medium: var(--elevation-medium);
+    --shadow-elevation-high: var(--elevation-high);
+    --shadow-elevation-glow: var(--elevation-glow);
+
+    /* Display/heading scale — the shared typographic rhythm every section
+       should pull from instead of picking its own text-4xl/5xl ad hoc. */
+    --text-display: 3.25rem;
+    --text-display--line-height: 1.05;
+    --text-display--letter-spacing: -0.02em;
+    --text-h1: 2.5rem;
+    --text-h1--line-height: 1.1;
+    --text-h1--letter-spacing: -0.015em;
+    --text-h2: 1.875rem;
+    --text-h2--line-height: 1.2;
+    --text-h2--letter-spacing: -0.01em;
+    --text-h3: 1.25rem;
+    --text-h3--line-height: 1.3;
 }
 
 :root {
@@ -82,11 +105,27 @@
     --border: oklch(0.929 0.013 255.508);
     --input: oklch(0.929 0.013 255.508);
     --ring: oklch(0.704 0.04 256.788);
-    --chart-1: oklch(0.769 0.188 70.08);
-    --chart-2: oklch(0.606 0.25 292.717);
-    --chart-3: oklch(0.6 0.118 184.704);
-    --chart-4: oklch(0.645 0.246 16.439);
-    --chart-5: oklch(0.554 0.046 257.417);
+    /* Same WCAG fix as --muted-foreground/--gold/--ai above, applied to
+       every category color: each is used as text-chart-N on its own
+       bg-chart-N/10 tint (category badges/icon chips, category-spend-bar
+       labels), and at the original lightness that measured as low as
+       2.03:1 for chart-1 — nowhere close to the 4.5:1 AA minimum. Targets
+       here are deliberately more conservative than a naive linear-sRGB
+       alpha-blend calculation would suggest: the browser composites the
+       /10 tint in OKLab space, which measures ~0.5 lower in real contrast
+       than the same math run in linear sRGB — verified against live
+       rendered badges, not just computed offline. These values measure
+       5.0–5.5:1 in the browser on the actual /10 tint. Dark mode's
+       chart-1..5 already pass (6.9–11.8:1) and are untouched; chart-6 has
+       no dark-mode-specific value to begin with (see the gaming/streaming
+       color-collision fix). Hue and chroma are unchanged — only lightness
+       moved. */
+    --chart-1: oklch(0.48 0.188 70.08);
+    --chart-2: oklch(0.5 0.25 292.717);
+    --chart-3: oklch(0.44 0.118 184.704);
+    --chart-4: oklch(0.46 0.246 16.439);
+    --chart-5: oklch(0.47 0.046 257.417);
+    --chart-6: oklch(0.46 0.19 250);
     --radius: 0.625rem;
     --sidebar: oklch(1 0 0);
     --sidebar-foreground: oklch(0.129 0.042 264.695);
@@ -96,12 +135,24 @@
     --sidebar-accent-foreground: oklch(0.208 0.042 265.755);
     --sidebar-border: oklch(0.929 0.013 255.508);
     --sidebar-ring: oklch(0.704 0.04 256.788);
-    --gold: oklch(0.666 0.179 58.318);
+    /* 0.666 measured 2.87:1 as text-gold against --gold-muted (fails WCAG
+       AA's 4.5:1) and only 3.05:1 for --gold-foreground against a bg-gold
+       badge. 0.52 measures 5.2–5.5:1 across every text-gold/bg-gold pairing
+       in the app, with dark mode's --gold left untouched since it already
+       passes (8.7:1+). Same bug class as --muted-foreground above, just
+       missed for this token. */
+    --gold: oklch(0.52 0.179 58.318);
     --gold-foreground: oklch(0.984 0.003 247.858);
     --gold-muted: oklch(0.962 0.059 95.617);
-    --ai: oklch(0.606 0.25 292.717);
+    /* Same fix, same reasoning: 0.606 measured 3.70:1 as text-ai against
+       --ai-muted; 0.52 measures 5.28:1. */
+    --ai: oklch(0.52 0.25 292.717);
     --ai-foreground: oklch(0.984 0.003 247.858);
     --ai-muted: oklch(0.943 0.029 294.588);
+    --elevation-low: 0 1px 2px oklch(0.129 0.042 264.695 / 0.04), 0 1px 1px oklch(0.129 0.042 264.695 / 0.03);
+    --elevation-medium: 0 12px 32px -12px oklch(0.129 0.042 264.695 / 0.14), 0 4px 12px -4px oklch(0.129 0.042 264.695 / 0.08);
+    --elevation-high: 0 32px 64px -16px oklch(0.129 0.042 264.695 / 0.2), 0 12px 24px -8px oklch(0.129 0.042 264.695 / 0.1);
+    --elevation-glow: 0 0 0 1px oklch(0.666 0.179 58.318 / 0.15), 0 8px 24px -8px oklch(0.666 0.179 58.318 / 0.25);
 }
 
 .dark {
@@ -130,6 +181,7 @@
     --chart-3: oklch(0.696 0.17 162.48);
     --chart-4: oklch(0.704 0.191 22.216);
     --chart-5: oklch(0.704 0.04 256.788);
+    --chart-6: oklch(0.72 0.17 250);
     --sidebar: oklch(0.18 0.04 265.755);
     --sidebar-foreground: oklch(0.984 0.003 247.858);
     --sidebar-primary: oklch(0.769 0.188 70.08);
@@ -144,6 +196,13 @@
     --ai: oklch(0.702 0.183 293.541);
     --ai-foreground: oklch(0.129 0.042 264.695);
     --ai-muted: oklch(0.606 0.25 292.717 / 20%);
+    /* Black shadows disappear against a dark navy background, so dark-mode
+       elevation leans on a hairline highlight (a sliver of the foreground
+       color) plus a much deeper, more diffuse shadow instead. */
+    --elevation-low: 0 1px 2px oklch(0 0 0 / 0.3), 0 1px 1px oklch(0 0 0 / 0.2);
+    --elevation-medium: 0 16px 40px -12px oklch(0 0 0 / 0.5), 0 4px 16px -4px oklch(0 0 0 / 0.3), 0 0 0 1px oklch(1 0 0 / 0.04);
+    --elevation-high: 0 32px 80px -16px oklch(0 0 0 / 0.6), 0 12px 32px -8px oklch(0 0 0 / 0.35), 0 0 0 1px oklch(1 0 0 / 0.06);
+    --elevation-glow: 0 0 0 1px oklch(0.828 0.189 84.429 / 0.25), 0 8px 32px -8px oklch(0.828 0.189 84.429 / 0.35);
 }
 
 @layer base {
