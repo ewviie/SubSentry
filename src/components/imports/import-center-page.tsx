@@ -4,10 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import type { Route } from "next";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
+import { Check } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { fadeQuick } from "@/lib/motion";
+import { cn } from "@/lib/utils";
 import { SourcePicker, SOURCE_LABELS } from "./source-picker";
 import { FileUploadStep } from "./file-upload-step";
 import { ConnectBankStep } from "./connect-bank-step";
@@ -60,20 +61,45 @@ const CONFIRM_SOURCE_MAP: Record<
   truelayer: "truelayer_import",
 };
 
+// Numbered-circle/check stepper (Stripe-checkout anatomy: circle + label +
+// connecting line, active/completed/inactive states) — adapted from the
+// 21st.dev Stepper primitive's visual language, driven directly by the
+// wizard's own Step state rather than that component's generic
+// context-provider API, which this single-owner state doesn't need.
 function StepProgress({ step }: { step: Step }) {
   // "connect" (the live-API bank-link step) stands in for "upload" in the
   // progress bar — a source is either file-based or connect-based, never
   // both, so there's no dedicated dot for it.
   const currentIndex = STEP_ORDER.indexOf(step === "connect" ? "upload" : step);
   return (
-    <div className="mb-6 flex items-center gap-2">
-      {STEP_ORDER.map((s, i) => (
-        <div key={s} className="flex items-center gap-2">
-          <Badge variant={i <= currentIndex ? "default" : "outline"}>{STEP_LABELS[s]}</Badge>
-          {i < STEP_ORDER.length - 1 ? <div className="h-px w-6 bg-border" aria-hidden="true" /> : null}
-        </div>
-      ))}
-    </div>
+    <ol className="mb-6 flex items-center">
+      {STEP_ORDER.map((s, i) => {
+        const completed = i < currentIndex;
+        const active = i === currentIndex;
+        return (
+          <li key={s} className="flex flex-1 items-center last:flex-none">
+            <div className="flex items-center gap-2">
+              <span
+                className={cn(
+                  "flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-medium transition-colors",
+                  completed && "bg-primary text-primary-foreground",
+                  active && "bg-primary/15 text-primary ring-1 ring-primary",
+                  !completed && !active && "bg-muted text-muted-foreground",
+                )}
+              >
+                {completed ? <Check className="size-3.5" aria-hidden="true" /> : i + 1}
+              </span>
+              <span className={cn("text-sm font-medium", active ? "text-foreground" : "text-muted-foreground")}>
+                {STEP_LABELS[s]}
+              </span>
+            </div>
+            {i < STEP_ORDER.length - 1 ? (
+              <div className={cn("mx-3 h-px flex-1 transition-colors", completed ? "bg-primary" : "bg-border")} aria-hidden="true" />
+            ) : null}
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
