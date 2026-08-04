@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { subscriptions, type Subscription } from "@/lib/db/schema";
 import { amountStringToCents, monthlyCents } from "./money";
 import type { SubscriptionInput, SubscriptionUpdate } from "./validation";
+import type { SubscriptionSource } from "./source";
 
 export async function listSubscriptions(userId: string): Promise<Subscription[]> {
   return db
@@ -27,7 +28,7 @@ export async function getSubscription(
 export async function createSubscription(
   userId: string,
   input: SubscriptionInput,
-  source: "manual" | "ai_parsed" = "manual",
+  source: SubscriptionSource = "manual",
 ): Promise<Subscription> {
   const [row] = await db
     .insert(subscriptions)

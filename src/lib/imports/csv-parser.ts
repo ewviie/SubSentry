@@ -172,6 +172,15 @@ function parseDateToISO(raw: string): string | null {
 export interface ParseCsvOptions {
   aliases: HeaderAliases;
   defaultCurrency?: string;
+  // Used only for the single-signed-amount-column case, when there's no
+  // debit/credit column pair and no direction-label column to read from,
+  // AND the amount has no leading "-" to infer a debit from. Bank exports
+  // are genuinely ambiguous here, so the historical default is "credit"
+  // (preserved when this option is omitted). App-store-style exports (Apple,
+  // Google Play) have no such ambiguity — every row is a purchase charge —
+  // so those providers pass "debit" explicitly rather than relying on a sign
+  // that will never be present in their export format.
+  defaultDirection?: "debit" | "credit";
 }
 
 export function parseCsvTransactions(fileText: string, options: ParseCsvOptions): ImportParseResult {
@@ -258,8 +267,10 @@ export function parseCsvTransactions(fileText: string, options: ParseCsvOptions)
         headerMap.direction !== null ? row[headerMap.direction]?.trim().toLowerCase() : undefined;
       if (directionLabel) {
         direction = directionLabel.startsWith("cr") ? "credit" : "debit";
+      } else if (isNegative) {
+        direction = "debit";
       } else {
-        direction = isNegative ? "debit" : "credit";
+        direction = options.defaultDirection ?? "credit";
       }
       amountCents = amountStringToCents(unsigned);
     }

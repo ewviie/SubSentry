@@ -19,3 +19,12 @@ const CONFIRM_LIMIT = 5;
 const CONFIRM_WINDOW_MS = 60 * 60 * 1000;
 
 export const checkImportConfirmRateLimit = createRateLimiter(CONFIRM_LIMIT, CONFIRM_WINDOW_MS);
+
+// Shared by every live-API provider's connect/sync routes (Plaid, TrueLayer)
+// — a real outbound call to the provider's API each time, same conservative
+// ceiling as ANALYZE_LIMIT rather than a per-provider limiter each, since a
+// single user only ever has one bank connection flow in progress at a time.
+const BANK_CONNECT_LIMIT = 10;
+const BANK_CONNECT_WINDOW_MS = 60 * 60 * 1000;
+
+export const checkBankConnectRateLimit = createRateLimiter(BANK_CONNECT_LIMIT, BANK_CONNECT_WINDOW_MS);

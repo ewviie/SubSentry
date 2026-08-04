@@ -1,7 +1,13 @@
 import { z } from "zod";
 import { subscriptionInputSchema } from "@/lib/subscriptions/validation";
 
-export const IMPORT_SOURCES = ["csv_import", "apple_import", "google_play_import"] as const;
+export const IMPORT_SOURCES = [
+  "csv_import",
+  "apple_import",
+  "google_play_import",
+  "plaid_import",
+  "truelayer_import",
+] as const;
 export type ImportSource = (typeof IMPORT_SOURCES)[number];
 
 // A second, independent validation gate on every parsed row, applied right

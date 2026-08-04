@@ -14,9 +14,17 @@ import type { ImportParseResult } from "./types";
 // file-upload route) that fetches transactions from a live API and adapts
 // them into the same ImportParseResult shape instead of parsing file text.
 // Zero changes needed anywhere downstream — detection, review UI, confirm
-// API, schema — only a new provider file plus a new ImportSourceId and
-// `source` enum value.
-export type ImportSourceId = "csv_bank" | "apple" | "google_play";
+// API, schema — only a new provider file plus a new entry in
+// IMPORT_SOURCE_IDS and a new `source` enum value.
+//
+// IMPORT_SOURCE_IDS is the runtime source of truth; ImportSourceId is
+// derived from it (not the other way around) so call sites that need the
+// list of valid ids at runtime — e.g. the analyze route's zod schema —
+// import this array instead of hand-duplicating the literal union, the same
+// SUBSCRIPTION_SOURCES/SubscriptionSource pattern used for the DB-level
+// source enum in src/lib/subscriptions/source.ts.
+export const IMPORT_SOURCE_IDS = ["csv_bank", "apple", "google_play", "plaid", "truelayer"] as const;
+export type ImportSourceId = (typeof IMPORT_SOURCE_IDS)[number];
 
 export interface ImportProvider {
   readonly id: ImportSourceId;
@@ -35,6 +43,18 @@ export interface ImportProvider {
   // malformed *rows* (collects them into warnings/skippedRowCount instead)
   // — only on structurally unreadable input.
   parse(fileText: string): Promise<ImportParseResult>;
+
+  // Optional: the extension point for live-API providers (Plaid, TrueLayer,
+  // Stripe Financial Connections, etc.) that don't have a "file" at all —
+  // they fetch transactions from a live API using a stored per-user access
+  // token instead. A provider that implements this still declares
+  // validate()/parse() (returning an explicit "not applicable" — see
+  // plaid-provider.ts) so it satisfies the interface uniformly; the caller
+  // (a dedicated route, not the file-upload analyze route) checks for this
+  // method's presence to decide which orchestration path applies. Detection,
+  // the review UI, and the confirm API are unchanged either way — both paths
+  // converge on the same RawTransaction[]/ImportParseResult shape.
+  fetchTransactions?(accessToken: string): Promise<ImportParseResult>;
 }
 
 const registry = new Map<ImportSourceId, ImportProvider>();

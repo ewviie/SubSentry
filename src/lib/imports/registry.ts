@@ -2,6 +2,8 @@ import { registerImportProvider } from "./provider";
 import { csvBankImportProvider } from "./providers/csv-bank-provider";
 import { appleImportProvider } from "./providers/apple-provider";
 import { googlePlayImportProvider } from "./providers/google-play-provider";
+import { plaidImportProvider } from "./providers/plaid-provider";
+import { trueLayerImportProvider } from "./providers/truelayer-provider";
 
 // Side-effecting: importing this module registers every provider. Imported
 // once, at the top of every entry point that needs to resolve a provider
@@ -9,3 +11,5 @@ import { googlePlayImportProvider } from "./providers/google-play-provider";
 registerImportProvider(csvBankImportProvider);
 registerImportProvider(appleImportProvider);
 registerImportProvider(googlePlayImportProvider);
+registerImportProvider(plaidImportProvider);
+registerImportProvider(trueLayerImportProvider);

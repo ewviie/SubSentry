@@ -59,7 +59,7 @@ export function InsightsSection({ insights }: { insights: ComputedInsight[] }) {
       {error ? <p className="mt-2 text-sm text-destructive">{error}</p> : null}
       {insights.length === 0 ? (
         <Card className="mt-4 shadow-elevation-low">
-          <CardContent className="flex items-center gap-3 pt-6">
+          <CardContent className="flex items-center gap-3">
             <div
               aria-hidden="true"
               className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"
