@@ -168,3 +168,178 @@ describe("detectRecurringSubscriptions", () => {
     expect(detected[0].estimatedBillingCycle.cycle).toBe(expectedCycle);
   });
 });
+
+describe("introductory pricing / free-trial transitions", () => {
+  it("treats a discounted first charge followed by a steady price as high confidence, not irregular_amount", () => {
+    // 31-day gaps (not 30) so each charge reliably lands in a new calendar
+    // month regardless of which month d1 starts in — multiple_months needs
+    // 3 distinct months, and Jan 1 + 30 days is still January.
+    const d1 = "2026-01-01";
+    const d2 = addDaysISO(d1, 31);
+    const d3 = addDaysISO(d2, 31);
+    const detected = detectRecurringSubscriptions(
+      [
+        tx({ description: "STREAMING CO", date: d1, amountCents: 199 }), // $1.99 intro
+        tx({ description: "STREAMING CO", date: d2, amountCents: 1499 }), // $14.99 regular
+        tx({ description: "STREAMING CO", date: d3, amountCents: 1499 }),
+      ],
+      [],
+    );
+    expect(detected).toHaveLength(1);
+    expect(detected[0].confidenceSignals).toContain("introductory_pricing_detected");
+    expect(detected[0].confidenceSignals).not.toContain("irregular_amount");
+    expect(detected[0].confidence).toBe("high");
+  });
+
+  it("reports the steady-state price as the representative amount, not a median skewed by the intro charge", () => {
+    const d1 = "2026-01-01";
+    const d2 = addDaysISO(d1, 30);
+    const d3 = addDaysISO(d2, 30);
+    const detected = detectRecurringSubscriptions(
+      [
+        tx({ description: "STREAMING CO", date: d1, amountCents: 199 }),
+        tx({ description: "STREAMING CO", date: d2, amountCents: 1499 }),
+        tx({ description: "STREAMING CO", date: d3, amountCents: 1499 }),
+      ],
+      [],
+    );
+    expect(detected[0].amountCents).toBe(1499);
+  });
+
+  it("does not misread an ordinary price increase (not a steep intro discount) as introductory pricing", () => {
+    const d1 = "2026-01-01";
+    const d2 = addDaysISO(d1, 30);
+    const d3 = addDaysISO(d2, 30);
+    // First charge is 90% of the later price — a plausible small price
+    // change, not a >=30%-off intro discount.
+    const detected = detectRecurringSubscriptions(
+      [
+        tx({ description: "STREAMING CO", date: d1, amountCents: 900 }),
+        tx({ description: "STREAMING CO", date: d2, amountCents: 1000 }),
+        tx({ description: "STREAMING CO", date: d3, amountCents: 1000 }),
+      ],
+      [],
+    );
+    expect(detected[0].confidenceSignals).not.toContain("introductory_pricing_detected");
+  });
+
+  it("does not attempt intro-pricing detection with only 2 occurrences", () => {
+    const detected = detectRecurringSubscriptions(
+      [
+        tx({ description: "STREAMING CO", date: "2026-01-01", amountCents: 199 }),
+        tx({ description: "STREAMING CO", date: addDaysISO("2026-01-01", 30), amountCents: 1499 }),
+      ],
+      [],
+    );
+    expect(detected[0].confidenceSignals).not.toContain("introductory_pricing_detected");
+  });
+});
+
+describe("irregular billing intervals (skipped/retried periods)", () => {
+  it("tolerates a single doubled gap among an otherwise-consistent monthly pattern", () => {
+    const d1 = "2026-01-01";
+    const d2 = addDaysISO(d1, 30);
+    const d3 = addDaysISO(d2, 62); // a missed month, billed on the retry
+    const d4 = addDaysISO(d3, 30);
+    const detected = detectRecurringSubscriptions(
+      [
+        tx({ description: "GYM CO", date: d1, amountCents: 4500 }),
+        tx({ description: "GYM CO", date: d2, amountCents: 4500 }),
+        tx({ description: "GYM CO", date: d3, amountCents: 4500 }),
+        tx({ description: "GYM CO", date: d4, amountCents: 4500 }),
+      ],
+      [],
+    );
+    expect(detected[0].confidenceSignals).toContain("consistent_interval");
+  });
+
+  it("still flags irregular_interval when more than one gap is inconsistent", () => {
+    const d1 = "2026-01-01";
+    const d2 = addDaysISO(d1, 30);
+    const d3 = addDaysISO(d2, 75); // outlier
+    const d4 = addDaysISO(d3, 80); // outlier
+    const detected = detectRecurringSubscriptions(
+      [
+        tx({ description: "GYM CO", date: d1, amountCents: 4500 }),
+        tx({ description: "GYM CO", date: d2, amountCents: 4500 }),
+        tx({ description: "GYM CO", date: d3, amountCents: 4500 }),
+        tx({ description: "GYM CO", date: d4, amountCents: 4500 }),
+      ],
+      [],
+    );
+    expect(detected[0].confidenceSignals).toContain("irregular_interval");
+  });
+});
+
+describe("false-positive reduction", () => {
+  it("does not treat two charges a couple of days apart as a consistent (weekly) cadence", () => {
+    // Two unrelated one-off purchases from the same generic merchant,
+    // days apart — not a plausible subscription cadence at all. Before the
+    // minimum-gap floor, a single gap's "variance" was trivially zero,
+    // always passing as consistent regardless of the gap's size.
+    const detected = detectRecurringSubscriptions(
+      [
+        tx({ description: "GENERIC STORE", date: "2026-01-01", amountCents: 2500 }),
+        tx({ description: "GENERIC STORE", date: "2026-01-03", amountCents: 2500 }),
+      ],
+      [],
+    );
+    expect(detected).toHaveLength(1);
+    expect(detected[0].confidenceSignals).toContain("irregular_interval");
+    expect(detected[0].confidence).not.toBe("high");
+  });
+
+  it("does not treat a single wildly-off gap as consistent with any cadence", () => {
+    const detected = detectRecurringSubscriptions(
+      [
+        tx({ description: "GENERIC STORE", date: "2026-01-01", amountCents: 2500 }),
+        tx({ description: "GENERIC STORE", date: "2026-01-20", amountCents: 2500 }), // 19 days: not weekly, not monthly
+      ],
+      [],
+    );
+    expect(detected[0].confidenceSignals).toContain("irregular_interval");
+  });
+});
+
+describe("widened quarterly/yearly tolerance", () => {
+  it("accepts a yearly subscription with a small amount of real-world date drift", () => {
+    const d1 = "2026-01-05";
+    const d2 = addDaysISO(d1, 380); // ~15 days beyond a clean 365, e.g. a leap year plus a few days' processing drift
+    const detected = detectRecurringSubscriptions(
+      [
+        tx({ description: "ANNUAL PLAN CO", date: d1, amountCents: 9999 }),
+        tx({ description: "ANNUAL PLAN CO", date: d2, amountCents: 9999 }),
+      ],
+      [],
+    );
+    expect(detected[0].estimatedBillingCycle.cycle).toBe("yearly");
+    expect(detected[0].confidenceSignals).toContain("consistent_interval");
+  });
+
+  it("accepts a quarterly subscription with a small amount of real-world date drift", () => {
+    const d1 = "2026-01-05";
+    const d2 = addDaysISO(d1, 100); // ~9 days beyond a clean 91
+    const detected = detectRecurringSubscriptions(
+      [
+        tx({ description: "QUARTERLY PLAN CO", date: d1, amountCents: 2999 }),
+        tx({ description: "QUARTERLY PLAN CO", date: d2, amountCents: 2999 }),
+      ],
+      [],
+    );
+    expect(detected[0].estimatedBillingCycle.cycle).toBe("quarterly");
+    expect(detected[0].confidenceSignals).toContain("consistent_interval");
+  });
+
+  it("still rejects a yearly gap that drifts well beyond the widened tolerance", () => {
+    const d1 = "2026-01-05";
+    const d2 = addDaysISO(d1, 440); // 75 days beyond target — implausible drift
+    const detected = detectRecurringSubscriptions(
+      [
+        tx({ description: "ANNUAL PLAN CO", date: d1, amountCents: 9999 }),
+        tx({ description: "ANNUAL PLAN CO", date: d2, amountCents: 9999 }),
+      ],
+      [],
+    );
+    expect(detected[0].confidenceSignals).toContain("irregular_interval");
+  });
+});

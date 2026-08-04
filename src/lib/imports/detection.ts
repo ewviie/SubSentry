@@ -38,12 +38,27 @@ interface CycleBucket {
   toleranceDays: number;
 }
 
+// Quarterly and yearly tolerances are wider than a naive scaling of
+// weekly/monthly's would suggest — real-world annual/quarterly billing
+// drifts more in absolute days than shorter cadences do (a renewal landing
+// on a weekend/holiday, a processor retry, a leap year) without that drift
+// meaning the charge isn't the same subscription.
 const CYCLE_BUCKETS: CycleBucket[] = [
   { cycle: "weekly", targetDays: 7, toleranceDays: 3 },
   { cycle: "monthly", targetDays: 30, toleranceDays: 5 },
-  { cycle: "quarterly", targetDays: 91, toleranceDays: 10 },
-  { cycle: "yearly", targetDays: 365, toleranceDays: 20 },
+  { cycle: "quarterly", targetDays: 91, toleranceDays: 12 },
+  { cycle: "yearly", targetDays: 365, toleranceDays: 30 },
 ];
+
+// Below the shortest defined cadence's plausible range — two charges from
+// the same merchant a couple of days apart are far more likely to be
+// unrelated one-off purchases (two different Amazon orders, two trips to
+// the same coffee shop) than a genuine sub-weekly subscription. Without
+// this floor, a 2-occurrence cluster's "interval variance" is a population
+// stddev over a single gap, which is trivially 0 regardless of how
+// implausible that gap is — this is the actual bug the floor fixes, not
+// just a stricter policy choice.
+const MIN_PLAUSIBLE_GAP_DAYS = 4;
 
 function estimateBillingCycle(gapDays: number[]): BillingCycleEstimate {
   const meanGap = gapDays.reduce((sum, g) => sum + g, 0) / gapDays.length;
@@ -55,6 +70,25 @@ function estimateBillingCycle(gapDays: number[]): BillingCycleEstimate {
     averageIntervalDays: Math.round(meanGap),
     intervalVarianceDays: Math.round(populationStdDev(gapDays)),
   };
+}
+
+// Each gap is judged against the bucket's own canonical target, not the
+// empirical mean/median of the observed gaps — comparing gaps to each
+// other (as the old population-stddev check effectively did) is trivially
+// "consistent" with a single gap (n=1 has zero variance by definition,
+// regardless of how implausible that one gap is) and is fooled by a
+// systematic drift that's still internally uniform. With 3+ gaps, at most
+// one is allowed to fall outside tolerance — a single skipped or
+// retried billing period (e.g. gaps of [30, 30, 62, 30]) shouldn't tank an
+// otherwise-clean pattern, which is exactly the "irregular billing
+// intervals" case a strict all-gaps-must-match rule handles badly.
+function isIntervalConsistent(gapDays: number[], bucket: CycleBucket): boolean {
+  if (gapDays.length === 1) {
+    return gapDays[0] >= MIN_PLAUSIBLE_GAP_DAYS && Math.abs(gapDays[0] - bucket.targetDays) <= bucket.toleranceDays;
+  }
+  const withinTolerance = gapDays.filter((g) => Math.abs(g - bucket.targetDays) <= bucket.toleranceDays).length;
+  const maxOutliers = gapDays.length >= 3 ? 1 : 0;
+  return withinTolerance >= gapDays.length - maxOutliers;
 }
 
 // Same fuzzy-match idea as insights.ts's namesLikelyMatch (exact match,
@@ -79,6 +113,62 @@ function likelyMatchesExistingName(normalizedDetected: string, normalizedExistin
 
 const CONSISTENT_AMOUNT_MAX_VARIANCE_PCT = 0.15;
 const MULTIPLE_MONTHS_THRESHOLD = 3;
+// The earliest charge counts as a plausible intro/trial price when it's no
+// more than 70% of the steady-state (post-intro) median — comfortably below
+// the ordinary price-rise noise CONSISTENT_AMOUNT_MAX_VARIANCE_PCT already
+// tolerates, so a real intro discount doesn't get misread from a merely
+// slightly-cheaper first invoice (a partial-period proration, say).
+const INTRO_PRICE_MAX_RATIO = 0.7;
+// Below this, two occurrences alone can't distinguish "intro price then
+// real price" from "two unrelated amounts" — a steady-state median needs at
+// least 2 post-intro charges to mean anything.
+const MIN_OCCURRENCES_FOR_INTRO_DETECTION = 3;
+
+interface AmountConsistency {
+  representativeAmount: number;
+  amountVariancePct: number;
+  consistentAmount: boolean;
+  introPricingDetected: boolean;
+}
+
+// Free-trial-to-paid and introductory-pricing transitions are the same
+// underlying shape: one anomalously low first charge followed by a steady
+// price. (A literal $0 trial charge never reaches here at all — csv-parser.ts
+// drops zero-amount rows upstream — so in practice this is always "first
+// real charge is discounted, then the regular price kicks in".) Judging
+// amount consistency over the *whole* cluster would read that discount as
+// "irregular_amount" and undercount the real ongoing price; recomputing
+// over just the steady-state charges fixes both.
+function evaluateAmountConsistency(sortedByDate: RawTransaction[]): AmountConsistency {
+  const amounts = sortedByDate.map((t) => t.amountCents);
+  const wholeClusterVariance = (values: number[]): { representative: number; variancePct: number } => {
+    const representative = median(values);
+    const variancePct = representative > 0 ? (Math.max(...values) - Math.min(...values)) / representative : 0;
+    return { representative, variancePct };
+  };
+
+  if (amounts.length >= MIN_OCCURRENCES_FOR_INTRO_DETECTION) {
+    const [first, ...rest] = amounts;
+    const restMedian = median(rest);
+    if (restMedian > 0 && first <= restMedian * INTRO_PRICE_MAX_RATIO) {
+      const { representative, variancePct } = wholeClusterVariance(rest);
+      return {
+        representativeAmount: representative,
+        amountVariancePct: variancePct,
+        consistentAmount: variancePct <= CONSISTENT_AMOUNT_MAX_VARIANCE_PCT,
+        introPricingDetected: true,
+      };
+    }
+  }
+
+  const { representative, variancePct } = wholeClusterVariance(amounts);
+  return {
+    representativeAmount: representative,
+    amountVariancePct: variancePct,
+    consistentAmount: variancePct <= CONSISTENT_AMOUNT_MAX_VARIANCE_PCT,
+    introPricingDetected: false,
+  };
+}
 
 export function detectRecurringSubscriptions(
   transactions: RawTransaction[],
@@ -115,19 +205,17 @@ export function detectRecurringSubscriptions(
     }
     const estimatedBillingCycle = estimateBillingCycle(gapDays);
     const bucket = CYCLE_BUCKETS.find((b) => b.cycle === estimatedBillingCycle.cycle)!;
-    const consistentInterval = estimatedBillingCycle.intervalVarianceDays <= bucket.toleranceDays;
+    const consistentInterval = isIntervalConsistent(gapDays, bucket);
 
-    const amounts = sorted.map((t) => t.amountCents);
-    const representativeAmount = median(amounts);
-    const amountVariancePct =
-      representativeAmount > 0 ? (Math.max(...amounts) - Math.min(...amounts)) / representativeAmount : 0;
-    const consistentAmount = amountVariancePct <= CONSISTENT_AMOUNT_MAX_VARIANCE_PCT;
+    const { representativeAmount, amountVariancePct, consistentAmount, introPricingDetected } =
+      evaluateAmountConsistency(sorted);
 
     const monthsSeen = new Set(sorted.map((t) => t.date.slice(0, 7))).size;
     const multipleMonths = monthsSeen >= MULTIPLE_MONTHS_THRESHOLD;
 
     const signals: ConfidenceSignal[] = [];
     if (merchant.isKnownSubscriptionMerchant) signals.push("known_subscription_merchant");
+    if (introPricingDetected) signals.push("introductory_pricing_detected");
     if (consistentAmount) signals.push("consistent_amount");
     else signals.push("irregular_amount");
     if (consistentInterval) signals.push("consistent_interval");
