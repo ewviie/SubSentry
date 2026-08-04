@@ -4,17 +4,23 @@ import { getSession } from "@/lib/auth/session";
 import { subscriptionInputSchema } from "@/lib/subscriptions/validation";
 import { createSubscription, listSubscriptions } from "@/lib/subscriptions/queries";
 import { checkSubscriptionCreateRateLimit } from "@/lib/subscriptions/rate-limit";
+import { SUBSCRIPTION_SOURCES } from "@/lib/subscriptions/source";
 import {
   FREE_PLAN_SUBSCRIPTION_LIMIT,
   MAX_ACTIVE_SUBSCRIPTIONS,
   hasReachedSubscriptionLimit,
 } from "@/lib/billing/plan";
 
-// `source` is provenance metadata only (drives the "AI-parsed" badge in the
-// UI) — it has no effect on validation or authorization, so trusting the
-// client's hint here is fine.
+// `source` is provenance metadata only (drives the "AI-parsed"/"Imported"
+// badge in the UI) — it has no effect on validation or authorization, so
+// trusting the client's hint here is fine. The import-specific values
+// (csv_import/apple_import/google_play_import) are included here too since
+// nothing prevents a client from creating a single subscription through this
+// endpoint with an import-sourced provenance tag; the Import Center's own
+// bulk-confirm flow goes through /api/imports/confirm instead, which
+// restricts `source` to only those three values.
 const createSubscriptionSchema = subscriptionInputSchema.extend({
-  source: z.enum(["manual", "ai_parsed"]).optional(),
+  source: z.enum(SUBSCRIPTION_SOURCES).optional(),
 });
 
 export async function GET() {

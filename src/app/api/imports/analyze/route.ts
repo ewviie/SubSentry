@@ -2,13 +2,12 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import "@/lib/imports/registry";
-import { getImportProvider, type ImportSourceId } from "@/lib/imports/provider";
+import { getImportProvider, IMPORT_SOURCE_IDS, type ImportSourceId } from "@/lib/imports/provider";
 import { checkImportAnalyzeRateLimit } from "@/lib/imports/rate-limit";
-import { rawTransactionSchema } from "@/lib/imports/validation";
-import { detectRecurringSubscriptions } from "@/lib/imports/detection";
+import { analyzeParsedTransactions } from "@/lib/imports/analyze";
 import { listSubscriptions } from "@/lib/subscriptions/queries";
 
-const sourceSchema = z.enum(["csv_bank", "apple", "google_play"]);
+const sourceSchema = z.enum(IMPORT_SOURCE_IDS);
 
 // Never writes to the DB — same "return drafts, don't persist" contract
 // /api/subscriptions/quick-add already establishes. Nothing about the
@@ -98,25 +97,8 @@ export async function POST(request: Request) {
     );
   }
 
-  // A second, independent validation gate on every parsed row (see
-  // rawTransactionSchema's own comment) — the parser's inline checks
-  // already filter malformed rows, this catches anything that slipped
-  // through before it can ever reach detection or the response.
-  const warnings = [...parseResult.warnings];
-  let skippedRowCount = parseResult.skippedRowCount;
-  const validTransactions = [];
-  for (const transaction of parseResult.transactions) {
-    const result = rawTransactionSchema.safeParse(transaction);
-    if (result.success) {
-      validTransactions.push(result.data);
-    } else {
-      skippedRowCount += 1;
-      warnings.push("A row failed validation and was skipped.");
-    }
-  }
-
   const existingSubscriptions = await listSubscriptions(session.user.id);
-  const detected = detectRecurringSubscriptions(validTransactions, existingSubscriptions);
+  const { detected, warnings, skippedRowCount } = analyzeParsedTransactions(parseResult, existingSubscriptions);
 
   return NextResponse.json({ detected, warnings, skippedRowCount });
 }

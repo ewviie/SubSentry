@@ -69,7 +69,7 @@ export function FeaturesSection() {
               className="h-full"
             >
               <Card className="h-full shadow-elevation-low transition-shadow duration-200 hover:shadow-elevation-medium">
-                <CardContent className="flex h-full flex-col gap-3 pt-6">
+                <CardContent className="flex h-full flex-col justify-center gap-3 pt-6 pb-6">
                   <div className={`flex size-9 items-center justify-center rounded-full ${feature.accent}`}>
                     <feature.icon className="size-4" aria-hidden="true" />
                   </div>

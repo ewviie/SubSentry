@@ -6,6 +6,7 @@ import {
   timestamp,
   date,
   index,
+  uniqueIndex,
   jsonb,
 } from "drizzle-orm/pg-core";
 import { SUBSCRIPTION_SOURCES } from "@/lib/subscriptions/source";
@@ -97,7 +98,9 @@ export const imports = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    source: text("source", { enum: ["csv_import", "apple_import", "google_play_import"] }).notNull(),
+    source: text("source", {
+      enum: ["csv_import", "apple_import", "google_play_import", "plaid_import", "truelayer_import"],
+    }).notNull(),
     status: text("status", { enum: ["reviewed", "completed", "failed"] })
       .notNull()
       .default("completed"),
@@ -111,6 +114,50 @@ export const imports = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index("imports_user_created_idx").on(table.userId, table.createdAt)],
+);
+
+// One row per linked bank/institution via a live-API import provider
+// (Plaid, TrueLayer) — see src/lib/imports/providers/plaid-provider.ts and
+// truelayer-provider.ts. Distinct from `imports` (a one-time audit record
+// written after a confirm): this is a standing, reusable credential the
+// analyze/sync routes read from on every fetch. Tokens are stored encrypted
+// (see src/lib/security/token-encryption.ts) since, unlike a session token,
+// they must be decryptable to actually call the provider's API later.
+export const bankConnections = pgTable(
+  "bank_connections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    provider: text("provider", { enum: ["plaid", "truelayer"] }).notNull(),
+    // The provider's own stable identifier for this linked
+    // institution/account (Plaid's item_id, TrueLayer's account id) — used
+    // to detect a duplicate re-link of the same institution.
+    providerItemId: text("provider_item_id").notNull(),
+    institutionName: text("institution_name"),
+    accessTokenEncrypted: text("access_token_encrypted").notNull(),
+    // Only TrueLayer's OAuth tokens expire and need this (~90 min access
+    // token lifetime); Plaid's access tokens don't expire the same way, so
+    // its provider never populates these two columns.
+    refreshTokenEncrypted: text("refresh_token_encrypted"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("bank_connections_user_idx").on(table.userId),
+    // Scoped by userId, not just (provider, providerItemId) — the invariant
+    // is "this user hasn't already linked this institution," not "no user
+    // in the system has ever linked this exact id." A global-only unique
+    // index would throw on legitimate re-links whenever a provider's id
+    // isn't as globally unique as assumed (e.g. sandbox test data).
+    uniqueIndex("bank_connections_user_provider_item_idx").on(
+      table.userId,
+      table.provider,
+      table.providerItemId,
+    ),
+  ],
 );
 
 export const checkoutSessions = pgTable("checkout_sessions", {
@@ -137,4 +184,6 @@ export type Subscription = typeof subscriptions.$inferSelect;
 export type NewSubscription = typeof subscriptions.$inferInsert;
 export type Import = typeof imports.$inferSelect;
 export type NewImport = typeof imports.$inferInsert;
+export type BankConnection = typeof bankConnections.$inferSelect;
+export type NewBankConnection = typeof bankConnections.$inferInsert;
 export type CheckoutSession = typeof checkoutSessions.$inferSelect;

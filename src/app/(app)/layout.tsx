@@ -24,6 +24,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             SubSentry
           </Link>
           <div className="flex items-center gap-3 sm:gap-4">
+            <nav aria-label="Primary" className="hidden items-center gap-3 sm:flex sm:gap-4">
+              <NavLink href="/analytics">Analytics</NavLink>
+              <NavLink href="/savings">Savings</NavLink>
+            </nav>
             <nav aria-label="Account" className="flex items-center gap-3 sm:gap-4">
               <NavLink href="/settings">Settings</NavLink>
               <span className="hidden text-sm text-muted-foreground sm:inline">{user.email}</span>
