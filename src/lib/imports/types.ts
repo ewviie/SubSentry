@@ -34,7 +34,13 @@ export type ConfidenceSignal =
   | "consistent_interval"
   | "multiple_months"
   | "irregular_amount"
-  | "irregular_interval";
+  | "irregular_interval"
+  // The earliest charge is markedly lower than the steady-state price that
+  // follows (a free trial or introductory-price period transitioning to the
+  // regular price) — treated as a positive signal, not penalized as
+  // "irregular_amount", since amount consistency is then judged against the
+  // steady-state charges rather than the whole cluster.
+  | "introductory_pricing_detected";
 
 export interface BillingCycleEstimate {
   cycle: Subscription["billingCycle"];
