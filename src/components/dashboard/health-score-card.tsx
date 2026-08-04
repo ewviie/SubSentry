@@ -16,7 +16,7 @@ export function HealthScoreCard({ result }: { result: HealthScoreResult }) {
   return (
     <motion.div variants={fadeInUp} whileHover={liftOnHover} transition={springSnappy} className="h-full">
       <Card className="h-full shadow-elevation-low">
-        <CardContent className="flex h-full flex-col items-center gap-4 pt-6 text-center sm:flex-row sm:items-center sm:gap-5 sm:text-left">
+        <CardContent className="flex h-full flex-col items-center justify-center gap-4 py-6 text-center sm:flex-row sm:items-center sm:gap-5 sm:text-left">
           <div className="relative shrink-0">
             <SentryRing className="-inset-3" />
             <HealthScoreGauge result={result} />
@@ -26,7 +26,7 @@ export function HealthScoreCard({ result }: { result: HealthScoreResult }) {
             <p className="mt-0.5 font-heading text-lg font-semibold">{result.label}</p>
             <ul className="mt-2 space-y-1">
               {result.factors.map((factor) => (
-                <li className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground sm:justify-start" key={factor.label}>
+                <li className="flex items-center gap-1.5 text-xs text-muted-foreground" key={factor.label}>
                   {factor.passed ? (
                     <Check className="size-3.5 shrink-0 text-gold" aria-hidden="true" />
                   ) : (

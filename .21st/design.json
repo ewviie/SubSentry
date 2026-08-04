@@ -1,0 +1,495 @@
+{
+  "version": 1,
+  "project": {
+    "name": "subsentry",
+    "productType": null,
+    "stack": [
+      "nextjs",
+      "react",
+      "shadcn",
+      "tailwind-v4"
+    ]
+  },
+  "sources": {
+    "tokens": [
+      "src/app/globals.css"
+    ],
+    "components": [
+      "src/components/ui"
+    ],
+    "assets": [],
+    "instructions": []
+  },
+  "design": {
+    "colorMode": "light-and-dark",
+    "colors": {
+      "--color-gold": {
+        "value": "var(--gold)",
+        "source": "src/app/globals.css"
+      },
+      "--color-gold-foreground": {
+        "value": "var(--gold-foreground)",
+        "source": "src/app/globals.css"
+      },
+      "--color-gold-muted": {
+        "value": "var(--gold-muted)",
+        "source": "src/app/globals.css"
+      },
+      "--color-ai": {
+        "value": "var(--ai)",
+        "source": "src/app/globals.css"
+      },
+      "--color-ai-foreground": {
+        "value": "var(--ai-foreground)",
+        "source": "src/app/globals.css"
+      },
+      "--color-ai-muted": {
+        "value": "var(--ai-muted)",
+        "source": "src/app/globals.css"
+      },
+      "--color-sidebar-ring": {
+        "value": "var(--sidebar-ring)",
+        "source": "src/app/globals.css"
+      },
+      "--color-sidebar-border": {
+        "value": "var(--sidebar-border)",
+        "source": "src/app/globals.css"
+      },
+      "--color-sidebar-accent-foreground": {
+        "value": "var(--sidebar-accent-foreground)",
+        "source": "src/app/globals.css"
+      },
+      "--color-sidebar-accent": {
+        "value": "var(--sidebar-accent)",
+        "source": "src/app/globals.css"
+      },
+      "--color-sidebar-primary-foreground": {
+        "value": "var(--sidebar-primary-foreground)",
+        "source": "src/app/globals.css"
+      },
+      "--color-sidebar-primary": {
+        "value": "var(--sidebar-primary)",
+        "source": "src/app/globals.css"
+      },
+      "--color-sidebar-foreground": {
+        "value": "var(--sidebar-foreground)",
+        "source": "src/app/globals.css"
+      },
+      "--color-sidebar": {
+        "value": "var(--sidebar)",
+        "source": "src/app/globals.css"
+      },
+      "--color-chart-5": {
+        "value": "var(--chart-5)",
+        "source": "src/app/globals.css"
+      },
+      "--color-chart-4": {
+        "value": "var(--chart-4)",
+        "source": "src/app/globals.css"
+      },
+      "--color-chart-3": {
+        "value": "var(--chart-3)",
+        "source": "src/app/globals.css"
+      },
+      "--color-chart-2": {
+        "value": "var(--chart-2)",
+        "source": "src/app/globals.css"
+      },
+      "--color-chart-1": {
+        "value": "var(--chart-1)",
+        "source": "src/app/globals.css"
+      },
+      "--color-ring": {
+        "value": "var(--ring)",
+        "source": "src/app/globals.css"
+      },
+      "--color-input": {
+        "value": "var(--input)",
+        "source": "src/app/globals.css"
+      },
+      "--color-border": {
+        "value": "var(--border)",
+        "source": "src/app/globals.css"
+      },
+      "--color-destructive": {
+        "value": "var(--destructive)",
+        "source": "src/app/globals.css"
+      },
+      "--color-accent-foreground": {
+        "value": "var(--accent-foreground)",
+        "source": "src/app/globals.css"
+      },
+      "--color-accent": {
+        "value": "var(--accent)",
+        "source": "src/app/globals.css"
+      },
+      "--color-muted-foreground": {
+        "value": "var(--muted-foreground)",
+        "source": "src/app/globals.css"
+      },
+      "--color-muted": {
+        "value": "var(--muted)",
+        "source": "src/app/globals.css"
+      },
+      "--color-secondary-foreground": {
+        "value": "var(--secondary-foreground)",
+        "source": "src/app/globals.css"
+      },
+      "--color-secondary": {
+        "value": "var(--secondary)",
+        "source": "src/app/globals.css"
+      },
+      "--color-primary-foreground": {
+        "value": "var(--primary-foreground)",
+        "source": "src/app/globals.css"
+      },
+      "--color-primary": {
+        "value": "var(--primary)",
+        "source": "src/app/globals.css"
+      },
+      "--color-popover-foreground": {
+        "value": "var(--popover-foreground)",
+        "source": "src/app/globals.css"
+      },
+      "--color-popover": {
+        "value": "var(--popover)",
+        "source": "src/app/globals.css"
+      },
+      "--color-card-foreground": {
+        "value": "var(--card-foreground)",
+        "source": "src/app/globals.css"
+      },
+      "--color-card": {
+        "value": "var(--card)",
+        "source": "src/app/globals.css"
+      },
+      "--color-foreground": {
+        "value": "var(--foreground)",
+        "source": "src/app/globals.css"
+      },
+      "--color-background": {
+        "value": "var(--background)",
+        "source": "src/app/globals.css"
+      },
+      "--background": {
+        "value": "oklch(0.208 0.042 265.755)",
+        "source": "src/app/globals.css"
+      },
+      "--foreground": {
+        "value": "oklch(0.984 0.003 247.858)",
+        "source": "src/app/globals.css"
+      },
+      "--card-foreground": {
+        "value": "oklch(0.984 0.003 247.858)",
+        "source": "src/app/globals.css"
+      },
+      "--popover-foreground": {
+        "value": "oklch(0.984 0.003 247.858)",
+        "source": "src/app/globals.css"
+      },
+      "--primary": {
+        "value": "oklch(0.769 0.188 70.08)",
+        "source": "src/app/globals.css"
+      },
+      "--primary-foreground": {
+        "value": "oklch(0.279 0.077 45.635)",
+        "source": "src/app/globals.css"
+      },
+      "--secondary": {
+        "value": "oklch(0.372 0.044 257.287)",
+        "source": "src/app/globals.css"
+      },
+      "--secondary-foreground": {
+        "value": "oklch(0.984 0.003 247.858)",
+        "source": "src/app/globals.css"
+      },
+      "--muted": {
+        "value": "oklch(0.279 0.041 260.031)",
+        "source": "src/app/globals.css"
+      },
+      "--muted-foreground": {
+        "value": "oklch(0.704 0.04 256.788)",
+        "source": "src/app/globals.css"
+      },
+      "--accent": {
+        "value": "oklch(0.372 0.044 257.287)",
+        "source": "src/app/globals.css"
+      },
+      "--accent-foreground": {
+        "value": "oklch(0.984 0.003 247.858)",
+        "source": "src/app/globals.css"
+      },
+      "--destructive": {
+        "value": "oklch(0.704 0.191 22.216)",
+        "source": "src/app/globals.css"
+      },
+      "--border": {
+        "value": "oklch(1 0 0 / 10%)",
+        "source": "src/app/globals.css"
+      },
+      "--ring": {
+        "value": "oklch(0.554 0.046 257.417)",
+        "source": "src/app/globals.css"
+      },
+      "--chart-1": {
+        "value": "oklch(0.828 0.189 84.429)",
+        "source": "src/app/globals.css"
+      },
+      "--chart-2": {
+        "value": "oklch(0.702 0.183 293.541)",
+        "source": "src/app/globals.css"
+      },
+      "--chart-3": {
+        "value": "oklch(0.696 0.17 162.48)",
+        "source": "src/app/globals.css"
+      },
+      "--chart-4": {
+        "value": "oklch(0.704 0.191 22.216)",
+        "source": "src/app/globals.css"
+      },
+      "--chart-5": {
+        "value": "oklch(0.704 0.04 256.788)",
+        "source": "src/app/globals.css"
+      },
+      "--sidebar-foreground": {
+        "value": "oklch(0.984 0.003 247.858)",
+        "source": "src/app/globals.css"
+      },
+      "--sidebar-primary": {
+        "value": "oklch(0.769 0.188 70.08)",
+        "source": "src/app/globals.css"
+      },
+      "--sidebar-primary-foreground": {
+        "value": "oklch(0.279 0.077 45.635)",
+        "source": "src/app/globals.css"
+      },
+      "--sidebar-accent": {
+        "value": "oklch(0.372 0.044 257.287)",
+        "source": "src/app/globals.css"
+      },
+      "--sidebar-accent-foreground": {
+        "value": "oklch(0.984 0.003 247.858)",
+        "source": "src/app/globals.css"
+      },
+      "--sidebar-border": {
+        "value": "oklch(1 0 0 / 10%)",
+        "source": "src/app/globals.css"
+      },
+      "--sidebar-ring": {
+        "value": "oklch(0.554 0.046 257.417)",
+        "source": "src/app/globals.css"
+      },
+      "--gold-foreground": {
+        "value": "oklch(0.279 0.077 45.635)",
+        "source": "src/app/globals.css"
+      },
+      "--gold-muted": {
+        "value": "oklch(0.279 0.077 45.635 / 25%)",
+        "source": "src/app/globals.css"
+      },
+      "--ai-foreground": {
+        "value": "oklch(0.129 0.042 264.695)",
+        "source": "src/app/globals.css"
+      },
+      "--ai-muted": {
+        "value": "oklch(0.606 0.25 292.717 / 20%)",
+        "source": "src/app/globals.css"
+      }
+    },
+    "typography": {
+      "--font-heading": {
+        "value": "var(--font-heading)",
+        "source": "src/app/globals.css"
+      },
+      "--font-sans": {
+        "value": "var(--font-sans)",
+        "source": "src/app/globals.css"
+      },
+      "--font-mono": {
+        "value": "var(--font-mono)",
+        "source": "src/app/globals.css"
+      },
+      "--text-display": {
+        "value": "3.25rem",
+        "source": "src/app/globals.css"
+      },
+      "--text-display--line-height": {
+        "value": "1.05",
+        "source": "src/app/globals.css"
+      },
+      "--text-display--letter-spacing": {
+        "value": "-0.02em",
+        "source": "src/app/globals.css"
+      },
+      "--text-h1": {
+        "value": "2.5rem",
+        "source": "src/app/globals.css"
+      },
+      "--text-h1--line-height": {
+        "value": "1.1",
+        "source": "src/app/globals.css"
+      },
+      "--text-h1--letter-spacing": {
+        "value": "-0.015em",
+        "source": "src/app/globals.css"
+      },
+      "--text-h2": {
+        "value": "1.875rem",
+        "source": "src/app/globals.css"
+      },
+      "--text-h2--line-height": {
+        "value": "1.2",
+        "source": "src/app/globals.css"
+      },
+      "--text-h2--letter-spacing": {
+        "value": "-0.01em",
+        "source": "src/app/globals.css"
+      },
+      "--text-h3": {
+        "value": "1.25rem",
+        "source": "src/app/globals.css"
+      },
+      "--text-h3--line-height": {
+        "value": "1.3",
+        "source": "src/app/globals.css"
+      }
+    },
+    "spacing": {},
+    "radius": {
+      "--radius-sm": {
+        "value": "calc(var(--radius) * 0.6)",
+        "source": "src/app/globals.css"
+      },
+      "--radius-md": {
+        "value": "calc(var(--radius) * 0.8)",
+        "source": "src/app/globals.css"
+      },
+      "--radius-lg": {
+        "value": "var(--radius)",
+        "source": "src/app/globals.css"
+      },
+      "--radius-xl": {
+        "value": "calc(var(--radius) * 1.4)",
+        "source": "src/app/globals.css"
+      },
+      "--radius-2xl": {
+        "value": "calc(var(--radius) * 1.8)",
+        "source": "src/app/globals.css"
+      },
+      "--radius-3xl": {
+        "value": "calc(var(--radius) * 2.2)",
+        "source": "src/app/globals.css"
+      },
+      "--radius-4xl": {
+        "value": "calc(var(--radius) * 2.6)",
+        "source": "src/app/globals.css"
+      },
+      "--radius": {
+        "value": "0.625rem",
+        "source": "src/app/globals.css"
+      }
+    },
+    "shadows": {
+      "--shadow-elevation-low": {
+        "value": "var(--elevation-low)",
+        "source": "src/app/globals.css"
+      },
+      "--shadow-elevation-medium": {
+        "value": "var(--elevation-medium)",
+        "source": "src/app/globals.css"
+      },
+      "--shadow-elevation-high": {
+        "value": "var(--elevation-high)",
+        "source": "src/app/globals.css"
+      },
+      "--shadow-elevation-glow": {
+        "value": "var(--elevation-glow)",
+        "source": "src/app/globals.css"
+      },
+      "--elevation-low": {
+        "value": "0 1px 2px oklch(0 0 0 / 0.3), 0 1px 1px oklch(0 0 0 / 0.2)",
+        "source": "src/app/globals.css"
+      },
+      "--elevation-medium": {
+        "value": "0 16px 40px -12px oklch(0 0 0 / 0.5), 0 4px 16px -4px oklch(0 0 0 / 0.3), 0 0 0 1px oklch(1 0 0 / 0.04)",
+        "source": "src/app/globals.css"
+      },
+      "--elevation-high": {
+        "value": "0 32px 80px -16px oklch(0 0 0 / 0.6), 0 12px 32px -8px oklch(0 0 0 / 0.35), 0 0 0 1px oklch(1 0 0 / 0.06)",
+        "source": "src/app/globals.css"
+      },
+      "--elevation-glow": {
+        "value": "0 0 0 1px oklch(0.828 0.189 84.429 / 0.25), 0 8px 32px -8px oklch(0.828 0.189 84.429 / 0.35)",
+        "source": "src/app/globals.css"
+      }
+    },
+    "motion": {},
+    "density": "unknown"
+  },
+  "components": {
+    "installed": [
+      "accordion",
+      "alert-dialog",
+      "avatar",
+      "badge",
+      "button",
+      "card",
+      "count-up",
+      "dialog",
+      "dropdown-menu",
+      "empty-state",
+      "input",
+      "label",
+      "select",
+      "separator",
+      "skeleton",
+      "sonner",
+      "spotlight",
+      "table",
+      "textarea"
+    ],
+    "preferredPrimitives": [],
+    "patterns": []
+  },
+  "constraints": {
+    "must": [],
+    "avoid": []
+  },
+  "decisions": [
+    {
+      "date": "2026-08-04T08:37:02.025Z",
+      "summary": "Premium fintech SaaS shell: sticky/blurred header, framer-motion sliding-pill primary nav (adapted from 21st Animated Navigation Tabs), numbered-circle/check import wizard stepper (adapted from 21st/shadcn Stepper anatomy). No page rewrites — existing Card/Badge/EmptyState primitives kept as-is."
+    }
+  ],
+  "evidence": [
+    {
+      "fact": "components.installed",
+      "source": "src/components/ui"
+    },
+    {
+      "fact": "design.colorMode:light-and-dark",
+      "source": "src/app/globals.css"
+    },
+    {
+      "fact": "design.tokens",
+      "source": "src/app/globals.css"
+    },
+    {
+      "fact": "project.stack:nextjs",
+      "source": "package.json"
+    },
+    {
+      "fact": "project.stack:react",
+      "source": "package.json"
+    },
+    {
+      "fact": "project.stack:shadcn",
+      "source": "components.json"
+    },
+    {
+      "fact": "project.stack:tailwind-v4",
+      "source": "package.json"
+    }
+  ],
+  "generatedAt": "2026-07-31T12:06:33.127Z"
+}

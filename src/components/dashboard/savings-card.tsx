@@ -34,7 +34,7 @@ export function SavingsCard({
             : "h-full shadow-elevation-low"
         }
       >
-        <CardContent className="flex h-full flex-col gap-4 pt-6">
+        <CardContent className="flex h-full flex-col justify-center gap-4 pt-5 pb-7">
           <div className="flex items-center gap-3">
             <div
               aria-hidden="true"
