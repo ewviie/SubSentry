@@ -206,50 +206,8 @@ export function computePotentialSavingsMonthlyCents(insights: ComputedInsight[])
   return total;
 }
 
-export interface HealthScoreResult {
-  score: number;
-  label: "Excellent" | "Good" | "Fair" | "Needs attention";
-  factors: { label: string; passed: boolean }[];
-}
-
-// Deterministic 0-100 score built from the same real signals computeInsights
-// already checks — not a fabricated or LLM-guessed number. Returns null when
-// there's nothing to score yet (no active subscriptions), rather than an
-// artificial 100 that would imply "healthy" for an empty account.
-export function computeHealthScore(
-  insights: ComputedInsight[],
-  activeCount: number,
-): HealthScoreResult | null {
-  if (activeCount === 0) return null;
-
-  const overdueCount = insights.filter((i) => i.type === "overdue_renewal").length;
-  // Same identity rule as computePotentialSavingsMonthlyCents — count each
-  // distinct redundant subscription once, not once per pair it matched in
-  // (three near-identical names produce three pairwise insights but only
-  // two actually-redundant subscriptions).
-  const duplicateCount = new Set(
-    insights
-      .filter((i) => i.type === "possible_overlap" && i.potentialSavingsMonthlyCents !== undefined)
-      .map((i) => i.subscriptionIds[1]),
-  ).size;
-  const hasConcentration = insights.some((i) => i.type === "expensive_category");
-
-  let score = 100;
-  score -= Math.min(overdueCount * 15, 30);
-  score -= Math.min(duplicateCount * 10, 30);
-  score -= hasConcentration ? 10 : 0;
-  score = Math.max(0, Math.min(100, score));
-
-  const label: HealthScoreResult["label"] =
-    score >= 90 ? "Excellent" : score >= 70 ? "Good" : score >= 50 ? "Fair" : "Needs attention";
-
-  return {
-    score,
-    label,
-    factors: [
-      { label: "No overdue renewals", passed: overdueCount === 0 },
-      { label: "No likely duplicate subscriptions", passed: duplicateCount === 0 },
-      { label: "Spend isn't concentrated in one category", passed: !hasConcentration },
-    ],
-  };
-}
+// The health score itself moved to src/lib/insights-engine (computeHealthScore
+// there, backed by HEALTH_RULES) — a weighted, rule-based system replacing
+// this file's old 3-factor pass/fail version. computeInsights/ComputedInsight
+// above stay here unchanged: they still drive the dashboard's Insights
+// section, /subscriptions' savings stat, and SavingsCard's duplicate list.

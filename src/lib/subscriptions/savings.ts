@@ -112,3 +112,32 @@ export function computeTotalPotentialSavingsMonthlyCents(recommendations: Saving
   }
   return total;
 }
+
+export type SavingsPriority = "high" | "medium" | "low";
+
+// Presentational bucketing only — no new data, just a threshold read on the
+// same monthlySavingsCents this module already computes deterministically.
+// category_concentration recommendations are always $0 (see the file-header
+// comment on why: clustering isn't proof of redundancy) and always bucket
+// to "low" as a result — that's intentional, not a missing case: a $0
+// recommendation is "worth a look," never "high impact."
+const HIGH_IMPACT_THRESHOLD_CENTS = 1500; // $15/mo
+
+export function getSavingsPriority(recommendation: SavingsRecommendation): SavingsPriority {
+  if (recommendation.monthlySavingsCents >= HIGH_IMPACT_THRESHOLD_CENTS) return "high";
+  if (recommendation.monthlySavingsCents > 0) return "medium";
+  return "low";
+}
+
+// Shared label/variant lookup for priority badges — lives here (not in the
+// "use client" SavingsRecommendationCard) so Server Components can import
+// it directly. A Server Component importing a plain constant from a "use
+// client" module crosses the RSC client-boundary and silently resolves to
+// undefined at render time instead of erroring, which is exactly what
+// happened when insight-panels.tsx (server) first imported these from
+// savings-recommendation-card.tsx (client): the badges rendered as empty
+// pills. "success"/"secondary"/"outline" reuse existing Badge variants —
+// "high" reuses the same green as every other positive-money signal in the
+// app (the emerald brand accent), not a new bespoke color.
+export const PRIORITY_LABEL = { high: "High impact", medium: "Medium impact", low: "Worth a look" } as const;
+export const PRIORITY_BADGE_VARIANT = { high: "success", medium: "secondary", low: "outline" } as const;

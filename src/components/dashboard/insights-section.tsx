@@ -93,13 +93,7 @@ export function InsightsSection({ insights }: { insights: ComputedInsight[] }) {
                 whileHover={liftOnHover}
                 transition={springSnappy}
               >
-                <Card
-                  className={
-                    insight.severity === "warning"
-                      ? "h-full border-l-2 border-l-destructive shadow-elevation-low transition-shadow duration-200 hover:shadow-elevation-medium"
-                      : "h-full shadow-elevation-low transition-shadow duration-200 hover:shadow-elevation-medium"
-                  }
-                >
+                <Card className="h-full shadow-elevation-low transition-shadow duration-200 hover:shadow-elevation-medium">
                   <CardContent className="flex h-full flex-col gap-3 pt-6">
                     <div className="flex gap-3">
                       <div
