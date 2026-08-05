@@ -43,7 +43,7 @@ describe.skipIf(!hasDb)("lockout (DB integration)", () => {
     expect(status.locked).toBe(true);
   });
 
-  it("re-locks on the first failure after a prior lock has expired (regression: used to permanently disable re-locking)", async () => {
+  it("treats an expired lock as not-locked, and restarts the failure count rather than instantly re-locking on the next failure", async () => {
     const email = freshEmail();
     for (let i = 0; i < 5; i++) {
       await lockout.recordFailedLogin(email);
@@ -55,7 +55,7 @@ describe.skipIf(!hasDb)("lockout (DB integration)", () => {
       .limit(1);
     expect(row?.lockedUntil).not.toBeNull();
 
-    // Simulate the lock having already expired (15 minutes ago) — this is
+    // Simulate the lock having already expired (one minute ago) — this is
     // exactly the state a real account is in once its lock window passes.
     await db
       .update(schema.loginAttempts)
@@ -66,9 +66,30 @@ describe.skipIf(!hasDb)("lockout (DB integration)", () => {
     const statusAfterExpiry = await lockout.checkLockout(email);
     expect(statusAfterExpiry.locked).toBe(false);
 
-    // One more failure past the (already-exceeded) threshold must re-engage
-    // the lock, not silently leave the stale, expired lockedUntil in place.
+    // One more failure past an *expired* lock must restart the count from
+    // this failure (1), not instantly re-lock off a stale count left over
+    // from before — a regression this once had: failedCount only ever
+    // increased, so it stayed >= LOCK_THRESHOLD forever after the first
+    // lock, and every single failure after that point re-locked the
+    // account for another 15 minutes, contradicting this module's own
+    // "a handful of genuine typos shouldn't cost a real user anything"
+    // design intent (see lockout.ts's file header).
     await lockout.recordFailedLogin(email);
+    [row] = await db
+      .select()
+      .from(schema.loginAttempts)
+      .where(eq(schema.loginAttempts.email, email))
+      .limit(1);
+    expect(row?.failedCount).toBe(1);
+    expect(row?.lockedUntil).toBeNull();
+    expect((await lockout.checkLockout(email)).locked).toBe(false);
+
+    // A fresh run of LOCK_THRESHOLD failures (this one plus 4 more) must
+    // still re-engage the lock — restarting the count isn't the same as
+    // disabling re-locking altogether.
+    for (let i = 0; i < 4; i++) {
+      await lockout.recordFailedLogin(email);
+    }
     [row] = await db
       .select()
       .from(schema.loginAttempts)
@@ -76,9 +97,7 @@ describe.skipIf(!hasDb)("lockout (DB integration)", () => {
       .limit(1);
     expect(row?.lockedUntil).not.toBeNull();
     expect(row!.lockedUntil!.getTime()).toBeGreaterThan(Date.now());
-
-    const statusAfterRelock = await lockout.checkLockout(email);
-    expect(statusAfterRelock.locked).toBe(true);
+    expect((await lockout.checkLockout(email)).locked).toBe(true);
   });
 
   it("resetLoginAttempts clears both the count and the lock", async () => {

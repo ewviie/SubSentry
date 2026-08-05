@@ -72,3 +72,18 @@ export const checkResendVerificationRateLimit = createRateLimiterAsync(
   RESEND_VERIFICATION_LIMIT,
   RESEND_VERIFICATION_WINDOW_MS,
 );
+
+// Aggregate bucket keyed by IP alone, same reasoning as checkLoginIpRateLimit
+// above: the IP+email bucket partitions by email, so a script sweeping many
+// different target addresses from one IP never accumulates in it, each
+// combo staying under its own fresh 3-per-15-minutes allowance. That's a
+// real cost here (each request past the CAPTCHA/lookup stage triggers a
+// genuine token issuance + outbound email send for whatever address is
+// real), not just an enumeration concern. Generous limit for the same
+// shared-IP reason as login's.
+const RESEND_VERIFICATION_IP_LIMIT = 20;
+const RESEND_VERIFICATION_IP_WINDOW_MS = 15 * 60 * 1000;
+export const checkResendVerificationIpRateLimit = createRateLimiterAsync(
+  RESEND_VERIFICATION_IP_LIMIT,
+  RESEND_VERIFICATION_IP_WINDOW_MS,
+);

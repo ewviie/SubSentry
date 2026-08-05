@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { checkVerifyEmailRateLimit, checkResendVerificationRateLimit } from "./rate-limit";
+import {
+  checkVerifyEmailRateLimit,
+  checkResendVerificationRateLimit,
+  checkResendVerificationIpRateLimit,
+} from "./rate-limit";
 
 // The generic limiter mechanics (window reset, per-key isolation) are
 // already covered by src/lib/rate-limit.test.ts, and the Redis-vs-fallback
@@ -31,5 +35,17 @@ describe("checkResendVerificationRateLimit", () => {
     for (let i = 0; i < 3; i++) await checkResendVerificationRateLimit(`${ip}:victim-a@example.com`);
     expect((await checkResendVerificationRateLimit(`${ip}:victim-a@example.com`)).allowed).toBe(false);
     expect((await checkResendVerificationRateLimit(`${ip}:victim-b@example.com`)).allowed).toBe(true);
+  });
+});
+
+describe("checkResendVerificationIpRateLimit", () => {
+  // This is the gap checkResendVerificationRateLimit alone can't catch: a
+  // script sweeping many different target emails from one IP never
+  // exhausts the per-(ip,email) bucket since each combination is fresh.
+  it("blocks a single IP sweeping many different target emails", async () => {
+    const ip = `test-ip-${Math.random()}`;
+    let lastResult;
+    for (let i = 0; i < 25; i++) lastResult = await checkResendVerificationIpRateLimit(ip);
+    expect(lastResult?.allowed).toBe(false);
   });
 });
