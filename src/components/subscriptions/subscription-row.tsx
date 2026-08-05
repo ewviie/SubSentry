@@ -37,23 +37,26 @@ function RenewalBadge({ subscription }: { subscription: Subscription }) {
     );
   }
   if (days <= 7) {
-    return <span className="text-sm font-medium text-gold">Renews in {days}d</span>;
+    return <span className="text-sm font-medium text-emerald">Renews in {days}d</span>;
   }
   return <span className="text-sm text-muted-foreground">{subscription.nextRenewalDate}</span>;
 }
 
 export function SubscriptionRow({
   subscription,
-  selected,
+  selected = false,
   onToggleSelected,
-  isDuplicate,
-  isHighCost,
+  isDuplicate = false,
+  isHighCost = false,
 }: {
   subscription: Subscription;
-  selected: boolean;
-  onToggleSelected: (id: string) => void;
-  isDuplicate: boolean;
-  isHighCost: boolean;
+  selected?: boolean;
+  // Optional — omit entirely for a read-only context (the dashboard's "All
+  // subscriptions" preview) to drop the checkbox rather than wiring a
+  // no-op handler. SubscriptionsExplorer (bulk actions) still passes both.
+  onToggleSelected?: (id: string) => void;
+  isDuplicate?: boolean;
+  isHighCost?: boolean;
 }) {
   const CategoryIcon = CATEGORY_ICONS[subscription.category];
   const monthly = monthlyCents(subscription.amountCents, subscription.billingCycle);
@@ -69,12 +72,14 @@ export function SubscriptionRow({
       )}
     >
       <div className="flex items-center gap-3">
-        <Checkbox
-          className="relative z-10"
-          checked={selected}
-          onCheckedChange={() => onToggleSelected(subscription.id)}
-          aria-label={`Select ${subscription.name}`}
-        />
+        {onToggleSelected ? (
+          <Checkbox
+            className="relative z-10"
+            checked={selected}
+            onCheckedChange={() => onToggleSelected(subscription.id)}
+            aria-label={`Select ${subscription.name}`}
+          />
+        ) : null}
         <div
           aria-hidden="true"
           className={cn(
@@ -153,9 +158,9 @@ export function SubscriptionRow({
         <Badge
           variant={
             subscription.status === "active"
-              ? "default"
+              ? "success"
               : subscription.status === "paused"
-                ? "secondary"
+                ? "warning"
                 : "outline"
           }
         >

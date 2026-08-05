@@ -1,12 +1,11 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Check, X } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { HealthScoreGauge } from "@/components/dashboard/health-score-gauge";
 import { SentryRing } from "@/components/ui/sentry-ring";
 import { fadeInUp, liftOnHover, springSnappy } from "@/lib/motion";
-import type { HealthScoreResult } from "@/lib/subscriptions/insights";
+import type { HealthScoreResult } from "@/lib/insights-engine";
 
 // The one place on the dashboard the signature ring motif reappears — this
 // is literally "SubSentry watching over your subscriptions," so the ring
@@ -23,16 +22,22 @@ export function HealthScoreCard({ result }: { result: HealthScoreResult }) {
           </div>
           <div className="min-w-0">
             <p className="text-sm font-medium text-muted-foreground">Subscription health</p>
-            <p className="mt-0.5 font-heading text-lg font-semibold">{result.label}</p>
+            <p className="mt-0.5 font-heading text-lg font-semibold">{result.rating}</p>
             <ul className="mt-2 space-y-1">
-              {result.factors.map((factor) => (
-                <li className="flex items-center gap-1.5 text-xs text-muted-foreground" key={factor.label}>
-                  {factor.passed ? (
-                    <Check className="size-3.5 shrink-0 text-gold" aria-hidden="true" />
-                  ) : (
-                    <X className="size-3.5 shrink-0 text-destructive" aria-hidden="true" />
-                  )}
-                  <span className={factor.passed ? "" : "text-foreground"}>{factor.label}</span>
+              {result.breakdown.slice(0, 3).map((entry) => (
+                <li className="flex items-baseline gap-1.5 text-xs" key={entry.label}>
+                  <span
+                    className={
+                      entry.delta > 0
+                        ? "shrink-0 font-mono font-medium text-emerald"
+                        : entry.delta < 0
+                          ? "shrink-0 font-mono font-medium text-destructive"
+                          : "shrink-0 font-mono font-medium text-muted-foreground"
+                    }
+                  >
+                    {entry.delta > 0 ? `+${entry.delta}` : entry.delta}
+                  </span>
+                  <span className="text-muted-foreground">{entry.label}</span>
                 </li>
               ))}
             </ul>

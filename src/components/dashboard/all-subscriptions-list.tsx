@@ -5,11 +5,24 @@ import { Inbox } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
-import { formatCents } from "@/lib/subscriptions/money";
-import { fadeQuick } from "@/lib/motion";
+import { SubscriptionRow } from "@/components/subscriptions/subscription-row";
+import { getDuplicateFlaggedIds, getHighCostFlaggedIds } from "@/lib/subscriptions/filters";
+import { staggerContainer } from "@/lib/motion";
 import type { Subscription } from "@/lib/db/schema";
+import type { ComputedInsight } from "@/lib/subscriptions/insights";
 
-export function AllSubscriptionsList({ subscriptions }: { subscriptions: Subscription[] }) {
+// Reuses SubscriptionRow (category icon, status badge, monthly/yearly cost,
+// renewal urgency, duplicate/high-cost flags) instead of the bare
+// name+amount list this used to be — same component the full subscriptions
+// page uses, just without the bulk-select checkbox (SubscriptionRow's
+// onToggleSelected is optional for exactly this read-only-preview case).
+export function AllSubscriptionsList({
+  subscriptions,
+  insights,
+}: {
+  subscriptions: Subscription[];
+  insights: ComputedInsight[];
+}) {
   if (subscriptions.length === 0) {
     return (
       <EmptyState
@@ -31,30 +44,26 @@ export function AllSubscriptionsList({ subscriptions }: { subscriptions: Subscri
     );
   }
 
+  const duplicateIds = getDuplicateFlaggedIds(insights);
+  const highCostIds = getHighCostFlaggedIds(insights);
+
   return (
-    <ul className="mt-4 divide-y divide-border rounded-lg border border-border">
+    <motion.ul
+      variants={staggerContainer(0.05)}
+      initial="hidden"
+      animate="visible"
+      className="mt-4 space-y-2"
+    >
       <AnimatePresence initial={false}>
         {subscriptions.slice(0, 6).map((s) => (
-          <motion.li
+          <SubscriptionRow
             key={s.id}
-            layout
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={fadeQuick}
-          >
-            <Link
-              href={`/subscriptions/${s.id}`}
-              className="flex items-center justify-between px-4 py-3 text-sm hover:bg-muted"
-            >
-              <span className="font-medium">{s.name}</span>
-              <span className="font-mono text-muted-foreground">
-                {formatCents(s.amountCents, s.currency)}
-              </span>
-            </Link>
-          </motion.li>
+            subscription={s}
+            isDuplicate={duplicateIds.has(s.id)}
+            isHighCost={highCostIds.has(s.id)}
+          />
         ))}
       </AnimatePresence>
-    </ul>
+    </motion.ul>
   );
 }

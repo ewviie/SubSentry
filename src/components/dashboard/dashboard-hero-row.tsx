@@ -4,7 +4,8 @@ import { motion } from "framer-motion";
 import { SavingsCard } from "@/components/dashboard/savings-card";
 import { HealthScoreCard } from "@/components/dashboard/health-score-card";
 import { revealViewport, staggerContainer } from "@/lib/motion";
-import type { ComputedInsight, HealthScoreResult } from "@/lib/subscriptions/insights";
+import type { ComputedInsight } from "@/lib/subscriptions/insights";
+import type { HealthScoreResult } from "@/lib/insights-engine";
 
 export function DashboardHeroRow({
   potentialYearlySavingsCents,

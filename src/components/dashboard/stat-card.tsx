@@ -15,7 +15,7 @@ export function StatCard({
   label: string;
   accentClassName?: string;
   // The one number a user actually opens this page to check gets a
-  // visually dominant treatment — a gold top rule, a larger figure, more
+  // visually dominant treatment — a emerald top rule, a larger figure, more
   // breathing room — so it reads first. Everything else stays plain: making
   // every card shout equally is the same as none of them shouting at all.
   emphasis?: boolean;
@@ -27,7 +27,7 @@ export function StatCard({
       <Card
         className={cn(
           "relative h-full overflow-hidden shadow-elevation-low transition-shadow duration-200 hover:shadow-elevation-medium",
-          emphasis && "shadow-sm ring-foreground/[0.08] before:absolute before:inset-x-0 before:top-0 before:h-[3px] before:bg-gold before:content-['']",
+          emphasis && "shadow-sm ring-foreground/[0.08] before:absolute before:inset-x-0 before:top-0 before:h-[3px] before:bg-emerald before:content-['']",
         )}
       >
         <CardHeader>
