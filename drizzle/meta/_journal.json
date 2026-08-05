@@ -29,6 +29,27 @@
       "when": 1785817105182,
       "tag": "0003_flaky_kree",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785843374575,
+      "tag": "0004_small_blink",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1785848794984,
+      "tag": "0005_giant_lionheart",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785867370803,
+      "tag": "0006_married_sinister_six",
+      "breakpoints": true
     }
   ]
 }

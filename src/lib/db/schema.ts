@@ -8,6 +8,7 @@ import {
   index,
   uniqueIndex,
   jsonb,
+  boolean,
 } from "drizzle-orm/pg-core";
 import { SUBSCRIPTION_SOURCES } from "@/lib/subscriptions/source";
 
@@ -23,6 +24,14 @@ export const users = pgTable("users", {
   // a subscription-cancelled event back to a user without ever storing a
   // Stripe subscription id we'd otherwise have to keep in sync.
   stripeCustomerId: text("stripe_customer_id"),
+  // Column-level default is `true`, not `false` — this backfills every
+  // existing row (created before email verification existed) as already
+  // verified, so this migration can't lock out current users. New signups
+  // explicitly override this to `false` in the insert (see
+  // api/auth/signup/route.ts); the column default only governs rows that
+  // don't set it themselves.
+  emailVerified: boolean("email_verified").notNull().default(true),
+  emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -160,6 +169,50 @@ export const bankConnections = pgTable(
   ],
 );
 
+// DB-backed brute-force tracking, keyed by the normalized login email —
+// deliberately NOT in-memory like src/lib/rate-limit.ts's limiters. A
+// lockout is a security control, not just abuse-shedding: it must survive a
+// process restart and be shared across horizontally-scaled instances, or an
+// attacker defeats it just by outlasting/round-robining processes. One row
+// per email that has ever failed a login; a clean login resets it to zero
+// rather than leaving stale failure history.
+export const loginAttempts = pgTable("login_attempts", {
+  email: text("email").primaryKey(),
+  failedCount: integer("failed_count").notNull().default(0),
+  lockedUntil: timestamp("locked_until", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// One row per outstanding email-verification token. Truly single-use: a
+// successful verification deletes its row (src/lib/auth/email-verification.ts)
+// rather than flagging it used, so there's no "used" state to accidentally
+// treat as still-valid. Only the sha256 hash is ever stored — same
+// reasoning as sessions.tokenHash: a DB leak alone can't hand out a working
+// verification link.
+export const emailVerificationTokens = pgTable(
+  "email_verification_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // Unique, not just indexed: issueVerificationToken() upserts on this
+    // column (see src/lib/auth/email-verification.ts) so "issue a fresh
+    // token" is one atomic statement instead of a separate delete then
+    // insert — the prior two-statement version left a window where two
+    // concurrent issue calls for the same user (e.g. a double-clicked
+    // resend) could both land a row, leaving more than one valid link
+    // outstanding at once. The unique constraint is what makes the upsert's
+    // ON CONFLICT target well-defined; it also makes "at most one
+    // outstanding token per user" a DB-enforced invariant, not just a
+    // convention this module happens to follow.
+    userId: uuid("user_id")
+      .notNull()
+      .unique()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull().unique(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+);
+
 export const checkoutSessions = pgTable("checkout_sessions", {
   id: text("id").primaryKey(),
   userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
@@ -187,3 +240,5 @@ export type NewImport = typeof imports.$inferInsert;
 export type BankConnection = typeof bankConnections.$inferSelect;
 export type NewBankConnection = typeof bankConnections.$inferInsert;
 export type CheckoutSession = typeof checkoutSessions.$inferSelect;
+export type LoginAttempt = typeof loginAttempts.$inferSelect;
+export type EmailVerificationToken = typeof emailVerificationTokens.$inferSelect;
