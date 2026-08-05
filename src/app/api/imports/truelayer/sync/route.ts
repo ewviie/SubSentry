@@ -11,6 +11,7 @@ import {
 } from "@/lib/imports/bank-connections";
 import { analyzeParsedTransactions } from "@/lib/imports/analyze";
 import { listSubscriptions } from "@/lib/subscriptions/queries";
+import { logServerError } from "@/lib/observability/log-error";
 
 // TrueLayer access tokens expire in ~90 minutes (unlike Plaid's, which don't
 // expire the same way) — refresh proactively whenever less than this much
@@ -47,7 +48,8 @@ export async function POST() {
   let accessToken: string;
   try {
     accessToken = decryptAccessToken(connection);
-  } catch {
+  } catch (error) {
+    logServerError("imports.truelayer.sync.decrypt", error, { userId: session.user.id });
     return NextResponse.json(
       { error: "reconnect_required", message: "Your stored bank connection can no longer be read. Reconnect your bank." },
       { status: 400 },
@@ -78,6 +80,7 @@ export async function POST() {
           { status: 400 },
         );
       }
+      logServerError("imports.truelayer.sync.refresh", error, { userId: session.user.id });
       return NextResponse.json(
         { error: "truelayer_error", message: "Couldn't fetch transactions from TrueLayer. Try again." },
         { status: 502 },
@@ -100,7 +103,8 @@ export async function POST() {
   let parseResult;
   try {
     parseResult = await trueLayerImportProvider.fetchTransactions!(accessToken);
-  } catch {
+  } catch (error) {
+    logServerError("imports.truelayer.sync.fetch", error, { userId: session.user.id });
     return NextResponse.json(
       { error: "truelayer_error", message: "Couldn't fetch transactions from TrueLayer. Try again." },
       { status: 502 },

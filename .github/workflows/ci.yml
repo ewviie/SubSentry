@@ -1,0 +1,133 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancels a stale run when new commits land on the same PR — avoids wasting
+# CI minutes running an already-superseded commit's checks to completion.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # A real Postgres service (below), not the local PGlite dev DB — CI runs
+  # concurrently across jobs/runners and PGlite's socket server is
+  # documented elsewhere in this repo (src/lib/db/index.ts) as fragile
+  # under any real concurrency. A disposable Postgres service container
+  # sidesteps that class of flakiness entirely rather than working around it.
+  DATABASE_URL: postgres://postgres:postgres@localhost:5432/subsentry_ci
+  # Deterministic 32-byte key so bank-connection token encryption paths
+  # exercise real code in CI without a production secret ever being
+  # anywhere near this repo.
+  TOKEN_ENCRYPTION_KEY: dGVzdC1vbmx5LTMyLWJ5dGUta2V5LWZvci1jaS1vbmx5ISE=
+
+jobs:
+  lint-typecheck-test-build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: subsentry_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run database migrations
+        run: npm run db:migrate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit + integration tests
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: lint-typecheck-test-build
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: subsentry_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run db:migrate
+      - run: npx playwright install --with-deps chromium
+
+      - name: E2E tests
+        run: npm run test:e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # gitleaks scans history, not just the working tree
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # A flat `--audit-level=high` would fail this exact repo state as-is
+      # today (a pre-existing high/moderate finding set — see
+      # PRODUCTION_READINESS_REPORT.md and npm-audit-baseline.json), and
+      # `--audit-level=critical` (the prior gate) silences a genuinely NEW
+      # high-severity finding landing in an unrelated dependency bump —
+      # exactly what this job exists to catch. check-npm-audit.mjs runs the
+      # real audit and only fails for a high/critical finding in a package
+      # not already listed in npm-audit-baseline.json.
+      - run: node scripts/check-npm-audit.mjs

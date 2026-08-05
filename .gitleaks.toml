@@ -1,0 +1,16 @@
+title = "SubSentry gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known-fake local-dev-only placeholders, not real secrets"
+regexes = [
+  # .env.example's documented local PGlite dev-server placeholder — the
+  # actual value the repo's own README/scripts tell every developer to use
+  # for local dev, never a real credential.
+  '''postgres://doubloon:doubloon@127\.0\.0\.1:55432/doubloon''',
+]
+paths = [
+  '''\.env\.example''',
+]

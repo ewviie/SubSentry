@@ -4,6 +4,7 @@ import { getSession } from "@/lib/auth/session";
 import { checkBankConnectRateLimit } from "@/lib/imports/rate-limit";
 import { isPlaidConfigured, getPlaidClient } from "@/lib/imports/plaid-client";
 import { createBankConnection } from "@/lib/imports/bank-connections";
+import { logServerError } from "@/lib/observability/log-error";
 
 // Plaid Link's own onSuccess callback already hands the client the
 // institution's display name in its metadata — no need for a second
@@ -48,7 +49,8 @@ export async function POST(request: Request) {
       accessToken: response.data.access_token,
     });
     return NextResponse.json({ connected: true });
-  } catch {
+  } catch (error) {
+    logServerError("imports.plaid.exchange", error, { userId: session.user.id });
     return NextResponse.json(
       { error: "plaid_error", message: "Couldn't finish connecting your bank. Try again." },
       { status: 502 },

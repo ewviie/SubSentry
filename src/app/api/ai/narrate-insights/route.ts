@@ -4,6 +4,7 @@ import { listSubscriptions } from "@/lib/subscriptions/queries";
 import { computeInsights } from "@/lib/subscriptions/insights";
 import { getAIProvider } from "@/lib/ai/provider";
 import { checkAndConsumeRateLimit } from "@/lib/ai/rate-limit";
+import { logServerError } from "@/lib/observability/log-error";
 
 // Deliberately recomputes insights server-side from the session's own data
 // rather than accepting them in the request body — otherwise this endpoint
@@ -33,7 +34,8 @@ export async function POST() {
   try {
     const narrations = await getAIProvider().narrateInsights(insights);
     return NextResponse.json({ narrations });
-  } catch {
+  } catch (error) {
+    logServerError("ai.narrate-insights", error, { userId: session.user.id });
     return NextResponse.json({ error: "narrate_failed", message: "Couldn't reach the AI. Try again." }, { status: 502 });
   }
 }

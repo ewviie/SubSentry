@@ -6,8 +6,16 @@ import { getImportProvider, IMPORT_SOURCE_IDS, type ImportSourceId } from "@/lib
 import { checkImportAnalyzeRateLimit } from "@/lib/imports/rate-limit";
 import { analyzeParsedTransactions } from "@/lib/imports/analyze";
 import { listSubscriptions } from "@/lib/subscriptions/queries";
+import { isContentLengthWithinLimit } from "@/lib/http/request-size";
 
 const sourceSchema = z.enum(IMPORT_SOURCE_IDS);
+
+// Above every provider's own maxFileSizeBytes (5MB) — this is just a fast
+// pre-parse rejection so an oversized upload never reaches
+// request.formData(), which buffers the whole multipart body into memory
+// before any provider-specific size check gets to run. The provider's own
+// limit (checked below, after parsing) stays the authoritative one.
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 // Never writes to the DB — same "return drafts, don't persist" contract
 // /api/subscriptions/quick-add already establishes. Nothing about the
@@ -23,6 +31,10 @@ export async function POST(request: Request) {
       { error: "rate_limited", message: "Too many imports analyzed recently. Try again in a bit." },
       { status: 429 },
     );
+  }
+
+  if (!isContentLengthWithinLimit(request, MAX_UPLOAD_BYTES)) {
+    return NextResponse.json({ error: "payload_too_large", message: "File is too large." }, { status: 413 });
   }
 
   let formData: FormData;

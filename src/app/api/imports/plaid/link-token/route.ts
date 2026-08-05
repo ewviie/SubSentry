@@ -3,6 +3,7 @@ import { getSession } from "@/lib/auth/session";
 import { checkBankConnectRateLimit } from "@/lib/imports/rate-limit";
 import { isPlaidConfigured, getPlaidClient } from "@/lib/imports/plaid-client";
 import { PLAID_LINK_PRODUCTS, PLAID_LINK_COUNTRY_CODES, LOOKBACK_DAYS } from "@/lib/imports/providers/plaid-provider";
+import { logServerError } from "@/lib/observability/log-error";
 
 // Creates the short-lived Link token the client-side Plaid Link SDK needs
 // to open its own connect UI — the client never sees PLAID_CLIENT_ID/SECRET
@@ -37,7 +38,8 @@ export async function POST() {
       user: { client_user_id: session.user.id },
     });
     return NextResponse.json({ linkToken: response.data.link_token });
-  } catch {
+  } catch (error) {
+    logServerError("imports.plaid.link-token", error, { userId: session.user.id });
     return NextResponse.json(
       { error: "plaid_error", message: "Couldn't start the bank connection. Try again." },
       { status: 502 },
