@@ -10,6 +10,7 @@ import { PricingSection } from "@/components/landing/pricing-section";
 import { FaqSection } from "@/components/landing/faq-section";
 import { FinalCtaSection } from "@/components/landing/final-cta-section";
 import { LandingFooter } from "@/components/landing/landing-footer";
+import { isBetaAllAccess } from "@/lib/billing/plan";
 
 export default async function Home() {
   // Same authoritative check used by (auth)/layout.tsx — a logged-in visitor
@@ -17,6 +18,11 @@ export default async function Home() {
   // of a "start free" pitch for something they already have.
   const session = await getSession();
   if (session) redirect("/dashboard");
+
+  // Pricing stays fully built (see pricing-section.tsx) — just not rendered
+  // during the free beta. Flip isBetaAllAccess() off in lib/billing/plan.ts
+  // and this section reappears with no other change needed.
+  const showPricing = !isBetaAllAccess();
 
   return (
     <>
@@ -27,7 +33,7 @@ export default async function Home() {
         <TrustSection />
         <FeaturesSection />
         <HowItWorksSection />
-        <PricingSection />
+        {showPricing ? <PricingSection /> : null}
         <FaqSection />
         <FinalCtaSection />
       </main>

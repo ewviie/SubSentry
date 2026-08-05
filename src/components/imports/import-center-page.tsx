@@ -77,9 +77,14 @@ function StepProgress({ step }: { step: Step }) {
         const completed = i < currentIndex;
         const active = i === currentIndex;
         return (
-          <li key={s} className="flex flex-1 items-center last:flex-none">
+          <li
+            key={s}
+            aria-current={active ? "step" : undefined}
+            className="flex flex-1 items-center last:flex-none"
+          >
             <div className="flex items-center gap-2">
               <span
+                aria-hidden="true"
                 className={cn(
                   "flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-medium transition-colors",
                   completed && "bg-primary text-primary-foreground",
@@ -91,6 +96,7 @@ function StepProgress({ step }: { step: Step }) {
               </span>
               <span className={cn("text-sm font-medium", active ? "text-foreground" : "text-muted-foreground")}>
                 {STEP_LABELS[s]}
+                {completed ? <span className="sr-only"> (completed)</span> : null}
               </span>
             </div>
             {i < STEP_ORDER.length - 1 ? (

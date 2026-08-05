@@ -8,12 +8,21 @@
     --font-heading: var(--font-heading);
     --font-sans: var(--font-sans);
     --font-mono: var(--font-mono);
-    --color-gold: var(--gold);
-    --color-gold-foreground: var(--gold-foreground);
-    --color-gold-muted: var(--gold-muted);
+    --color-emerald: var(--emerald);
+    --color-emerald-foreground: var(--emerald-foreground);
+    --color-emerald-muted: var(--emerald-muted);
     --color-ai: var(--ai);
     --color-ai-foreground: var(--ai-foreground);
     --color-ai-muted: var(--ai-muted);
+    --color-success: var(--success);
+    --color-success-foreground: var(--success-foreground);
+    --color-success-muted: var(--success-muted);
+    --color-warning: var(--warning);
+    --color-warning-foreground: var(--warning-foreground);
+    --color-warning-muted: var(--warning-muted);
+    --color-info: var(--info);
+    --color-info-foreground: var(--info-foreground);
+    --color-info-muted: var(--info-muted);
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -77,34 +86,54 @@
     --text-h3--line-height: 1.3;
 }
 
+/* Financial-number convention — this was already consistently
+   `font-mono tabular-nums` (sometimes with a size/weight/color variant on
+   top) across ~15 call sites (stat cards, savings figures, table cells,
+   the health score gauge) before this utility existed; naming it here
+   makes the convention explicit and discoverable instead of tribal
+   knowledge copy-pasted between files. Existing call sites are left as-is
+   (they're already correct, and a mechanical rename across 15 files for a
+   purely cosmetic win isn't worth the regression risk) — new/redesigned
+   financial-number displays should reach for this instead of re-deriving
+   the two-class combo. */
+@utility font-financial {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
 :root {
-    /* Cool slate-tinted neutrals rather than pure gray — reads as premium
-       fintech, not default-template gray. Primary is near-black navy (trust,
-       high contrast); gold and violet are reserved as deliberate accents
-       (gold = brand/coin motif, violet = AI-generated content) rather than
-       being spread across every semantic color, so they stay legible signals
-       instead of decoration. */
-    --background: oklch(0.985 0.002 247.858);
-    --foreground: oklch(0.129 0.042 264.695);
+    /* True neutral grays (zero chroma), not the prior cool slate tint —
+       monochrome base per this round's direction (Linear/Vercel-style:
+       restrained black/white/gray, exactly one color accent doing real
+       work instead of decoration). Primary flips to literal black/white
+       between modes rather than a tinted near-black; emerald is the one
+       accent, reserved for the brand mark, financial-emphasis figures, and
+       focus rings — never spread across incidental UI the way a second or
+       third hue would be. Violet (--ai, below) stays: it marks a distinct,
+       genuinely different thing (AI-generated content, not brand emphasis)
+       and wasn't part of what this palette change was asked to fix. */
+    --background: oklch(0.99 0 0);
+    --foreground: oklch(0.145 0 0);
     --card: oklch(1 0 0);
-    --card-foreground: oklch(0.129 0.042 264.695);
+    --card-foreground: oklch(0.145 0 0);
     --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.129 0.042 264.695);
-    --primary: oklch(0.129 0.042 264.695);
-    --primary-foreground: oklch(0.984 0.003 247.858);
-    --secondary: oklch(0.968 0.007 247.896);
-    --secondary-foreground: oklch(0.208 0.042 265.755);
-    --muted: oklch(0.968 0.007 247.896);
-    /* 0.554 measured at 4.35:1 against muted/secondary-tinted surfaces
-       (e.g. card footers) — fails WCAG AA's 4.5:1 minimum for normal text.
-       0.50 measures ~5.5:1 there, comfortably passing. */
-    --muted-foreground: oklch(0.5 0.046 257.417);
-    --accent: oklch(0.968 0.007 247.896);
-    --accent-foreground: oklch(0.208 0.042 265.755);
+    --popover-foreground: oklch(0.145 0 0);
+    --primary: oklch(0.145 0 0);
+    --primary-foreground: oklch(0.985 0 0);
+    --secondary: oklch(0.97 0 0);
+    --secondary-foreground: oklch(0.205 0 0);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.48 0 0);
+    --accent: oklch(0.97 0 0);
+    --accent-foreground: oklch(0.205 0 0);
     --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.929 0.013 255.508);
-    --input: oklch(0.929 0.013 255.508);
-    --ring: oklch(0.704 0.04 256.788);
+    --border: oklch(0.9 0 0);
+    --input: oklch(0.9 0 0);
+    /* Emerald, not neutral — focus rings are exactly where a brand accent
+       earns its keep (an a11y-critical moment that should stand out), so
+       this is the one non-decorative use of color outside the emerald
+       token's own badges/emphasis usages. */
+    --ring: oklch(0.5 0.14 162);
     /* Same WCAG fix as --muted-foreground/--gold/--ai above, applied to
        every category color: each is used as text-chart-N on its own
        bg-chart-N/10 tint (category badges/icon chips, category-spend-bar
@@ -128,81 +157,114 @@
     --chart-6: oklch(0.46 0.19 250);
     --radius: 0.625rem;
     --sidebar: oklch(1 0 0);
-    --sidebar-foreground: oklch(0.129 0.042 264.695);
-    --sidebar-primary: oklch(0.129 0.042 264.695);
-    --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
-    --sidebar-accent: oklch(0.968 0.007 247.896);
-    --sidebar-accent-foreground: oklch(0.208 0.042 265.755);
-    --sidebar-border: oklch(0.929 0.013 255.508);
-    --sidebar-ring: oklch(0.704 0.04 256.788);
-    /* 0.666 measured 2.87:1 as text-gold against --gold-muted (fails WCAG
-       AA's 4.5:1) and only 3.05:1 for --gold-foreground against a bg-gold
-       badge. 0.52 measures 5.2–5.5:1 across every text-gold/bg-gold pairing
-       in the app, with dark mode's --gold left untouched since it already
-       passes (8.7:1+). Same bug class as --muted-foreground above, just
-       missed for this token. */
-    --gold: oklch(0.52 0.179 58.318);
-    --gold-foreground: oklch(0.984 0.003 247.858);
-    --gold-muted: oklch(0.962 0.059 95.617);
-    /* Same fix, same reasoning: 0.606 measured 3.70:1 as text-ai against
-       --ai-muted; 0.52 measures 5.28:1. */
+    --sidebar-foreground: oklch(0.145 0 0);
+    --sidebar-primary: oklch(0.145 0 0);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.97 0 0);
+    --sidebar-accent-foreground: oklch(0.205 0 0);
+    --sidebar-border: oklch(0.9 0 0);
+    --sidebar-ring: oklch(0.5 0.14 162);
+    /* Emerald — the one accent this palette keeps, replacing the prior
+       gold/coin motif. Same "verify real rendered contrast" discipline as
+       the fixes this comment block used to describe for gold: 0.5 measures
+       comfortably past 4.5:1 both as text-emerald on emerald-muted and as
+       plain body text on card/background. */
+    --emerald: oklch(0.5 0.14 162);
+    --emerald-foreground: oklch(0.985 0 0);
+    --emerald-muted: oklch(0.95 0.03 162);
+    /* Violet stays — a genuinely different signal (AI-generated content),
+       not a second brand accent, and wasn't part of what this repaint
+       changed. 0.52 already measured 5.28:1 against --ai-muted. */
     --ai: oklch(0.52 0.25 292.717);
     --ai-foreground: oklch(0.984 0.003 247.858);
     --ai-muted: oklch(0.943 0.029 294.588);
-    --elevation-low: 0 1px 2px oklch(0.129 0.042 264.695 / 0.04), 0 1px 1px oklch(0.129 0.042 264.695 / 0.03);
-    --elevation-medium: 0 12px 32px -12px oklch(0.129 0.042 264.695 / 0.14), 0 4px 12px -4px oklch(0.129 0.042 264.695 / 0.08);
-    --elevation-high: 0 32px 64px -16px oklch(0.129 0.042 264.695 / 0.2), 0 12px 24px -8px oklch(0.129 0.042 264.695 / 0.1);
-    --elevation-glow: 0 0 0 1px oklch(0.666 0.179 58.318 / 0.15), 0 8px 24px -8px oklch(0.666 0.179 58.318 / 0.25);
+    /* Semantic success/warning/info triplet — unchanged hues/values from
+       the prior pass (already contrast-verified live), except success now
+       intentionally sits close to the new emerald brand accent's hue
+       (155° vs. emerald's 162°) rather than needing to stay clearly apart
+       from a gold/financial-emphasis color that no longer exists — some
+       thematic overlap between "brand" and "success/positive" is apt for a
+       savings app, not a collision to avoid anymore. */
+    --success: oklch(0.45 0.15 155);
+    --success-foreground: oklch(0.984 0.003 247.858);
+    --success-muted: oklch(0.955 0.045 155);
+    --warning: oklch(0.5 0.19 45);
+    --warning-foreground: oklch(0.984 0.003 247.858);
+    --warning-muted: oklch(0.96 0.06 55);
+    --info: oklch(0.48 0.15 250);
+    --info-foreground: oklch(0.984 0.003 247.858);
+    --info-muted: oklch(0.955 0.03 250);
+    --elevation-low: 0 1px 2px oklch(0.145 0 0 / 0.04), 0 1px 1px oklch(0.145 0 0 / 0.03);
+    --elevation-medium: 0 12px 32px -12px oklch(0.145 0 0 / 0.14), 0 4px 12px -4px oklch(0.145 0 0 / 0.08);
+    --elevation-high: 0 32px 64px -16px oklch(0.145 0 0 / 0.2), 0 12px 24px -8px oklch(0.145 0 0 / 0.1);
+    --elevation-glow: 0 0 0 1px oklch(0.62 0.15 162 / 0.15), 0 8px 24px -8px oklch(0.62 0.15 162 / 0.25);
 }
 
 .dark {
     /* Deep navy background (not pure black) so the gold accent has room to
        pop — the standard dark-fintech pairing (dark navy + warm accent). */
-    --background: oklch(0.208 0.042 265.755);
-    --foreground: oklch(0.984 0.003 247.858);
-    --card: oklch(0.279 0.041 260.031);
-    --card-foreground: oklch(0.984 0.003 247.858);
-    --popover: oklch(0.279 0.041 260.031);
-    --popover-foreground: oklch(0.984 0.003 247.858);
-    --primary: oklch(0.769 0.188 70.08);
-    --primary-foreground: oklch(0.279 0.077 45.635);
-    --secondary: oklch(0.372 0.044 257.287);
-    --secondary-foreground: oklch(0.984 0.003 247.858);
-    --muted: oklch(0.279 0.041 260.031);
-    --muted-foreground: oklch(0.704 0.04 256.788);
-    --accent: oklch(0.372 0.044 257.287);
-    --accent-foreground: oklch(0.984 0.003 247.858);
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.205 0 0);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.205 0 0);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.985 0 0);
+    --primary-foreground: oklch(0.205 0 0);
+    --secondary: oklch(0.269 0 0);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+    --accent: oklch(0.269 0 0);
+    --accent-foreground: oklch(0.985 0 0);
     --destructive: oklch(0.704 0.191 22.216);
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.554 0.046 257.417);
+    --ring: oklch(0.72 0.16 162);
     --chart-1: oklch(0.828 0.189 84.429);
     --chart-2: oklch(0.702 0.183 293.541);
     --chart-3: oklch(0.696 0.17 162.48);
     --chart-4: oklch(0.704 0.191 22.216);
     --chart-5: oklch(0.704 0.04 256.788);
     --chart-6: oklch(0.72 0.17 250);
-    --sidebar: oklch(0.18 0.04 265.755);
-    --sidebar-foreground: oklch(0.984 0.003 247.858);
-    --sidebar-primary: oklch(0.769 0.188 70.08);
-    --sidebar-primary-foreground: oklch(0.279 0.077 45.635);
-    --sidebar-accent: oklch(0.372 0.044 257.287);
-    --sidebar-accent-foreground: oklch(0.984 0.003 247.858);
+    --sidebar: oklch(0.18 0 0);
+    --sidebar-foreground: oklch(0.985 0 0);
+    --sidebar-primary: oklch(0.985 0 0);
+    --sidebar-primary-foreground: oklch(0.205 0 0);
+    --sidebar-accent: oklch(0.269 0 0);
+    --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.554 0.046 257.417);
-    --gold: oklch(0.828 0.189 84.429);
-    --gold-foreground: oklch(0.279 0.077 45.635);
-    --gold-muted: oklch(0.279 0.077 45.635 / 25%);
+    --sidebar-ring: oklch(0.72 0.16 162);
+    --emerald: oklch(0.72 0.16 162);
+    --emerald-foreground: oklch(0.145 0 0);
+    --emerald-muted: oklch(0.72 0.16 162 / 20%);
     --ai: oklch(0.702 0.183 293.541);
     --ai-foreground: oklch(0.129 0.042 264.695);
     --ai-muted: oklch(0.606 0.25 292.717 / 20%);
-    /* Black shadows disappear against a dark navy background, so dark-mode
+    /* Same hues as :root above, lifted to dark mode's usual higher-lightness,
+       higher-chroma range (a color that reads correctly at L=0.45 on a
+       near-white background needs to be much lighter to read at the same
+       perceptual weight on a near-black one) — foreground reuses the same
+       dark near-foreground tone as emerald-foreground above, muted follows
+       an alpha-over-background pattern rather than a solid pale tint (a
+       solid pale tint would read as a light-mode surface accidentally left
+       in a dark UI). */
+    --success: oklch(0.75 0.15 155);
+    --success-foreground: oklch(0.129 0.042 264.695);
+    --success-muted: oklch(0.55 0.14 155 / 20%);
+    --warning: oklch(0.78 0.16 55);
+    --warning-foreground: oklch(0.129 0.042 264.695);
+    --warning-muted: oklch(0.55 0.15 50 / 20%);
+    --info: oklch(0.72 0.13 250);
+    --info-foreground: oklch(0.129 0.042 264.695);
+    --info-muted: oklch(0.5 0.13 250 / 20%);
+    /* Black shadows disappear against a near-black background, so dark-mode
        elevation leans on a hairline highlight (a sliver of the foreground
        color) plus a much deeper, more diffuse shadow instead. */
     --elevation-low: 0 1px 2px oklch(0 0 0 / 0.3), 0 1px 1px oklch(0 0 0 / 0.2);
     --elevation-medium: 0 16px 40px -12px oklch(0 0 0 / 0.5), 0 4px 16px -4px oklch(0 0 0 / 0.3), 0 0 0 1px oklch(1 0 0 / 0.04);
     --elevation-high: 0 32px 80px -16px oklch(0 0 0 / 0.6), 0 12px 32px -8px oklch(0 0 0 / 0.35), 0 0 0 1px oklch(1 0 0 / 0.06);
-    --elevation-glow: 0 0 0 1px oklch(0.828 0.189 84.429 / 0.25), 0 8px 32px -8px oklch(0.828 0.189 84.429 / 0.35);
+    --elevation-glow: 0 0 0 1px oklch(0.72 0.16 162 / 0.25), 0 8px 32px -8px oklch(0.72 0.16 162 / 0.35);
 }
 
 @layer base {

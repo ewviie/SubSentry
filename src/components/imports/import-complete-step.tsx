@@ -13,7 +13,7 @@ export function ImportCompleteStep({
 }) {
   return (
     <div className="flex flex-col items-center gap-4 py-12 text-center">
-      <div className="flex size-12 items-center justify-center rounded-full bg-gold-muted text-gold">
+      <div className="flex size-12 items-center justify-center rounded-full bg-emerald-muted text-emerald">
         <CheckCircle2 className="size-6" aria-hidden="true" />
       </div>
       <div className="space-y-1">

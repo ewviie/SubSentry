@@ -5,7 +5,7 @@ import { formatCents } from "@/lib/subscriptions/money";
 import { cn } from "@/lib/utils";
 import type { RenewalMonthEntry } from "@/lib/subscriptions/analytics";
 
-// A 12-bar time series, one flat hue (gold — this app's established "spend"
+// A 12-bar time series, one flat hue (emerald — this app's established "spend"
 // accent) since each bar's identity is its position in time, not a
 // category — a sequential ramp or per-bar hue here would wrongly imply
 // each month is a different "kind" of thing. Per-bar hover tooltip, same
@@ -40,8 +40,8 @@ export function RenewalsTimelineChart({ months }: { months: RenewalMonthEntry[] 
                 <button
                   type="button"
                   className={cn(
-                    "h-full w-full rounded-t-sm bg-gold/70 transition-colors hover:bg-gold",
-                    hoverIndex === i && "bg-gold",
+                    "h-full w-full rounded-t-sm bg-emerald/70 transition-colors hover:bg-emerald",
+                    hoverIndex === i && "bg-emerald",
                   )}
                   onMouseEnter={() => setHoverIndex(i)}
                   onFocus={() => setHoverIndex(i)}
