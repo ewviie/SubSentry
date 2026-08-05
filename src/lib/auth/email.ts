@@ -32,6 +32,10 @@ export function isEmailSendingConfigured(): boolean {
 // squeezing out one more retry.
 const MAX_SEND_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 300;
+// Without a timeout, a hung Resend call would hold the signup/resend
+// request open indefinitely instead of hitting the retry/failure path
+// below like a normal network error does.
+const SEND_TIMEOUT_MS = 5000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -77,6 +81,7 @@ export async function sendVerificationEmail(email: string, rawToken: string): Pr
           subject: "Verify your SubSentry email",
           html: `<p>Confirm your email to finish setting up SubSentry:</p><p><a href="${verificationUrl}">${verificationUrl}</a></p><p>This link expires in 24 hours.</p>`,
         }),
+        signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
       });
     } catch (error) {
       // Network error (DNS, connection reset, timeout) — always transient
