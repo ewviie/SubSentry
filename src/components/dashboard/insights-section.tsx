@@ -94,7 +94,7 @@ export function InsightsSection({ insights }: { insights: ComputedInsight[] }) {
                 transition={springSnappy}
               >
                 <Card className="h-full shadow-elevation-low transition-shadow duration-200 hover:shadow-elevation-medium">
-                  <CardContent className="flex h-full flex-col gap-3 pt-6">
+                  <CardContent className="flex h-full flex-col gap-3 pt-4">
                     <div className="flex gap-3">
                       <div
                         className={
