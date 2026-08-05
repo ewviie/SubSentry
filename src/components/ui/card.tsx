@@ -19,7 +19,7 @@ function Card({
         // insight tomorrow) composes one primitive instead of re-deriving
         // the same border/shadow/ring combination per usage — this exact
         // class list used to be hand-assembled inline in Settings.
-        highlight && "border-emerald/30 shadow-elevation-glow ring-1 ring-emerald/20",
+        highlight && "border border-emerald/30 shadow-elevation-glow ring-1 ring-emerald/20",
         className
       )}
       {...props}

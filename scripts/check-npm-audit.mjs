@@ -19,8 +19,11 @@ let auditJson;
 try {
   // npm audit exits non-zero the moment it finds anything reportable, so
   // the JSON output has to be read off a thrown error's stdout, not a
-  // successful call's.
-  auditJson = execFileSync("npm", ["audit", "--json"], { encoding: "utf8" });
+  // successful call's. maxBuffer raised above Node's 1MB default — a
+  // dependency tree this size can produce a report bigger than that,
+  // which would otherwise throw ERR_CHILD_PROCESS_STDIO_MAXBUFFER instead
+  // of ever reaching the JSON below.
+  auditJson = execFileSync("npm", ["audit", "--json"], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 } catch (error) {
   auditJson = error.stdout;
 }
@@ -30,7 +33,16 @@ if (!auditJson) {
   process.exit(1);
 }
 
-const report = JSON.parse(auditJson);
+let report;
+try {
+  report = JSON.parse(auditJson);
+} catch (error) {
+  // A truncated/malformed report shouldn't crash with a raw SyntaxError —
+  // fail the same way as every other "couldn't get a clean answer" path
+  // here: a clear message and a non-zero exit.
+  console.error(`Could not parse npm audit output (possibly truncated): ${error.message}`);
+  process.exit(1);
+}
 const vulnerabilities = report.vulnerabilities ?? {};
 
 const newSevereFindings = [];

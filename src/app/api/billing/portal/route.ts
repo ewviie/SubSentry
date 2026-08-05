@@ -43,6 +43,11 @@ export async function POST(request: Request) {
         "Content-Type": "application/x-www-form-urlencoded",
       },
       body: new URLSearchParams({ customer: customerId, return_url: returnUrl }),
+      // Without this, a Stripe-side hang would hold the request (and the
+      // user on a stuck "Opening billing portal…" button) indefinitely —
+      // AbortSignal.timeout turns that into the same handled failure path
+      // as a network error below, instead of an unbounded wait.
+      signal: AbortSignal.timeout(10_000),
     });
   } catch (error) {
     // A network-level failure (Stripe unreachable, DNS, timeout) throws

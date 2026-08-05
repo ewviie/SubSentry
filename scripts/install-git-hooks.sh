@@ -15,15 +15,21 @@ hooks_dir="$(git rev-parse --git-path hooks)"
 mkdir -p "$hooks_dir"
 target="$hooks_dir/pre-commit"
 
+source="$(dirname "$0")/git-hooks/pre-commit"
+
 # Don't clobber a hook that isn't ours — a project (or the user) may
 # already have a pre-commit hook doing something else; overwriting it
-# silently would delete that behavior with no way to recover it.
-if [ -e "$target" ] && ! grep -q "gitleaks" "$target" 2>/dev/null; then
-  echo "✗ $target already exists and doesn't look like this script's hook. Not overwriting it." >&2
+# silently would delete that behavior with no way to recover it. Compares
+# against this script's own hook file byte-for-byte rather than grepping
+# for "gitleaks" — that string match would also treat an unrelated
+# hand-written hook that merely mentions gitleaks (e.g. in a comment) as
+# "already ours" and overwrite it.
+if [ -e "$target" ] && ! cmp -s "$source" "$target"; then
+  echo "✗ $target already exists and doesn't match this script's hook. Not overwriting it." >&2
   echo "  Merge scripts/git-hooks/pre-commit into it by hand, or move the existing hook aside first." >&2
   exit 1
 fi
 
-cp "$(dirname "$0")/git-hooks/pre-commit" "$target"
+cp "$source" "$target"
 chmod +x "$target"
 echo "✓ Pre-commit secret scan installed at $target. Requires gitleaks: https://github.com/gitleaks/gitleaks#installing"
