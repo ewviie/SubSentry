@@ -43,7 +43,7 @@ export function HowItWorksSection() {
             const isPayoff = i === STEPS.length - 1;
             return (
             <motion.li key={step.title} variants={fadeInUp} className="relative">
-              {/* Gold is reserved for the payoff step — the moment SubSentry
+              {/* Emerald is reserved for the payoff step — the moment SubSentry
                   actually surfaces something for you — rather than spent on
                   every number, so it reads as a deliberate beat, not a
                   repeated bullet-point color. */}
@@ -51,7 +51,7 @@ export function HowItWorksSection() {
                 aria-hidden="true"
                 className={
                   isPayoff
-                    ? "flex size-9 items-center justify-center rounded-full bg-gold-muted font-mono text-sm font-semibold text-gold"
+                    ? "flex size-9 items-center justify-center rounded-full bg-emerald-muted font-mono text-sm font-semibold text-emerald"
                     : "flex size-9 items-center justify-center rounded-full bg-secondary font-mono text-sm font-semibold text-secondary-foreground"
                 }
               >

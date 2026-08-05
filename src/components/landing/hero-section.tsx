@@ -9,7 +9,7 @@ import { CategorySpendBar } from "@/components/dashboard/category-spend-bar";
 import { CountUp } from "@/components/ui/count-up";
 import { Spotlight } from "@/components/ui/spotlight";
 import { SentryRing } from "@/components/ui/sentry-ring";
-import { FREE_PLAN_SUBSCRIPTION_LIMIT } from "@/lib/billing/plan";
+import { isBetaAllAccess } from "@/lib/billing/plan";
 import { fadeInUp, liftOnHover, pressScale, scaleIn, springSmooth, springSnappy, staggerContainer } from "@/lib/motion";
 
 // Representative sample data for the preview panel, not a real account's
@@ -78,7 +78,7 @@ export function HeroSection() {
           </motion.div>
 
           <motion.p variants={fadeInUp} className="mt-4 text-sm text-muted-foreground">
-            Free for up to {FREE_PLAN_SUBSCRIPTION_LIMIT} subscriptions. No card required to start.
+            {isBetaAllAccess() ? "Free during the beta. No card required." : "Free to start. No card required."}
           </motion.p>
         </motion.div>
 
@@ -105,7 +105,7 @@ export function HeroSection() {
             <StatCard
               icon={DollarSign}
               label="Monthly spend"
-              accentClassName="bg-gold-muted text-gold"
+              accentClassName="bg-emerald-muted text-emerald"
               caption="Across 7 active subscriptions"
               emphasis
             >

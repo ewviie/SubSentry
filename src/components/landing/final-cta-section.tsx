@@ -5,7 +5,7 @@ import Image from "next/image";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { SentryRing } from "@/components/ui/sentry-ring";
-import { FREE_PLAN_SUBSCRIPTION_LIMIT } from "@/lib/billing/plan";
+import { isBetaAllAccess } from "@/lib/billing/plan";
 import { fadeInUp, liftOnHover, pressScale, revealViewport, springSnappy, staggerContainer } from "@/lib/motion";
 
 export function FinalCtaSection() {
@@ -30,7 +30,7 @@ export function FinalCtaSection() {
           Start tracking what you&apos;re actually paying for.
         </motion.h2>
         <motion.p variants={fadeInUp} className="max-w-md text-muted-foreground">
-          Free for up to {FREE_PLAN_SUBSCRIPTION_LIMIT} subscriptions. No card required to start.
+          {isBetaAllAccess() ? "Free during the beta. No card required." : "Free to start. No card required."}
         </motion.p>
         <motion.div variants={fadeInUp} whileHover={liftOnHover} whileTap={pressScale} transition={springSnappy}>
           <Button size="lg" render={<Link href="/signup" />} nativeButton={false}>

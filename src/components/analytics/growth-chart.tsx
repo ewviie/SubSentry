@@ -9,7 +9,7 @@ const CHART_HEIGHT = 40; // viewBox units
 const TOP_PADDING = 4;
 const BOTTOM_PADDING = 2;
 
-// A single-series line/area chart — one hue (gold, this app's established
+// A single-series line/area chart — one hue (emerald, this app's established
 // "spend" accent, see the dashboard's Monthly spend stat card and
 // SavingsCard), no legend needed per the dataviz single-series rule. Percent
 // coordinate space (viewBox="0 0 100 40") lets hover hit-targets be plain
@@ -51,15 +51,15 @@ export function GrowthChart({ points }: { points: GrowthPoint[] }) {
         <svg viewBox={`0 0 100 ${CHART_HEIGHT}`} preserveAspectRatio="none" className="absolute inset-0 size-full" aria-hidden="true">
           <defs>
             <linearGradient id="growth-fill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="var(--color-gold)" stopOpacity="0.25" />
-              <stop offset="100%" stopColor="var(--color-gold)" stopOpacity="0" />
+              <stop offset="0%" stopColor="var(--color-emerald)" stopOpacity="0.25" />
+              <stop offset="100%" stopColor="var(--color-emerald)" stopOpacity="0" />
             </linearGradient>
           </defs>
           <path d={areaPath} fill="url(#growth-fill)" />
           <path
             d={linePath}
             fill="none"
-            stroke="var(--color-gold)"
+            stroke="var(--color-emerald)"
             strokeWidth={0.6}
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -80,7 +80,7 @@ export function GrowthChart({ points }: { points: GrowthPoint[] }) {
                 cx={xPercent(hoverIndex)}
                 cy={yPercent(points[hoverIndex].cumulativeMonthlyCents)}
                 r={1.6}
-                fill="var(--color-gold)"
+                fill="var(--color-emerald)"
                 vectorEffect="non-scaling-stroke"
               />
             </>

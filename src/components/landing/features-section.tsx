@@ -25,7 +25,7 @@ const FEATURES = [
     icon: PieChart,
     title: "See spend by category",
     description: "Software, streaming, fitness, and more: one glance at where the money actually goes each month.",
-    accent: "bg-gold-muted text-gold",
+    accent: "bg-emerald-muted text-emerald",
     span: "",
   },
   {

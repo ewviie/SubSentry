@@ -78,13 +78,13 @@ export function PricingSection() {
                 card's own overflow-hidden corner mask at any zoom level. */}
             <div className="mb-3 flex h-5 items-center justify-center">
               {tier.popular ? (
-                <Badge className="bg-gold text-gold-foreground">Most popular</Badge>
+                <Badge className="bg-emerald text-emerald-foreground">Most popular</Badge>
               ) : null}
             </div>
             <Card
               className={
                 tier.popular
-                  ? "border-gold/40 shadow-elevation-glow ring-1 ring-gold/30 transition-shadow duration-200"
+                  ? "border-emerald/40 shadow-elevation-glow ring-1 ring-emerald/30 transition-shadow duration-200"
                   : "shadow-elevation-low transition-shadow duration-200 hover:shadow-elevation-medium"
               }
             >

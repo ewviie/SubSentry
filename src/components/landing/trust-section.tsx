@@ -24,8 +24,15 @@ const SIGNALS = [
 
 export function TrustSection() {
   return (
-    <section className="border-y border-border/60 bg-muted/30">
+    <section aria-labelledby="trust-heading" className="border-y border-border/60 bg-muted/30">
       <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6">
+        {/* Visually-hidden — the 3 signal cards below are self-explanatory
+            at a glance, but a screen-reader's heading outline otherwise
+            skips straight from the hero's h1 to Features' h2 with this
+            whole section unlabeled. */}
+        <h2 id="trust-heading" className="sr-only">
+          Why you can trust SubSentry
+        </h2>
         <motion.div
           variants={staggerContainer(0.1)}
           initial="hidden"
