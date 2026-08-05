@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeHealthScore, computeInsights, computePotentialSavingsMonthlyCents } from "./insights";
+import { computeInsights, computePotentialSavingsMonthlyCents } from "./insights";
 import type { Subscription } from "@/lib/db/schema";
 
 let nextId = 1;
@@ -137,37 +137,5 @@ describe("computePotentialSavingsMonthlyCents", () => {
   });
 });
 
-describe("computeHealthScore", () => {
-  it("returns null when there are no active subscriptions", () => {
-    expect(computeHealthScore([], 0)).toBeNull();
-  });
-
-  it("scores 100 with no negative signals", () => {
-    const insights = computeInsights([sub({ name: "Netflix" })]);
-    const result = computeHealthScore(insights, 1);
-    expect(result?.score).toBe(100);
-    expect(result?.label).toBe("Excellent");
-    expect(result?.factors.every((f) => f.passed)).toBe(true);
-  });
-
-  it("deducts points for an overdue renewal", () => {
-    const overdue = sub({ name: "Gym", nextRenewalDate: "2020-01-01" });
-    const insights = computeInsights([overdue]);
-    const result = computeHealthScore(insights, 1);
-    expect(result?.score).toBe(85);
-    expect(result?.factors.find((f) => f.label.includes("overdue"))?.passed).toBe(false);
-  });
-
-  it("stays within 0-100 even with many negative signals", () => {
-    const overdue1 = sub({ name: "Gym", nextRenewalDate: "2020-01-01" });
-    const overdue2 = sub({ name: "Gym2", nextRenewalDate: "2020-01-01" });
-    const overdue3 = sub({ name: "Gym3", nextRenewalDate: "2020-01-01" });
-    const dup1 = sub({ name: "Netflix", amountCents: 1000 });
-    const dup2 = sub({ name: "Netflix Premium", amountCents: 1000 });
-    const big = sub({ name: "Big", category: "streaming", amountCents: 100000 });
-    const subs = [overdue1, overdue2, overdue3, dup1, dup2, big];
-    const insights = computeInsights(subs);
-    const result = computeHealthScore(insights, subs.length);
-    expect(result?.score).toBeGreaterThanOrEqual(0);
-  });
-});
+// computeHealthScore moved to src/lib/insights-engine/health-score.test.ts,
+// covering the new weighted rule-based scorer.

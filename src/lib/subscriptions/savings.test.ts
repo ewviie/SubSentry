@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { computeSavingsRecommendations, computeTotalPotentialSavingsMonthlyCents } from "./savings";
+import {
+  computeSavingsRecommendations,
+  computeTotalPotentialSavingsMonthlyCents,
+  getSavingsPriority,
+  type SavingsRecommendation,
+} from "./savings";
 import type { Subscription } from "@/lib/db/schema";
 
 let nextId = 1;
@@ -98,5 +103,37 @@ describe("computeTotalPotentialSavingsMonthlyCents", () => {
 
   it("returns 0 for no recommendations", () => {
     expect(computeTotalPotentialSavingsMonthlyCents([])).toBe(0);
+  });
+});
+
+describe("getSavingsPriority", () => {
+  function rec(monthlySavingsCents: number): SavingsRecommendation {
+    return {
+      id: "r1",
+      type: monthlySavingsCents > 0 ? "duplicate" : "category_concentration",
+      title: "t",
+      description: "d",
+      actionLabel: "Review",
+      monthlySavingsCents,
+      targetSubscriptionId: "sub-1",
+      involvedSubscriptionIds: ["sub-1"],
+    };
+  }
+
+  it("is 'low' for a $0 recommendation (category_concentration — never proven savings)", () => {
+    expect(getSavingsPriority(rec(0))).toBe("low");
+  });
+
+  it("is 'medium' for a small confirmed duplicate saving", () => {
+    expect(getSavingsPriority(rec(500))).toBe("medium");
+  });
+
+  it("is 'high' at and above the $15/mo threshold", () => {
+    expect(getSavingsPriority(rec(1500))).toBe("high");
+    expect(getSavingsPriority(rec(5000))).toBe("high");
+  });
+
+  it("is 'medium' just below the threshold", () => {
+    expect(getSavingsPriority(rec(1499))).toBe("medium");
   });
 });

@@ -46,4 +46,48 @@ describe("subscriptionInputSchema", () => {
     expect(result.category).toBe("other");
     expect(result.status).toBe("active");
   });
+
+  const validInput = {
+    name: "Netflix",
+    amount: "15.99",
+    billingCycle: "monthly" as const,
+    nextRenewalDate: "2026-01-01",
+  };
+
+  it("rejects a name over the 120-char limit", () => {
+    const result = subscriptionInputSchema.safeParse({ ...validInput, name: "a".repeat(121) });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects an empty name", () => {
+    expect(subscriptionInputSchema.safeParse({ ...validInput, name: "" }).success).toBe(false);
+  });
+
+  it("rejects an amount above the Postgres integer-cents ceiling", () => {
+    expect(subscriptionInputSchema.safeParse({ ...validInput, amount: "99999999.99" }).success).toBe(false);
+  });
+
+  it("rejects a malformed amount string (injection/formula attempt)", () => {
+    for (const bad of ["=cmd|'/c calc'", "15.99; DROP TABLE subscriptions;", "abc", "-15.99", "15.999"]) {
+      expect(subscriptionInputSchema.safeParse({ ...validInput, amount: bad }).success, bad).toBe(false);
+    }
+  });
+
+  it("rejects a category outside the closed enum", () => {
+    expect(subscriptionInputSchema.safeParse({ ...validInput, category: "not-a-real-category" }).success).toBe(false);
+  });
+
+  it("rejects a calendar-invalid date (e.g. Feb 31) despite matching the YYYY-MM-DD shape", () => {
+    expect(subscriptionInputSchema.safeParse({ ...validInput, nextRenewalDate: "2026-02-31" }).success).toBe(false);
+  });
+
+  it("rejects notes over the 2000-char limit", () => {
+    expect(subscriptionInputSchema.safeParse({ ...validInput, notes: "a".repeat(2001) }).success).toBe(false);
+  });
+
+  it("silently strips unexpected fields rather than erroring or passing them through", () => {
+    const result = subscriptionInputSchema.parse({ ...validInput, isAdmin: true, userId: "attacker-controlled-id" });
+    expect(result).not.toHaveProperty("isAdmin");
+    expect(result).not.toHaveProperty("userId");
+  });
 });

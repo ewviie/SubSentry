@@ -11,7 +11,7 @@ import type { ComputedInsight } from "@/lib/subscriptions/insights";
 
 // The primary hero anchor. Two genuinely different states rather than one
 // component forcing a number where there isn't one: when real duplicate
-// subscriptions are flagged, the potential yearly savings gets the gold
+// subscriptions are flagged, the potential yearly savings gets the emerald
 // "this matters" treatment; when the account is already clean, that's a
 // real, positive fact too — showing it instead of hiding an empty state
 // keeps the card honest for the common case where there's nothing to save.
@@ -30,7 +30,7 @@ export function SavingsCard({
       <Card
         className={
           hasSavings
-            ? "relative h-full overflow-hidden border-gold/30 shadow-elevation-glow ring-1 ring-gold/20"
+            ? "relative h-full overflow-hidden border-emerald/30 shadow-elevation-glow ring-1 ring-emerald/20"
             : "h-full shadow-elevation-low"
         }
       >
@@ -40,7 +40,7 @@ export function SavingsCard({
               aria-hidden="true"
               className={
                 hasSavings
-                  ? "flex size-9 items-center justify-center rounded-full bg-gold-muted text-gold"
+                  ? "flex size-9 items-center justify-center rounded-full bg-emerald-muted text-emerald"
                   : "flex size-9 items-center justify-center rounded-full bg-muted text-muted-foreground"
               }
             >
@@ -53,7 +53,7 @@ export function SavingsCard({
 
           {hasSavings ? (
             <>
-              <p className="font-mono text-4xl font-semibold tabular-nums text-gold">
+              <p className="font-mono text-4xl font-semibold tabular-nums text-emerald">
                 <CountUp value={potentialYearlySavingsCents} format="currency" />
               </p>
               <p className="text-sm text-muted-foreground">
