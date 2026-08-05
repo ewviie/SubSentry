@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { buildCsp } from "./proxy";
+import { buildCsp, resolveRequestId } from "./proxy";
 
 // CSP correctness is security-sensitive and easy to silently regress with
 // no visible error (a browser only logs a CSP violation to a console
@@ -53,5 +53,31 @@ describe("buildCsp", () => {
     const csp = buildCsp("n");
     const scriptSrc = csp.split(";").find((d) => d.trim().startsWith("script-src"));
     expect(scriptSrc).toContain("unsafe-eval");
+  });
+});
+
+describe("resolveRequestId", () => {
+  it("preserves an inbound id shaped like a real upstream-proxy request id", () => {
+    expect(resolveRequestId("a1b2c3d4-e5f6-7890-abcd-ef1234567890")).toBe(
+      "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    );
+  });
+
+  it("mints a fresh id when there's no inbound header", () => {
+    expect(resolveRequestId(null)).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  // A caller-controlled request id is both logged (logServerError /
+  // logSecurityEvent) and echoed back in a response header — accepting an
+  // arbitrary string here would let any caller plant fake correlation ids
+  // in this app's own logs.
+  it("rejects an oversized inbound id rather than reflecting it into logs/response headers", () => {
+    const huge = "a".repeat(500);
+    expect(resolveRequestId(huge)).not.toBe(huge);
+  });
+
+  it("rejects an inbound id containing characters outside the safe token set", () => {
+    const malicious = "id\r\nX-Injected: evil";
+    expect(resolveRequestId(malicious)).not.toBe(malicious);
   });
 });

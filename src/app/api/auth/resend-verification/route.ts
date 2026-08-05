@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { issueVerificationToken } from "@/lib/auth/email-verification";
 import { sendVerificationEmail } from "@/lib/auth/email";
-import { checkResendVerificationRateLimit } from "@/lib/auth/rate-limit";
+import { checkResendVerificationRateLimit, checkResendVerificationIpRateLimit } from "@/lib/auth/rate-limit";
 import { getClientIp } from "@/lib/http/client-ip";
 import { isContentLengthWithinLimit, MAX_JSON_BODY_BYTES } from "@/lib/http/request-size";
 import { logServerError } from "@/lib/observability/log-error";
@@ -49,8 +49,12 @@ export async function POST(request: Request) {
 
   const { email, captchaToken } = parsed.data;
 
-  const rateLimit = await checkResendVerificationRateLimit(`${getClientIp(request)}:${email}`);
-  if (!rateLimit.allowed) {
+  const ip = getClientIp(request);
+  const [rateLimit, ipRateLimit] = await Promise.all([
+    checkResendVerificationRateLimit(`${ip}:${email}`),
+    checkResendVerificationIpRateLimit(ip),
+  ]);
+  if (!rateLimit.allowed || !ipRateLimit.allowed) {
     return NextResponse.json(
       { error: "rate_limited", message: "Too many attempts. Try again in a few minutes." },
       { status: 429 },

@@ -12,6 +12,21 @@ import { logSecurityEvent } from "@/lib/observability/log-security-event";
 const PROTECTED_PREFIXES = ["/dashboard", "/subscriptions", "/settings", "/analytics", "/savings"];
 const STATE_CHANGING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
+// A real upstream load balancer/reverse proxy's request id is a short
+// opaque token — uuid-shaped or similar. Anything else (arbitrary length,
+// odd characters) is treated as not actually inbound-proxy-supplied and
+// replaced with a fresh one, since this value is both logged
+// (logServerError/logSecurityEvent) and echoed back in a response header:
+// accepting it unvalidated would let any caller plant an arbitrary string
+// in this app's own logs under the guise of a "request id".
+const REQUEST_ID_RE = /^[A-Za-z0-9._-]{1,128}$/;
+
+// Exported for direct unit testing (proxy.test.ts).
+export function resolveRequestId(inboundHeader: string | null): string {
+  if (inboundHeader && REQUEST_ID_RE.test(inboundHeader)) return inboundHeader;
+  return crypto.randomUUID();
+}
+
 // Exported for direct unit testing (proxy.test.ts) — CSP correctness is
 // security-sensitive and easy to silently regress (e.g. a future edit that
 // drops the Turnstile origin would break signup's bot protection with no
@@ -151,8 +166,9 @@ export function proxy(request: NextRequest) {
   // the client too — useful to ask a user reporting an issue for the id
   // straight off their network tab. Preserves an inbound id from a real
   // upstream load balancer/reverse proxy if one is already set, rather
-  // than always minting a fresh one that would disagree with the proxy's.
-  const requestId = request.headers.get("x-request-id") ?? crypto.randomUUID();
+  // than always minting a fresh one that would disagree with the proxy's
+  // — but only if it's actually shaped like one (see resolveRequestId).
+  const requestId = resolveRequestId(request.headers.get("x-request-id"));
 
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-nonce", nonce);

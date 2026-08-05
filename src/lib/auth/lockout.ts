@@ -46,6 +46,21 @@ export async function checkLockout(email: string): Promise<LockoutStatus> {
 // so two concurrent failed attempts against the same email can't race and
 // silently lose an increment. Locks once the post-increment count reaches
 // the threshold.
+//
+// The CASE resets failedCount to 1, in the same statement, when the
+// existing row's lock has already expired — rather than incrementing a
+// stale count left over from the last lockout. Without this, failedCount
+// only ever goes up: once an email crosses LOCK_THRESHOLD once, it stays
+// at or above it forever (resetLoginAttempts is the only thing that
+// zeroes it, which requires a *correct* password), so every single
+// failure after that first lock expires reads as "already past the
+// threshold" and re-locks the account for another 15 minutes off of one
+// typo — a legitimate user who mistyped their password once, 20 minutes
+// ago, gets locked out again by a second typo instead of getting the same
+// 5-strikes allowance a first-time offender gets. Comparing against
+// now() in SQL (not a value read by a prior SELECT) keeps this in the
+// same atomic statement as the increment, so two concurrent failures
+// right at the lock's expiry boundary can't race the reset.
 export async function recordFailedLogin(email: string): Promise<void> {
   await db
     .insert(loginAttempts)
@@ -53,7 +68,19 @@ export async function recordFailedLogin(email: string): Promise<void> {
     .onConflictDoUpdate({
       target: loginAttempts.email,
       set: {
-        failedCount: sql`${loginAttempts.failedCount} + 1`,
+        failedCount: sql`case
+          when ${loginAttempts.lockedUntil} is not null and ${loginAttempts.lockedUntil} < now() then 1
+          else ${loginAttempts.failedCount} + 1
+        end`,
+        // Cleared alongside the count reset above — leaving the old,
+        // already-expired timestamp in place is harmless to checkLockout's
+        // own now()-comparison, but a stale non-null lockedUntil sitting
+        // next to a freshly-reset failedCount misrepresents the row's
+        // actual state to anything else that reads it.
+        lockedUntil: sql`case
+          when ${loginAttempts.lockedUntil} is not null and ${loginAttempts.lockedUntil} < now() then null
+          else ${loginAttempts.lockedUntil}
+        end`,
         updatedAt: new Date(),
       },
     });
