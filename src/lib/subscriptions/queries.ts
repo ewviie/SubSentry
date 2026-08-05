@@ -1,9 +1,25 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { subscriptions, type Subscription } from "@/lib/db/schema";
+import { subscriptions, type Subscription, type User } from "@/lib/db/schema";
+import { MAX_ACTIVE_SUBSCRIPTIONS, hasReachedSubscriptionLimit } from "@/lib/billing/plan";
 import { amountStringToCents, monthlyCents } from "./money";
 import type { SubscriptionInput, SubscriptionUpdate } from "./validation";
 import type { SubscriptionSource } from "./source";
+
+function subscriptionInsertValues(userId: string, input: SubscriptionInput, source: SubscriptionSource) {
+  return {
+    userId,
+    name: input.name,
+    amountCents: amountStringToCents(input.amount),
+    currency: input.currency,
+    billingCycle: input.billingCycle,
+    category: input.category,
+    nextRenewalDate: input.nextRenewalDate,
+    status: input.status,
+    notes: input.notes || null,
+    source,
+  };
+}
 
 export async function listSubscriptions(userId: string): Promise<Subscription[]> {
   return db
@@ -25,6 +41,10 @@ export async function getSubscription(
   return row;
 }
 
+// No limit check, no lock — a plain single-row insert. Used directly only
+// by test setup (queries.idor.test.ts), which needs a row to exist without
+// caring about plan/ceiling rules. Production write paths go through
+// createSubscriptionWithLimitCheck below instead.
 export async function createSubscription(
   userId: string,
   input: SubscriptionInput,
@@ -32,20 +52,94 @@ export async function createSubscription(
 ): Promise<Subscription> {
   const [row] = await db
     .insert(subscriptions)
-    .values({
-      userId,
-      name: input.name,
-      amountCents: amountStringToCents(input.amount),
-      currency: input.currency,
-      billingCycle: input.billingCycle,
-      category: input.category,
-      nextRenewalDate: input.nextRenewalDate,
-      status: input.status,
-      notes: input.notes || null,
-      source,
-    })
+    .values(subscriptionInsertValues(userId, input, source))
     .returning();
   return row;
+}
+
+export type SubscriptionLimitResult =
+  | { kind: "ceiling" }
+  | { kind: "plan" }
+  | { kind: "created"; subscription: Subscription };
+
+export type SubscriptionsBulkLimitResult =
+  | { kind: "ceiling" }
+  | { kind: "plan" }
+  | { kind: "created"; subscriptions: Subscription[] };
+
+// Both functions below wrap their count-check-then-insert in a transaction
+// holding a Postgres advisory lock scoped to the target user for the
+// transaction's duration. Without this, two concurrent calls for the same
+// account (a double-submit, a raced retry, a scripted burst) could each
+// read "under the limit" before either's insert committed, letting one
+// account exceed MAX_ACTIVE_SUBSCRIPTIONS — or, once BETA_ALL_ACCESS
+// (lib/billing/plan.ts) is turned off, exceed the free-plan cap — by
+// simply racing requests instead of respecting either limit. The lock
+// serializes concurrent callers for the *same* user; a second request for
+// that user blocks until the first's transaction commits or rolls back, so
+// it always sees the first's row in its own count. hashtext() can
+// theoretically collide between two different users' ids; that only costs
+// harmless extra serialization between unrelated accounts (they still each
+// get a correct answer), never an incorrect result, since the lock is a
+// mutex around one user's own check-then-insert, not a data partition.
+export async function createSubscriptionWithLimitCheck(
+  userId: string,
+  plan: User["plan"],
+  input: SubscriptionInput,
+  source: SubscriptionSource = "manual",
+): Promise<SubscriptionLimitResult> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${userId}))`);
+
+    // The free-plan check only applies to free users and only counts
+    // "active" rows, matching the same definition getDashboardData() uses
+    // elsewhere — a canceled/paused subscription shouldn't count against it
+    // any more than it counts toward spend totals. The defensive ceiling
+    // below is different: it must count every row regardless of status,
+    // since a paused/canceled subscription still occupies a row and costs
+    // the same to store and query.
+    const existing = await tx.select().from(subscriptions).where(eq(subscriptions.userId, userId));
+    const activeCount = existing.filter((s) => s.status === "active").length;
+
+    if (existing.length >= MAX_ACTIVE_SUBSCRIPTIONS) return { kind: "ceiling" };
+    if (hasReachedSubscriptionLimit(plan, activeCount)) return { kind: "plan" };
+
+    const [row] = await tx
+      .insert(subscriptions)
+      .values(subscriptionInsertValues(userId, input, source))
+      .returning();
+    return { kind: "created", subscription: row };
+  });
+}
+
+// Same lock/limit reasoning as createSubscriptionWithLimitCheck above,
+// against a batch total instead of one row — used by /api/imports/confirm.
+// A single multi-row insert (not a loop of per-row inserts): Postgres makes
+// one multi-row INSERT atomic on its own, and this needs the transaction's
+// own `tx` handle anyway to stay inside the advisory lock.
+export async function createSubscriptionsBulkWithLimitCheck(
+  userId: string,
+  plan: User["plan"],
+  rows: SubscriptionInput[],
+  source: SubscriptionSource,
+): Promise<SubscriptionsBulkLimitResult> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${userId}))`);
+
+    const existing = await tx.select().from(subscriptions).where(eq(subscriptions.userId, userId));
+    const activeCount = existing.filter((s) => s.status === "active").length;
+    const activeRowCount = rows.filter((row) => row.status === "active").length;
+
+    if (existing.length + rows.length > MAX_ACTIVE_SUBSCRIPTIONS) return { kind: "ceiling" };
+    if (hasReachedSubscriptionLimit(plan, activeCount + activeRowCount)) return { kind: "plan" };
+    if (rows.length === 0) return { kind: "created", subscriptions: [] };
+
+    const created = await tx
+      .insert(subscriptions)
+      .values(rows.map((input) => subscriptionInsertValues(userId, input, source)))
+      .returning();
+    return { kind: "created", subscriptions: created };
+  });
 }
 
 export async function updateSubscription(
