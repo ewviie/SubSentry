@@ -29,14 +29,14 @@ export default async function SavingsPage() {
       ) : (
         <>
           {totalMonthlyCents > 0 ? (
-            <div className="mt-6 rounded-xl border border-gold/30 bg-gold-muted/40 p-4">
+            <div className="mt-6 rounded-xl border border-emerald/30 bg-emerald-muted/40 p-4">
               <div className="flex items-center gap-3">
-                <div className="flex size-9 items-center justify-center rounded-full bg-gold-muted text-gold">
+                <div className="flex size-9 items-center justify-center rounded-full bg-emerald-muted text-emerald">
                   <PiggyBank className="size-4.5" aria-hidden="true" />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-muted-foreground">Potential savings from duplicates</p>
-                  <p className="font-mono text-2xl font-semibold tabular-nums text-gold">
+                  <p className="font-mono text-2xl font-semibold tabular-nums text-emerald">
                     {formatCents(totalMonthlyCents)}/mo
                   </p>
                 </div>

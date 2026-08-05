@@ -43,9 +43,9 @@ export default async function SubscriptionsPage() {
           <StatCard
             icon={PiggyBank}
             label="Potential savings"
-            accentClassName={potentialSavingsMonthlyCents > 0 ? "bg-gold-muted text-gold" : undefined}
+            accentClassName={potentialSavingsMonthlyCents > 0 ? "bg-emerald-muted text-emerald" : undefined}
           >
-            <span className={potentialSavingsMonthlyCents > 0 ? "text-gold" : undefined}>
+            <span className={potentialSavingsMonthlyCents > 0 ? "text-emerald" : undefined}>
               <CountUp value={potentialSavingsMonthlyCents * 12} format="currency" />
             </span>
           </StatCard>

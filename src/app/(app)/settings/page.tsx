@@ -3,7 +3,7 @@ import { Check, Sparkles } from "lucide-react";
 import { requireUser } from "@/lib/auth/session";
 import { listSubscriptions } from "@/lib/subscriptions/queries";
 import { isAIConfigured } from "@/lib/ai/provider";
-import { FREE_PLAN_SUBSCRIPTION_LIMIT, getUpgradeUrl, isBillingPortalConfigured } from "@/lib/billing/plan";
+import { FREE_PLAN_SUBSCRIPTION_LIMIT, getUpgradeUrl, isBillingPortalConfigured, hasPaidAccess, isBetaAllAccess } from "@/lib/billing/plan";
 import { initials } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -22,19 +22,18 @@ const PRO_BENEFITS = [
 
 export default async function SettingsPage() {
   const user = await requireUser();
-  const activeCount =
-    user.plan === "free"
-      ? (await listSubscriptions(user.id)).filter((s) => s.status === "active").length
-      : 0;
-  const upgradeUrl = user.plan === "free" ? getUpgradeUrl(user.id) : null;
+  const isPaid = hasPaidAccess(user.plan);
+  const activeCount = isPaid ? 0 : (await listSubscriptions(user.id)).filter((s) => s.status === "active").length;
+  const upgradeUrl = isPaid ? null : getUpgradeUrl(user.id);
   const aiConfigured = isAIConfigured();
   const portalConfigured = isBillingPortalConfigured();
+  const beta = isBetaAllAccess();
 
   return (
     <div className="max-w-2xl">
       <div className="flex items-center gap-4">
         <Avatar size="lg">
-          <AvatarFallback className="bg-gold-muted text-base font-semibold text-gold">
+          <AvatarFallback className="bg-emerald-muted text-base font-semibold text-emerald">
             {initials(user.name, user.email)}
           </AvatarFallback>
         </Avatar>
@@ -61,25 +60,16 @@ export default async function SettingsPage() {
           </CardContent>
         </Card>
 
-        <Card
-          className={
-            user.plan === "pro"
-              ? "border-gold/30 shadow-elevation-glow ring-1 ring-gold/20"
-              : "shadow-elevation-low"
-          }
-        >
+        <Card highlight={isPaid} className={isPaid ? undefined : "shadow-elevation-low"}>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               Plan &amp; billing
-              <Badge
-                className={user.plan === "pro" ? "bg-gold text-gold-foreground" : undefined}
-                variant={user.plan === "pro" ? undefined : "secondary"}
-              >
-                {user.plan === "pro" ? "Pro" : "Free"}
+              <Badge className={isPaid ? "bg-emerald text-emerald-foreground" : undefined} variant={isPaid ? undefined : "secondary"}>
+                {beta ? "Beta — full access" : user.plan === "pro" ? "Pro" : "Free"}
               </Badge>
             </CardTitle>
             <CardDescription>
-              {user.plan === "pro"
+              {isPaid
                 ? "You have unlimited subscriptions."
                 : `Up to ${FREE_PLAN_SUBSCRIPTION_LIMIT} active subscriptions.`}
             </CardDescription>
@@ -89,7 +79,7 @@ export default async function SettingsPage() {
               <ManageBillingButton />
             </CardContent>
           ) : null}
-          {user.plan === "free" ? (
+          {!isPaid ? (
             <CardContent className="space-y-4">
               <div>
                 <div className="mb-1.5 flex items-baseline justify-between text-sm">
@@ -100,7 +90,7 @@ export default async function SettingsPage() {
                 </div>
                 <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
                   <div
-                    className="h-full rounded-full bg-gold"
+                    className="h-full rounded-full bg-emerald"
                     style={{
                       width: `${Math.min((activeCount / FREE_PLAN_SUBSCRIPTION_LIMIT) * 100, 100)}%`,
                     }}
@@ -108,12 +98,12 @@ export default async function SettingsPage() {
                 </div>
               </div>
               {upgradeUrl ? (
-                <div className="rounded-lg border border-gold/20 bg-gold-muted/40 p-4">
+                <div className="rounded-lg border border-emerald/20 bg-emerald-muted/40 p-4">
                   <p className="text-sm font-medium">Upgrade to Pro: £4.99/mo</p>
                   <ul className="mt-2 space-y-1.5">
                     {PRO_BENEFITS.map((benefit) => (
                       <li key={benefit} className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <Check className="size-3.5 shrink-0 text-gold" aria-hidden="true" />
+                        <Check className="size-3.5 shrink-0 text-emerald" aria-hidden="true" />
                         {benefit}
                       </li>
                     ))}
