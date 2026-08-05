@@ -1,4 +1,4 @@
-# ⚓ Doubloon
+# ⚓ SubSentry
 
 AI-powered subscription management. Track what you're paying for, catch
 duplicate and overpriced subscriptions, and add new ones by typing them in
