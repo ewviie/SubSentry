@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { subscriptionUpdateSchema } from "@/lib/subscriptions/validation";
 import { deleteSubscription, getSubscription, updateSubscription } from "@/lib/subscriptions/queries";
+import { checkSubscriptionMutateRateLimit } from "@/lib/subscriptions/rate-limit";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -19,6 +20,14 @@ export async function GET(_request: Request, { params }: Params) {
 export async function PATCH(request: Request, { params }: Params) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  const rateLimit = checkSubscriptionMutateRateLimit(session.user.id);
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: "rate_limited", message: "Too many changes recently. Try again in a bit." },
+      { status: 429 },
+    );
+  }
 
   const { id } = await params;
   const parsed = subscriptionUpdateSchema.safeParse(await request.json().catch(() => null));
@@ -38,6 +47,14 @@ export async function PATCH(request: Request, { params }: Params) {
 export async function DELETE(_request: Request, { params }: Params) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  const rateLimit = checkSubscriptionMutateRateLimit(session.user.id);
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: "rate_limited", message: "Too many changes recently. Try again in a bit." },
+      { status: 429 },
+    );
+  }
 
   const { id } = await params;
   const ok = await deleteSubscription(session.user.id, id);

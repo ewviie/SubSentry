@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/auth/session";
 import { checkoutSessions, users } from "@/lib/db/schema";
+import { checkActivateRateLimit } from "@/lib/billing/rate-limit";
 
 const activateSchema = z.object({
   checkoutSessionId: z.string().trim().min(1),
@@ -22,6 +23,14 @@ const activateSchema = z.object({
 export async function POST(request: Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  const rateLimit = checkActivateRateLimit(session.user.id);
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: "rate_limited", message: "Too many attempts. Try again in a bit." },
+      { status: 429 },
+    );
+  }
 
   const parsed = activateSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
