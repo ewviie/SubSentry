@@ -2,13 +2,10 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { importConfirmSchema } from "@/lib/imports/validation";
 import { checkImportConfirmRateLimit } from "@/lib/imports/rate-limit";
-import { bulkCreateSubscriptionsFromImport, createImportRecord } from "@/lib/imports/queries";
-import { listSubscriptions } from "@/lib/subscriptions/queries";
-import {
-  FREE_PLAN_SUBSCRIPTION_LIMIT,
-  MAX_ACTIVE_SUBSCRIPTIONS,
-  hasReachedSubscriptionLimit,
-} from "@/lib/billing/plan";
+import { createImportRecord } from "@/lib/imports/queries";
+import { createSubscriptionsBulkWithLimitCheck } from "@/lib/subscriptions/queries";
+import { FREE_PLAN_SUBSCRIPTION_LIMIT, MAX_ACTIVE_SUBSCRIPTIONS } from "@/lib/billing/plan";
+import { logServerError } from "@/lib/observability/log-error";
 
 export async function POST(request: Request) {
   const session = await getSession();
@@ -38,48 +35,46 @@ export async function POST(request: Request) {
 
   const { source, rows, ignoredCount } = parsed.data;
 
-  // Same plan-limit checks as /api/subscriptions POST, but against the
-  // batch total — checked up front, before inserting anything, so a batch
-  // that would exceed the limit is rejected outright rather than partially
-  // imported.
-  const existing = await listSubscriptions(session.user.id);
-  const activeCount = existing.filter((s) => s.status === "active").length;
-  const activeRowCount = rows.filter((row) => row.status === "active").length;
-
-  if (existing.length + rows.length > MAX_ACTIVE_SUBSCRIPTIONS) {
-    return NextResponse.json(
-      {
-        error: "subscription_limit_reached",
-        message: `Importing these ${rows.length} subscriptions would exceed the maximum of ${MAX_ACTIVE_SUBSCRIPTIONS} subscriptions.`,
-      },
-      { status: 403 },
-    );
-  }
-
-  if (hasReachedSubscriptionLimit(session.user.plan, activeCount + activeRowCount)) {
-    return NextResponse.json(
-      {
-        error: "plan_limit_reached",
-        message: `Importing these subscriptions would exceed the free plan limit of ${FREE_PLAN_SUBSCRIPTION_LIMIT} active subscriptions. Upgrade to Pro for unlimited tracking.`,
-      },
-      { status: 403 },
-    );
-  }
-
   try {
-    const created = await bulkCreateSubscriptionsFromImport(session.user.id, rows, source);
+    // Same plan-limit checks as /api/subscriptions POST, against the batch
+    // total, and the same per-user advisory-lock protection against a
+    // concurrent-request race (a double-submitted import, or a batch import
+    // racing a manual add) — see createSubscriptionsBulkWithLimitCheck's own
+    // comment in lib/subscriptions/queries.ts for the full reasoning.
+    const bulkResult = await createSubscriptionsBulkWithLimitCheck(session.user.id, session.user.plan, rows, source);
+
+    if (bulkResult.kind === "ceiling") {
+      return NextResponse.json(
+        {
+          error: "subscription_limit_reached",
+          message: `Importing these ${rows.length} subscriptions would exceed the maximum of ${MAX_ACTIVE_SUBSCRIPTIONS} subscriptions.`,
+        },
+        { status: 403 },
+      );
+    }
+    if (bulkResult.kind === "plan") {
+      return NextResponse.json(
+        {
+          error: "plan_limit_reached",
+          message: `Importing these subscriptions would exceed the free plan limit of ${FREE_PLAN_SUBSCRIPTION_LIMIT} active subscriptions. Upgrade to Pro for unlimited tracking.`,
+        },
+        { status: 403 },
+      );
+    }
+
     const importRecord = await createImportRecord({
       userId: session.user.id,
       source,
       status: "completed",
       detectedCount: rows.length + ignoredCount,
-      importedCount: created.length,
+      importedCount: bulkResult.subscriptions.length,
       ignoredCount,
       errors: [],
     });
 
-    return NextResponse.json({ subscriptions: created, importId: importRecord.id }, { status: 201 });
-  } catch {
+    return NextResponse.json({ subscriptions: bulkResult.subscriptions, importId: importRecord.id }, { status: 201 });
+  } catch (error) {
+    logServerError("imports.confirm", error, { userId: session.user.id, source });
     await createImportRecord({
       userId: session.user.id,
       source,

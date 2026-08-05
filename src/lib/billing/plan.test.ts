@@ -3,9 +3,24 @@ import {
   FREE_PLAN_SUBSCRIPTION_LIMIT,
   MAX_ACTIVE_SUBSCRIPTIONS,
   hasReachedSubscriptionLimit,
+  hasPaidAccess,
+  isBetaAllAccess,
   getUpgradeUrl,
   isBillingPortalConfigured,
 } from "./plan";
+
+// The free beta unlocks paid access for every plan (see BETA_ALL_ACCESS in
+// plan.ts) — these tests document that current state. Once the beta ends
+// (BETA_ALL_ACCESS flipped to false), hasPaidAccess/hasReachedSubscriptionLimit
+// revert to real plan-based behavior and the "over the limit" tests below
+// should be restored to asserting `true`.
+describe("hasPaidAccess", () => {
+  it("is true for every plan during the beta", () => {
+    expect(isBetaAllAccess()).toBe(true);
+    expect(hasPaidAccess("free")).toBe(true);
+    expect(hasPaidAccess("pro")).toBe(true);
+  });
+});
 
 describe("MAX_ACTIVE_SUBSCRIPTIONS", () => {
   it("is well above the free-plan limit, since it's a defensive ceiling, not a product limit", () => {
@@ -22,12 +37,9 @@ describe("hasReachedSubscriptionLimit", () => {
     expect(hasReachedSubscriptionLimit("free", FREE_PLAN_SUBSCRIPTION_LIMIT - 1)).toBe(false);
   });
 
-  it("is true for a free user at the limit", () => {
-    expect(hasReachedSubscriptionLimit("free", FREE_PLAN_SUBSCRIPTION_LIMIT)).toBe(true);
-  });
-
-  it("is true for a free user over the limit", () => {
-    expect(hasReachedSubscriptionLimit("free", FREE_PLAN_SUBSCRIPTION_LIMIT + 1)).toBe(true);
+  it("is false for a free user at or over the limit during the beta (limit gate is bypassed)", () => {
+    expect(hasReachedSubscriptionLimit("free", FREE_PLAN_SUBSCRIPTION_LIMIT)).toBe(false);
+    expect(hasReachedSubscriptionLimit("free", FREE_PLAN_SUBSCRIPTION_LIMIT + 1)).toBe(false);
   });
 });
 
@@ -50,10 +62,9 @@ describe("getUpgradeUrl", () => {
     expect(getUpgradeUrl("user-1")).toBeNull();
   });
 
-  it("appends client_reference_id to the configured payment link", () => {
+  it("returns null during the beta even with a payment link configured", () => {
     process.env.STRIPE_PAYMENT_LINK = "https://buy.stripe.com/test_abc123";
-    const url = getUpgradeUrl("user-1");
-    expect(url).toBe("https://buy.stripe.com/test_abc123?client_reference_id=user-1");
+    expect(getUpgradeUrl("user-1")).toBeNull();
   });
 });
 

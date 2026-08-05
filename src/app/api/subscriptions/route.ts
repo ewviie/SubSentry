@@ -2,14 +2,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { subscriptionInputSchema } from "@/lib/subscriptions/validation";
-import { createSubscription, listSubscriptions } from "@/lib/subscriptions/queries";
+import { createSubscriptionWithLimitCheck, listSubscriptions } from "@/lib/subscriptions/queries";
 import { checkSubscriptionCreateRateLimit } from "@/lib/subscriptions/rate-limit";
 import { SUBSCRIPTION_SOURCES } from "@/lib/subscriptions/source";
-import {
-  FREE_PLAN_SUBSCRIPTION_LIMIT,
-  MAX_ACTIVE_SUBSCRIPTIONS,
-  hasReachedSubscriptionLimit,
-} from "@/lib/billing/plan";
+import { FREE_PLAN_SUBSCRIPTION_LIMIT, MAX_ACTIVE_SUBSCRIPTIONS } from "@/lib/billing/plan";
 
 // `source` is provenance metadata only (drives the "AI-parsed"/"Imported"
 // badge in the UI) — it has no effect on validation or authorization, so
@@ -53,18 +49,18 @@ export async function POST(request: Request) {
     );
   }
 
-  // The free-plan check only applies to free users and only counts "active"
-  // rows, matching the same definition getDashboardData() uses elsewhere — a
-  // canceled/paused subscription shouldn't count against it any more than it
-  // counts toward spend totals. The defensive ceiling below is different: it
-  // must count every row regardless of status, since a paused/canceled
-  // subscription still occupies a row and costs the same to store and query
-  // — counting only "active" rows here would let an account grow this table
-  // without bound just by creating rows with status=canceled.
-  const existing = await listSubscriptions(session.user.id);
-  const activeCount = existing.filter((s) => s.status === "active").length;
+  const { source, ...input } = parsed.data;
 
-  if (existing.length >= MAX_ACTIVE_SUBSCRIPTIONS) {
+  // createSubscriptionWithLimitCheck runs the count-check and the insert
+  // inside one transaction holding a per-user advisory lock — see its own
+  // comment in lib/subscriptions/queries.ts for why: without it, two
+  // concurrent POSTs from the same account could each read "under the
+  // limit" before either's insert committed, letting one account exceed
+  // MAX_ACTIVE_SUBSCRIPTIONS (or, once BETA_ALL_ACCESS is off, the
+  // free-plan cap) by racing requests.
+  const result = await createSubscriptionWithLimitCheck(session.user.id, session.user.plan, input, source ?? "manual");
+
+  if (result.kind === "ceiling") {
     return NextResponse.json(
       {
         error: "subscription_limit_reached",
@@ -73,8 +69,7 @@ export async function POST(request: Request) {
       { status: 403 },
     );
   }
-
-  if (hasReachedSubscriptionLimit(session.user.plan, activeCount)) {
+  if (result.kind === "plan") {
     return NextResponse.json(
       {
         error: "plan_limit_reached",
@@ -83,8 +78,5 @@ export async function POST(request: Request) {
       { status: 403 },
     );
   }
-
-  const { source, ...input } = parsed.data;
-  const subscription = await createSubscription(session.user.id, input, source);
-  return NextResponse.json({ subscription }, { status: 201 });
+  return NextResponse.json({ subscription: result.subscription }, { status: 201 });
 }
