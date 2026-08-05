@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { checkBillingPortalRateLimit } from "@/lib/billing/rate-limit";
+import { logServerError } from "@/lib/observability/log-error";
 
 // Mints a one-time Stripe Billing Portal session URL for the signed-in
 // user's stored customer id. No Stripe SDK dependency, same as the rest of
@@ -33,16 +34,33 @@ export async function POST(request: Request) {
 
   const returnUrl = new URL("/settings", request.url).toString();
 
-  const response = await fetch("https://api.stripe.com/v1/billing_portal/sessions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${secretKey}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({ customer: customerId, return_url: returnUrl }),
-  });
+  let response: Response;
+  try {
+    response = await fetch("https://api.stripe.com/v1/billing_portal/sessions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${secretKey}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ customer: customerId, return_url: returnUrl }),
+    });
+  } catch (error) {
+    // A network-level failure (Stripe unreachable, DNS, timeout) throws
+    // instead of resolving — without this catch it would 500 with no
+    // server-side record at all, unlike every other genuine-failure path
+    // in this codebase (see logServerError's call sites elsewhere).
+    logServerError("billing.portal.fetch", error, { userId: session.user.id });
+    return NextResponse.json(
+      { error: "stripe_error", message: "Couldn't open the billing portal. Try again in a moment." },
+      { status: 502 },
+    );
+  }
 
   if (!response.ok) {
+    logServerError("billing.portal.non_ok", new Error(`Stripe billing portal request failed: ${response.status}`), {
+      userId: session.user.id,
+      status: response.status,
+    });
     return NextResponse.json(
       { error: "stripe_error", message: "Couldn't open the billing portal. Try again in a moment." },
       { status: 502 },
@@ -51,6 +69,9 @@ export async function POST(request: Request) {
 
   const data = (await response.json()) as { url?: string };
   if (!data.url) {
+    logServerError("billing.portal.no_url", new Error("Stripe billing portal response had no url"), {
+      userId: session.user.id,
+    });
     return NextResponse.json(
       { error: "stripe_error", message: "Couldn't open the billing portal. Try again in a moment." },
       { status: 502 },

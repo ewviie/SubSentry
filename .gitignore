@@ -4,3 +4,6 @@ node_modules/
 next-env.d.ts
 .pglite/
 *.tsbuildinfo
+/test-results/
+/playwright-report/
+/blob-report/

@@ -3,13 +3,22 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { checkoutSessions, stripeEvents, users } from "@/lib/db/schema";
 import { verifyStripeSignature, stripeEventSchema } from "@/lib/billing/stripe-webhook";
+import { isContentLengthWithinLimit } from "@/lib/http/request-size";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Real Stripe event payloads are a few KB; this endpoint is public and only
+// signature-gated (not authenticated), so an oversized body is rejected
+// before request.text() buffers it.
+const MAX_WEBHOOK_BODY_BYTES = 256 * 1024;
 
 export async function POST(request: Request) {
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!secret) {
     return NextResponse.json({ error: "not_configured" }, { status: 503 });
+  }
+
+  if (!isContentLengthWithinLimit(request, MAX_WEBHOOK_BODY_BYTES)) {
+    return NextResponse.json({ error: "payload_too_large" }, { status: 413 });
   }
 
   const rawBody = await request.text();

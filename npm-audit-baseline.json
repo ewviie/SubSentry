@@ -1,0 +1,5 @@
+{
+  "description": "Packages with a known, already-triaged high/critical npm audit finding as of this file's generation — see PRODUCTION_READINESS_REPORT.md's CI/CD section. scripts/check-npm-audit.mjs only fails CI on a high/critical finding for a package NOT listed here, so a genuinely new severe vulnerability still blocks a merge without these pre-existing ones needing to be resolved first. Re-generate with `npm audit --json` after actually triaging/fixing one of these (remove it from the list once it's gone), not just to silence a new finding.",
+  "generatedAt": "2026-08-05",
+  "acceptedHighOrCriticalPackages": ["brace-expansion", "fast-uri", "next", "postcss", "sharp"]
+}

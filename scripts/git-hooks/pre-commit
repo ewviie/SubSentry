@@ -1,0 +1,15 @@
+#!/bin/sh
+# Pre-commit secret scan — blocks a commit that would introduce a secret
+# into git history, the one place a later `git revert`/rm can't fully undo
+# (history rewriting is possible but disruptive; better to never commit it).
+# Not wired via a new npm dependency (no husky/simple-git-hooks added) — see
+# scripts/install-git-hooks.sh for the one-time setup this repo asks every
+# contributor to run once after cloning.
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "⚠ gitleaks not installed — skipping pre-commit secret scan."
+  echo "  Install: https://github.com/gitleaks/gitleaks#installing"
+  exit 0
+fi
+
+gitleaks protect --staged --redact --config .gitleaks.toml

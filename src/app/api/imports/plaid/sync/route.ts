@@ -6,6 +6,7 @@ import { plaidImportProvider } from "@/lib/imports/providers/plaid-provider";
 import { getLatestBankConnection, decryptAccessToken } from "@/lib/imports/bank-connections";
 import { analyzeParsedTransactions } from "@/lib/imports/analyze";
 import { listSubscriptions } from "@/lib/subscriptions/queries";
+import { logServerError } from "@/lib/observability/log-error";
 
 // The live-API counterpart to /api/imports/analyze: no file upload, just
 // "fetch this user's already-linked bank transactions and run the same
@@ -46,7 +47,8 @@ export async function POST() {
   let accessToken: string;
   try {
     accessToken = decryptAccessToken(connection);
-  } catch {
+  } catch (error) {
+    logServerError("imports.plaid.sync.decrypt", error, { userId: session.user.id });
     return NextResponse.json(
       { error: "reconnect_required", message: "Your stored bank connection can no longer be read. Reconnect your bank." },
       { status: 400 },
@@ -56,7 +58,8 @@ export async function POST() {
   let parseResult;
   try {
     parseResult = await plaidImportProvider.fetchTransactions!(accessToken);
-  } catch {
+  } catch (error) {
+    logServerError("imports.plaid.sync.fetch", error, { userId: session.user.id });
     return NextResponse.json(
       { error: "plaid_error", message: "Couldn't fetch transactions from Plaid. Try again." },
       { status: 502 },

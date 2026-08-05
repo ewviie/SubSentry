@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { exchangeCodeForTokens, fetchAccounts } from "@/lib/imports/truelayer-client";
 import { createBankConnection } from "@/lib/imports/bank-connections";
+import { logServerError } from "@/lib/observability/log-error";
 
 const STATE_COOKIE = "truelayer_oauth_state";
 
@@ -58,7 +59,8 @@ export async function GET(request: Request) {
     });
 
     importUrl.searchParams.set("truelayer_connected", "1");
-  } catch {
+  } catch (error) {
+    logServerError("imports.truelayer.callback", error, { userId: session.user.id });
     importUrl.searchParams.set("truelayer_error", "connect_failed");
   }
 
