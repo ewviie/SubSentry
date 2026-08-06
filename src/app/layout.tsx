@@ -25,9 +25,16 @@ const SITE_DESCRIPTION = "AI-powered subscription management";
 const appUrl = process.env.NEXT_PUBLIC_APP_URL;
 
 export const metadata: Metadata = {
-  title: SITE_TITLE,
+  // title.template applies to every page under this layout that sets its
+  // own `title` (e.g. login/signup below) without repeating "SubSentry" —
+  // `default` is what renders on pages (like this one, the landing page)
+  // that don't override title at all. Previously every single page in the
+  // app rendered the exact same title/description, since nothing below the
+  // root ever overrode them.
+  title: { default: SITE_TITLE, template: `%s | ${SITE_TITLE}` },
   description: SITE_DESCRIPTION,
   metadataBase: appUrl ? new URL(appUrl) : undefined,
+  alternates: { canonical: "/" },
   openGraph: {
     title: SITE_TITLE,
     description: SITE_DESCRIPTION,

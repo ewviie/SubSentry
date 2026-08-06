@@ -24,8 +24,29 @@ export default async function Home() {
   // and this section reappears with no other change needed.
   const showPricing = !isBetaAllAccess();
 
+  // Deliberately minimal — name/description/category only. No
+  // aggregateRating, no review count, no offers/price block: this app has
+  // no real reviews to cite and pricing is hidden during the beta (see
+  // showPricing above), so none of those fields have real data to back
+  // them. Fabricating any of that to make the rich-result snippet look
+  // more complete would violate this app's own "never fabricate a number"
+  // principle applied to itself.
+  const structuredData = {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    name: "SubSentry",
+    description: "AI-powered subscription management — track what you're actually paying for.",
+    applicationCategory: "FinanceApplication",
+    operatingSystem: "Web",
+  };
+
   return (
     <>
+      {/* JSON-LD, not a visible element — safe to inline directly since
+          this is a fixed, server-constructed object with no user input,
+          not a place a CSP nonce is needed the way a real <script> would
+          otherwise require. */}
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }} />
       <ScrollProgress />
       <LandingNav />
       <main id="main-content">
