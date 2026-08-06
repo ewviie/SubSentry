@@ -91,19 +91,40 @@ export function SubscriptionsExplorer({
   const highCostIds = useMemo(() => getHighCostFlaggedIds(insights), [insights]);
   const needsReviewIds = useMemo(() => getNeedsReviewIds(insights), [insights]);
 
+  // Quick filters OR together, not AND: selecting more than one (e.g.
+  // "Needs review" + "Duplicate") should widen what's shown ("anything
+  // worth a look"), not narrow it to only rows matching every selected
+  // criterion simultaneously. AND was the original behavior here, and it
+  // silently produced an empty "No matches" the moment two selected
+  // filters' id sets didn't fully overlap — e.g. two subscriptions flagged
+  // "needs review" for being overdue, but not flagged "duplicate" of each
+  // other, made "Needs review" + "Duplicate" together show 0 results even
+  // though 2 real, relevant subscriptions existed. search/status/category
+  // stay AND'd with quick filters and with each other — those are narrowing
+  // a list by construction (a search term, one status, one category), not a
+  // multi-select "highlight anything relevant" control.
   const filtered = useMemo(() => {
+    function matchesQuickFilter(s: Subscription, filter: QuickFilter): boolean {
+      switch (filter) {
+        case "needs_review":
+          return needsReviewIds.has(s.id);
+        case "duplicate":
+          return duplicateIds.has(s.id);
+        case "high_cost":
+          return highCostIds.has(s.id);
+        case "recently_added":
+          return isRecentlyAdded(s);
+        case "upcoming_renewal":
+          return isUpcomingRenewal(s);
+      }
+    }
+
     const query = search.trim().toLowerCase();
     return subscriptions.filter((s) => {
       if (query && !s.name.toLowerCase().includes(query)) return false;
       if (statusFilter !== "all" && s.status !== statusFilter) return false;
       if (categoryFilter !== "all" && s.category !== categoryFilter) return false;
-      for (const filter of quickFilters) {
-        if (filter === "needs_review" && !needsReviewIds.has(s.id)) return false;
-        if (filter === "duplicate" && !duplicateIds.has(s.id)) return false;
-        if (filter === "high_cost" && !highCostIds.has(s.id)) return false;
-        if (filter === "recently_added" && !isRecentlyAdded(s)) return false;
-        if (filter === "upcoming_renewal" && !isUpcomingRenewal(s)) return false;
-      }
+      if (quickFilters.size > 0 && ![...quickFilters].some((filter) => matchesQuickFilter(s, filter))) return false;
       return true;
     });
   }, [subscriptions, search, statusFilter, categoryFilter, quickFilters, needsReviewIds, duplicateIds, highCostIds]);
