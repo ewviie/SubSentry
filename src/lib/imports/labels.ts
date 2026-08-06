@@ -6,6 +6,7 @@ export const IMPORT_SOURCE_LABELS: Record<Import["source"], string> = {
   google_play_import: "Google Play",
   plaid_import: "Bank (Plaid)",
   truelayer_import: "Bank (TrueLayer)",
+  gmail_import: "Google (Gmail)",
 };
 
 export const IMPORT_STATUS_LABELS: Record<Import["status"], string> = {

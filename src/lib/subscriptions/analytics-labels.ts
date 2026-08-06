@@ -12,6 +12,7 @@ export const SOURCE_ANALYTICS_LABELS: Record<SubscriptionSource, string> = {
   google_play_import: "Google Play",
   plaid_import: "Bank (Plaid)",
   truelayer_import: "Bank (TrueLayer)",
+  gmail_import: "Google (Gmail)",
 };
 
 // A fixed hue per source, distinct from category-colors.ts's assignment
@@ -26,4 +27,10 @@ export const SOURCE_BAR_CLASSES: Record<SubscriptionSource, string> = {
   google_play_import: "bg-chart-4",
   plaid_import: "bg-chart-1",
   truelayer_import: "bg-chart-6",
+  // Reuses chart-2's hue rather than introducing a 7th chart color token —
+  // csv_import (Bank CSV) and gmail_import are unlikely to appear in the
+  // same account's breakdown often enough that sharing a color reads as
+  // ambiguous in practice, and adding an 8th token is a design-system
+  // change out of scope here.
+  gmail_import: "bg-chart-2",
 };

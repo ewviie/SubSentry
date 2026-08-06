@@ -57,8 +57,9 @@ async function parse(fileText: string): Promise<ImportParseResult> {
 
 export const appleImportProvider: ImportProvider = {
   id: "apple",
-  label: "Apple Subscriptions",
-  description: "Import your Apple subscription export to detect active App Store subscriptions.",
+  label: "Apple Data Export",
+  description:
+    "Apple doesn't provide a way to connect your subscriptions directly — export your data from Apple ID → Data & Privacy, then upload it here.",
   acceptedFileTypes: [".csv", "text/csv"],
   maxFileSizeBytes: MAX_FILE_SIZE_BYTES,
   enabled: true,

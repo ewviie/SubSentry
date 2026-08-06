@@ -23,7 +23,7 @@ import type { ImportParseResult } from "./types";
 // import this array instead of hand-duplicating the literal union, the same
 // SUBSCRIPTION_SOURCES/SubscriptionSource pattern used for the DB-level
 // source enum in src/lib/subscriptions/source.ts.
-export const IMPORT_SOURCE_IDS = ["csv_bank", "apple", "google_play", "plaid", "truelayer"] as const;
+export const IMPORT_SOURCE_IDS = ["csv_bank", "apple", "google_play", "plaid", "truelayer", "gmail"] as const;
 export type ImportSourceId = (typeof IMPORT_SOURCE_IDS)[number];
 
 export interface ImportProvider {

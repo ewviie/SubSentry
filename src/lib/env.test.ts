@@ -8,14 +8,19 @@ const KEYS = [
   "PLAID_SECRET",
   "TRUELAYER_CLIENT_ID",
   "TRUELAYER_CLIENT_SECRET",
+  "GOOGLE_CLIENT_ID",
+  "GOOGLE_CLIENT_SECRET",
   "STRIPE_PAYMENT_LINK",
   "STRIPE_WEBHOOK_SECRET",
   "UPSTASH_REDIS_REST_URL",
   "UPSTASH_REDIS_REST_TOKEN",
   "NEXT_PUBLIC_TURNSTILE_SITE_KEY",
   "TURNSTILE_SECRET_KEY",
-  "RESEND_API_KEY",
-  "RESEND_FROM_EMAIL",
+  "SMTP_HOST",
+  "SMTP_PORT",
+  "SMTP_USER",
+  "SMTP_PASSWORD",
+  "SMTP_FROM",
 ] as const;
 
 let saved: Record<string, string | undefined>;
@@ -71,6 +76,22 @@ describe("validateEnv", () => {
     expect(issues.some((i) => i.variable === "PLAID_SECRET")).toBe(true);
   });
 
+  it("flags a half-configured Google pair", () => {
+    process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
+    process.env.GOOGLE_CLIENT_ID = "client-id";
+    const issues = validateEnv();
+    expect(issues.some((i) => i.variable === "GOOGLE_CLIENT_SECRET")).toBe(true);
+  });
+
+  it("does not flag Google when fully configured or fully unconfigured", () => {
+    process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
+    expect(validateEnv().some((i) => i.variable.startsWith("GOOGLE"))).toBe(false);
+
+    process.env.GOOGLE_CLIENT_ID = "client-id";
+    process.env.GOOGLE_CLIENT_SECRET = "client-secret";
+    expect(validateEnv().some((i) => i.variable.startsWith("GOOGLE"))).toBe(false);
+  });
+
   it("does not flag Plaid when fully configured", () => {
     process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
     process.env.PLAID_CLIENT_ID = "client-id";
@@ -124,19 +145,36 @@ describe("validateEnv", () => {
     expect(validateEnv().some((i) => i.variable.includes("TURNSTILE"))).toBe(false);
   });
 
-  it("flags RESEND_API_KEY set without RESEND_FROM_EMAIL", () => {
+  it("flags a partially-configured SMTP setup", () => {
     process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
-    process.env.RESEND_API_KEY = "re_test_key";
+    process.env.SMTP_HOST = "smtp-mail.outlook.com";
+    process.env.SMTP_USER = "user@outlook.com";
     const issues = validateEnv();
-    expect(issues.some((i) => i.variable === "RESEND_FROM_EMAIL")).toBe(true);
+    expect(issues.some((i) => i.problem.includes("SMTP_PORT"))).toBe(true);
+    expect(issues.some((i) => i.problem.includes("SMTP_PASSWORD"))).toBe(true);
+    expect(issues.some((i) => i.problem.includes("SMTP_FROM"))).toBe(true);
   });
 
-  it("does not flag RESEND_FROM_EMAIL when RESEND_API_KEY is also set, or when both are unset", () => {
+  it("does not flag SMTP when fully configured or fully unconfigured", () => {
     process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
-    expect(validateEnv().some((i) => i.variable === "RESEND_FROM_EMAIL")).toBe(false);
+    expect(validateEnv().some((i) => i.variable.startsWith("SMTP"))).toBe(false);
 
-    process.env.RESEND_API_KEY = "re_test_key";
-    process.env.RESEND_FROM_EMAIL = "SubSentry <noreply@subsentry.app>";
-    expect(validateEnv().some((i) => i.variable === "RESEND_FROM_EMAIL")).toBe(false);
+    process.env.SMTP_HOST = "smtp-mail.outlook.com";
+    process.env.SMTP_PORT = "587";
+    process.env.SMTP_USER = "user@outlook.com";
+    process.env.SMTP_PASSWORD = "pw";
+    process.env.SMTP_FROM = "SubSentry <user@outlook.com>";
+    expect(validateEnv().some((i) => i.variable.startsWith("SMTP"))).toBe(false);
+  });
+
+  it("flags a non-numeric SMTP_PORT", () => {
+    process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
+    process.env.SMTP_HOST = "smtp-mail.outlook.com";
+    process.env.SMTP_PORT = "not-a-port";
+    process.env.SMTP_USER = "user@outlook.com";
+    process.env.SMTP_PASSWORD = "pw";
+    process.env.SMTP_FROM = "SubSentry <user@outlook.com>";
+    const issues = validateEnv();
+    expect(issues.some((i) => i.variable === "SMTP_PORT")).toBe(true);
   });
 });

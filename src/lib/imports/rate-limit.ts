@@ -28,3 +28,15 @@ const BANK_CONNECT_LIMIT = 10;
 const BANK_CONNECT_WINDOW_MS = 60 * 60 * 1000;
 
 export const checkBankConnectRateLimit = createRateLimiter(BANK_CONNECT_LIMIT, BANK_CONNECT_WINDOW_MS);
+
+// Gmail's authorize/disconnect are cheap (no external API call yet) and
+// share checkBankConnectRateLimit's "one connect flow at a time" ceiling —
+// no separate limiter needed for those. Sync is different: it's a Gmail
+// messages.list call plus up to MAX_MESSAGES_PER_SYNC messages.get calls
+// (see gmail-extract.ts) each time, real outbound API cost per call closer
+// to ANALYZE_LIMIT's "expensive operation" ceiling than a cheap CRUD
+// action.
+const GMAIL_SYNC_LIMIT = 10;
+const GMAIL_SYNC_WINDOW_MS = 60 * 60 * 1000;
+
+export const checkGmailSyncRateLimit = createRateLimiter(GMAIL_SYNC_LIMIT, GMAIL_SYNC_WINDOW_MS);

@@ -14,6 +14,7 @@ export const SUBSCRIPTION_SOURCES = [
   "google_play_import",
   "plaid_import",
   "truelayer_import",
+  "gmail_import",
 ] as const;
 
 export type SubscriptionSource = (typeof SUBSCRIPTION_SOURCES)[number];

@@ -7,6 +7,7 @@ export const IMPORT_SOURCES = [
   "google_play_import",
   "plaid_import",
   "truelayer_import",
+  "gmail_import",
 ] as const;
 export type ImportSource = (typeof IMPORT_SOURCES)[number];
 

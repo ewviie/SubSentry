@@ -143,7 +143,11 @@ function detectCurrencyFromAmountString(raw: string): string | null {
   return CURRENCY_SYMBOLS[firstChar] ?? CURRENCY_SYMBOLS[lastChar] ?? null;
 }
 
-function cleanAmountString(raw: string): string {
+// Exported: gmail-extract.ts reuses this for the same reason a CSV cell
+// needs it — a regex-matched amount out of raw email text ("$9.99",
+// "USD 9.99") still has a currency symbol/thousands separator to strip
+// before amountStringToCents (money.ts) can parse it.
+export function cleanAmountString(raw: string): string {
   // Strip currency symbols, thousands separators, and surrounding
   // whitespace, but keep a leading "-" (sign) and the decimal point.
   return raw.trim().replace(/[^\d.,-]/g, "").replace(/,/g, "");

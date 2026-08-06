@@ -56,6 +56,7 @@ export function validateEnv(): EnvIssue[] {
   const pairs: [string, string, string, string][] = [
     ["PLAID_CLIENT_ID", "PLAID_SECRET", "Plaid", "Plaid import stays disabled"],
     ["TRUELAYER_CLIENT_ID", "TRUELAYER_CLIENT_SECRET", "TrueLayer", "TrueLayer import stays disabled"],
+    ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "Google", "Gmail import stays disabled"],
     [
       "UPSTASH_REDIS_REST_URL",
       "UPSTASH_REDIS_REST_TOKEN",
@@ -87,19 +88,24 @@ export function validateEnv(): EnvIssue[] {
     });
   }
 
-  // Resend is configured but no real sending domain was ever set — every
-  // verification email would go out from Resend's own shared sandbox
-  // address (see email.ts's fallback), which has no relationship to this
-  // app's own domain reputation and, on Resend's free tier, may only be
-  // deliverable to the account's own verified test addresses at all. Not
-  // fatal (mail can still send), but exactly the kind of "works in my
-  // testing, silently fails for real users" gap this module exists to
-  // surface at startup instead of on a support ticket.
-  if (process.env.RESEND_API_KEY && !process.env.RESEND_FROM_EMAIL) {
+  // Email sending (Nodemailer/SMTP — see auth/email.ts) is all-or-nothing:
+  // isEmailSendingConfigured() there requires every one of these five, so
+  // any subset being set is always a typo/incomplete-setup, never a
+  // deliberate partial configuration — the feature stays fully disabled
+  // (silently falling back to demo-mode console logging, or throwing in
+  // production) until all five are present.
+  const smtpVars = ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM"];
+  const smtpSet = smtpVars.filter((v) => Boolean(process.env[v]));
+  if (smtpSet.length > 0 && smtpSet.length < smtpVars.length) {
+    const missing = smtpVars.filter((v) => !smtpSet.includes(v));
     issues.push({
-      variable: "RESEND_FROM_EMAIL",
-      problem:
-        "RESEND_API_KEY is set but RESEND_FROM_EMAIL isn't — verification emails send from Resend's shared onboarding@resend.dev sandbox address, not a domain real users will trust or that reliably delivers outside your own verified test addresses",
+      variable: missing[0],
+      problem: `SMTP is partially configured (missing ${missing.join(", ")}) — verification emails stay undeliverable until all of ${smtpVars.join(", ")} are set`,
+    });
+  } else if (process.env.SMTP_PORT && !Number.isInteger(Number(process.env.SMTP_PORT))) {
+    issues.push({
+      variable: "SMTP_PORT",
+      problem: `set to "${process.env.SMTP_PORT}", which is not a valid port number`,
     });
   }
 
