@@ -134,7 +134,38 @@ export async function sendVerificationEmail(email: string, rawToken: string): Pr
       continue;
     }
 
-    if (response.ok) return;
+    // Diagnostic logging: a 2xx here only means Resend *accepted* the
+    // send request into its own queue — it is not proof of actual inbox
+    // delivery, which only Resend's own dashboard/webhooks know about
+    // later. Logging the returned id lets a specific send be looked up
+    // there; logging the full error body on failure surfaces Resend's
+    // own reason (e.g. "You can only send testing emails to your own
+    // email address" for an unverified sending domain) instead of just a
+    // bare status code.
+    const responseBody = await response.json().catch(() => null);
+
+    if (response.ok) {
+      console.log(
+        JSON.stringify({
+          level: "info",
+          context: "auth.email.resend-accepted",
+          resendId: responseBody?.id,
+          status: response.status,
+          timestamp: new Date().toISOString(),
+        }),
+      );
+      return;
+    }
+
+    console.error(
+      JSON.stringify({
+        level: "error",
+        context: "auth.email.resend-rejected",
+        status: response.status,
+        resendError: responseBody,
+        timestamp: new Date().toISOString(),
+      }),
+    );
 
     if (response.status < 500) {
       // Not transient — a 4xx will fail identically on every retry
