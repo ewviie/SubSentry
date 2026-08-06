@@ -1,0 +1,18 @@
+# SubSentry
+
+> AI-powered subscription management. Track what you're actually paying
+> for, catch duplicate or overpriced subscriptions, and add new
+> subscriptions by describing them in plain English instead of filling
+> out a form.
+
+SubSentry helps people see every subscription they're paying for in one
+place, flags likely duplicates and cost outliers using deterministic
+rules run against their own real transaction/subscription data (never a
+guessed or fabricated figure), and supports importing subscriptions from
+a bank CSV or a live bank connection.
+
+## Pages
+
+- [Home](/): product overview, features, how it works, FAQ.
+- [Log in](/login)
+- [Sign up](/signup)
