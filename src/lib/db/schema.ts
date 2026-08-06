@@ -108,7 +108,7 @@ export const imports = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     source: text("source", {
-      enum: ["csv_import", "apple_import", "google_play_import", "plaid_import", "truelayer_import"],
+      enum: ["csv_import", "apple_import", "google_play_import", "plaid_import", "truelayer_import", "gmail_import"],
     }).notNull(),
     status: text("status", { enum: ["reviewed", "completed", "failed"] })
       .notNull()
@@ -166,6 +166,50 @@ export const bankConnections = pgTable(
       table.provider,
       table.providerItemId,
     ),
+  ],
+);
+
+// One row per linked mailbox via a live-API import provider (Gmail today)
+// — see src/lib/imports/gmail-client.ts. Deliberately a separate table from
+// bankConnections rather than widening its `provider` enum: the shape
+// genuinely differs (emailAddress instead of institutionName; no
+// providerItemId — a user only ever has one Gmail connection at a time in
+// this design, so (userId, provider) alone is the uniqueness key, unlike
+// bank_connections which supports multiple institutions per user) and
+// conflating "a linked bank account" with "a linked mailbox" under one
+// table would make both harder to read for no real code reuse (the actual
+// reusable logic — AES-256-GCM token encryption — already lives in
+// src/lib/security/token-encryption.ts, shared by both). Same
+// encrypted-at-rest reasoning as bankConnections: an access/refresh token
+// here must be decryptable to actually call the Gmail API later.
+export const emailConnections = pgTable(
+  "email_connections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    provider: text("provider", { enum: ["gmail"] }).notNull(),
+    // The mailbox address this connection reads from — shown in the
+    // "Connected as ___" UI state so a user can tell which account is
+    // linked without needing to disconnect first to check.
+    emailAddress: text("email_address").notNull(),
+    accessTokenEncrypted: text("access_token_encrypted").notNull(),
+    // Google's OAuth access tokens expire in ~1 hour; refresh_token is only
+    // ever issued on the first consent (access_type=offline + prompt=consent
+    // — see gmail-client.ts), so this can be null on a re-consent Google
+    // silently treats as already-granted.
+    refreshTokenEncrypted: text("refresh_token_encrypted"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    // Distinct from updatedAt (which also changes on every token refresh) —
+    // this only moves when a sync actually ran, so the UI's "Last synced"
+    // state reflects real scan activity, not incidental token housekeeping.
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("email_connections_user_provider_idx").on(table.userId, table.provider),
   ],
 );
 
@@ -239,6 +283,8 @@ export type Import = typeof imports.$inferSelect;
 export type NewImport = typeof imports.$inferInsert;
 export type BankConnection = typeof bankConnections.$inferSelect;
 export type NewBankConnection = typeof bankConnections.$inferInsert;
+export type EmailConnection = typeof emailConnections.$inferSelect;
+export type NewEmailConnection = typeof emailConnections.$inferInsert;
 export type CheckoutSession = typeof checkoutSessions.$inferSelect;
 export type LoginAttempt = typeof loginAttempts.$inferSelect;
 export type EmailVerificationToken = typeof emailVerificationTokens.$inferSelect;

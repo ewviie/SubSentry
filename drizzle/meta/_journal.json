@@ -50,6 +50,13 @@
       "when": 1785867370803,
       "tag": "0006_married_sinister_six",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786017012927,
+      "tag": "0007_nasty_human_robot",
+      "breakpoints": true
     }
   ]
 }

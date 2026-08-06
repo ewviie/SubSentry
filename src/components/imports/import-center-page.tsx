@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { SourcePicker, SOURCE_LABELS } from "./source-picker";
 import { FileUploadStep } from "./file-upload-step";
 import { ConnectBankStep } from "./connect-bank-step";
+import { ConnectEmailStep } from "./connect-email-step";
 import { AnalyzingStep } from "./analyzing-step";
 import { ReviewTable } from "./review-table";
 import { ImportCompleteStep } from "./import-complete-step";
@@ -31,11 +32,12 @@ const STEP_LABELS: Record<Step, string> = {
   complete: "Done",
 };
 
-const LIVE_API_SOURCES: ImportSourceId[] = ["plaid", "truelayer"];
+const LIVE_API_SOURCES: ImportSourceId[] = ["plaid", "truelayer", "gmail"];
 
 const SYNC_ROUTE: Partial<Record<ImportSourceId, string>> = {
   plaid: "/api/imports/plaid/sync",
   truelayer: "/api/imports/truelayer/sync",
+  gmail: "/api/imports/gmail/sync",
 };
 
 const TRUELAYER_ERROR_MESSAGES: Record<string, string> = {
@@ -47,18 +49,27 @@ const TRUELAYER_ERROR_MESSAGES: Record<string, string> = {
   rate_limited: "Too many connection attempts recently. Try again in a bit.",
 };
 
+const GMAIL_ERROR_MESSAGES: Record<string, string> = {
+  denied: "Google connection was cancelled.",
+  invalid_state: "That connection link expired. Try connecting again.",
+  connect_failed: "Couldn't finish connecting your Google account. Try again.",
+  disabled: "Google import isn't available yet.",
+  rate_limited: "Too many connection attempts recently. Try again in a bit.",
+};
+
 // The confirm endpoint's `source` enum (subscriptions.source's provenance
 // tag) is distinct from the wizard's ImportSourceId (which providers the
 // analyze route dispatches by) — see src/lib/imports/validation.ts.
 const CONFIRM_SOURCE_MAP: Record<
   ImportSourceId,
-  "csv_import" | "apple_import" | "google_play_import" | "plaid_import" | "truelayer_import"
+  "csv_import" | "apple_import" | "google_play_import" | "plaid_import" | "truelayer_import" | "gmail_import"
 > = {
   csv_bank: "csv_import",
   apple: "apple_import",
   google_play: "google_play_import",
   plaid: "plaid_import",
   truelayer: "truelayer_import",
+  gmail: "gmail_import",
 };
 
 // Numbered-circle/check stepper (Stripe-checkout anatomy: circle + label +
@@ -112,9 +123,15 @@ function StepProgress({ step }: { step: Step }) {
 export function ImportCenterPage({
   plaidEnabled = false,
   trueLayerEnabled = false,
+  gmailEnabled = false,
+  gmailConnectedEmail = null,
+  gmailLastSyncedAt = null,
 }: {
   plaidEnabled?: boolean;
   trueLayerEnabled?: boolean;
+  gmailEnabled?: boolean;
+  gmailConnectedEmail?: string | null;
+  gmailLastSyncedAt?: string | null;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -170,26 +187,41 @@ export function ImportCenterPage({
     void runSync("truelayer");
   }
 
+  function connectFromGmailRedirect() {
+    setSource("gmail");
+    void runSync("gmail");
+  }
+
   // TrueLayer's OAuth flow is a full-page redirect (see
   // /api/imports/truelayer/authorize and .../callback), so it can't hand
   // results back via a fetch() response the way Plaid's in-page Link modal
   // does — it lands back here as a query param on a fresh page load
   // instead. Same pattern as CheckoutActivator picking up
-  // ?checkout_session_id after Stripe's redirect.
+  // ?checkout_session_id after Stripe's redirect. Gmail's OAuth flow is
+  // architecturally identical (see /api/imports/gmail/authorize
+  // and .../callback), so it lands here the same way.
   useEffect(() => {
     if (handledRedirect.current) return;
-    const connected = searchParams.get("truelayer_connected");
-    const error = searchParams.get("truelayer_error");
-    if (!connected && !error) return;
+    const trueLayerConnected = searchParams.get("truelayer_connected");
+    const trueLayerError = searchParams.get("truelayer_error");
+    const gmailConnected = searchParams.get("gmail_connected");
+    const gmailError = searchParams.get("gmail_error");
+    if (!trueLayerConnected && !trueLayerError && !gmailConnected && !gmailError) return;
     handledRedirect.current = true;
 
     const url = new URL(window.location.href);
     url.searchParams.delete("truelayer_connected");
     url.searchParams.delete("truelayer_error");
+    url.searchParams.delete("gmail_connected");
+    url.searchParams.delete("gmail_error");
     router.replace((url.pathname + url.search) as Route);
 
-    if (error) {
-      toast.error(TRUELAYER_ERROR_MESSAGES[error] ?? "Couldn't connect your bank. Try again.");
+    if (trueLayerError) {
+      toast.error(TRUELAYER_ERROR_MESSAGES[trueLayerError] ?? "Couldn't connect your bank. Try again.");
+      return;
+    }
+    if (gmailError) {
+      toast.error(GMAIL_ERROR_MESSAGES[gmailError] ?? "Couldn't connect your Google account. Try again.");
       return;
     }
 
@@ -197,10 +229,11 @@ export function ImportCenterPage({
     // react-hooks/set-state-in-effect flags direct setState calls here, and
     // this genuinely is "subscribe to an external system (the URL), react
     // to it once it settles" rather than a render-time state derivation.
-    queueMicrotask(connectFromTrueLayerRedirect);
-    // runSync/connectFromTrueLayerRedirect are stable enough for this
-    // one-shot redirect-landing effect — re-running it on every render
-    // would refetch on unrelated re-renders.
+    if (trueLayerConnected) queueMicrotask(connectFromTrueLayerRedirect);
+    if (gmailConnected) queueMicrotask(connectFromGmailRedirect);
+    // runSync/connectFrom*Redirect are stable enough for this one-shot
+    // redirect-landing effect — re-running it on every render would refetch
+    // on unrelated re-renders.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, router]);
 
@@ -282,7 +315,8 @@ export function ImportCenterPage({
           <CardDescription>
             {step === "source" && "Pick where you'd like to import subscriptions from."}
             {step === "upload" && "We only read what's needed to detect subscriptions — the file itself is never stored."}
-            {step === "connect" && "Nothing is fetched until you finish connecting your bank."}
+            {step === "connect" && source === "gmail" && "Nothing is scanned until you finish connecting your Google account."}
+            {step === "connect" && source !== "gmail" && "Nothing is fetched until you finish connecting your bank."}
             {step === "analyzing" && "This only takes a moment."}
             {step === "review" &&
               "Only high-confidence matches are pre-selected. Nothing is imported until you confirm."}
@@ -303,6 +337,7 @@ export function ImportCenterPage({
                   onSelect={handleSelectSource}
                   plaidEnabled={plaidEnabled}
                   trueLayerEnabled={trueLayerEnabled}
+                  gmailEnabled={gmailEnabled}
                 />
               ) : null}
               {step === "upload" ? (
@@ -313,6 +348,22 @@ export function ImportCenterPage({
                   <ConnectBankStep
                     source={source}
                     onConnected={() => void runSync(source)}
+                    onError={setConnectError}
+                  />
+                  {connectError ? (
+                    <p role="alert" className="text-center text-sm text-destructive">
+                      {connectError}
+                    </p>
+                  ) : null}
+                </>
+              ) : null}
+              {step === "connect" && source === "gmail" ? (
+                <>
+                  <ConnectEmailStep
+                    connectedEmail={gmailConnectedEmail}
+                    lastSyncedAt={gmailLastSyncedAt}
+                    onSync={() => void runSync("gmail")}
+                    onDisconnected={reset}
                     onError={setConnectError}
                   />
                   {connectError ? (
