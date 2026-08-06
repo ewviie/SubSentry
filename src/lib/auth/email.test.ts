@@ -1,14 +1,31 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { isEmailSendingConfigured, sendVerificationEmail } from "./email";
 
+// vi.mock calls are hoisted above imports by Vitest's transform, so the
+// mocked module applies before ./email's own `import nodemailer from
+// "nodemailer"` is evaluated. vi.hoisted() is the explicit escape hatch for
+// referencing these from inside the mock factory (a plain outer const
+// would otherwise trip Vitest's temporal-dead-zone hoisting check).
+const { sendMailMock, createTransportMock } = vi.hoisted(() => {
+  const sendMailMock = vi.fn();
+  const createTransportMock = vi.fn((_options: unknown) => ({ sendMail: sendMailMock }));
+  return { sendMailMock, createTransportMock };
+});
+
+vi.mock("nodemailer", () => ({
+  default: { createTransport: (options: unknown) => createTransportMock(options) },
+}));
+
 // NODE_ENV is handled separately via vi.stubEnv/unstubAllEnvs below —
 // @types/node marks it read-only, so a plain `process.env.NODE_ENV = ...`
 // assignment (which works fine at runtime under Vitest) fails typecheck.
-const ENV_KEYS = ["RESEND_API_KEY", "RESEND_FROM_EMAIL"] as const;
+const ENV_KEYS = ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM"] as const;
 let saved: Record<string, string | undefined>;
 
 beforeEach(() => {
   saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
+  sendMailMock.mockReset();
+  createTransportMock.mockClear();
 });
 
 afterEach(() => {
@@ -17,154 +34,169 @@ afterEach(() => {
     else process.env[k] = saved[k];
   }
   vi.unstubAllEnvs();
-  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
 describe("isEmailSendingConfigured", () => {
-  it("is false when RESEND_API_KEY is unset", () => {
-    delete process.env.RESEND_API_KEY;
+  it("is false when any required SMTP_* var is unset", () => {
+    delete process.env.SMTP_HOST;
+    process.env.SMTP_PORT = "587";
+    process.env.SMTP_USER = "user@outlook.com";
+    process.env.SMTP_PASSWORD = "pw";
+    process.env.SMTP_FROM = "SubSentry <user@outlook.com>";
     expect(isEmailSendingConfigured()).toBe(false);
   });
 
-  it("is true when RESEND_API_KEY is set", () => {
-    process.env.RESEND_API_KEY = "re_test";
+  it("is true when all required SMTP_* vars are set", () => {
+    process.env.SMTP_HOST = "smtp-mail.outlook.com";
+    process.env.SMTP_PORT = "587";
+    process.env.SMTP_USER = "user@outlook.com";
+    process.env.SMTP_PASSWORD = "pw";
+    process.env.SMTP_FROM = "SubSentry <user@outlook.com>";
     expect(isEmailSendingConfigured()).toBe(true);
   });
 });
 
 describe("sendVerificationEmail — unconfigured (demo mode)", () => {
   it("logs the link and returns in non-production", async () => {
-    delete process.env.RESEND_API_KEY;
+    delete process.env.SMTP_HOST;
     vi.stubEnv("NODE_ENV", "test");
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    const fetchSpy = vi.fn();
-    vi.stubGlobal("fetch", fetchSpy);
 
     await expect(sendVerificationEmail("user@example.com", "raw-token")).resolves.toBeUndefined();
     expect(logSpy).toHaveBeenCalledOnce();
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(createTransportMock).not.toHaveBeenCalled();
   });
 
   it("throws in production rather than logging a live verification link", async () => {
-    delete process.env.RESEND_API_KEY;
+    delete process.env.SMTP_HOST;
     vi.stubEnv("NODE_ENV", "production");
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
-    await expect(sendVerificationEmail("user@example.com", "raw-token")).rejects.toThrow(/RESEND_API_KEY/);
+    await expect(sendVerificationEmail("user@example.com", "raw-token")).rejects.toThrow(/SMTP/);
     expect(logSpy).not.toHaveBeenCalled();
   });
 });
 
-describe("sendVerificationEmail — configured (Resend API)", () => {
+describe("sendVerificationEmail — configured (SMTP via Nodemailer)", () => {
   beforeEach(() => {
-    process.env.RESEND_API_KEY = "re_test_key";
+    process.env.SMTP_HOST = "smtp-mail.outlook.com";
+    process.env.SMTP_PORT = "587";
+    process.env.SMTP_USER = "user@outlook.com";
+    process.env.SMTP_PASSWORD = "pw";
+    process.env.SMTP_FROM = "SubSentry <user@outlook.com>";
   });
-
-  // A bare { ok, status } object stands in for most of these mocks; a few
-  // below also need a working .json() since sendVerificationEmail now
-  // always reads the response body for diagnostic logging.
-  function mockResponse(ok: boolean, status: number, body: unknown = {}) {
-    return { ok, status, json: () => Promise.resolve(body) };
-  }
 
   it("succeeds on the first attempt, no retry", async () => {
-    const fetchSpy = vi.fn().mockResolvedValue(mockResponse(true, 200, { id: "email-id-1" }));
-    vi.stubGlobal("fetch", fetchSpy);
+    sendMailMock.mockResolvedValue({ messageId: "msg-1", accepted: ["user@example.com"], rejected: [] });
 
     await expect(sendVerificationEmail("user@example.com", "raw-token")).resolves.toBeUndefined();
-    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(sendMailMock).toHaveBeenCalledOnce();
   });
 
-  it("sends the expected copy, with the verification link in both the html and text bodies", async () => {
-    const fetchSpy = vi.fn().mockResolvedValue(mockResponse(true, 200, { id: "email-id-2" }));
-    vi.stubGlobal("fetch", fetchSpy);
+  it("creates the transporter from SMTP_* env vars, with secure:false on port 587", async () => {
+    sendMailMock.mockResolvedValue({ messageId: "msg-2", accepted: [], rejected: [] });
 
     await sendVerificationEmail("user@example.com", "raw-token");
 
-    const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
-    expect(body.html).toContain("Thanks for creating a SubSentry account");
-    expect(body.html).toContain("Verify email address");
-    expect(body.html).toContain("Once your email has been verified");
-    expect(body.text).toContain("Thanks for creating a SubSentry account");
-    expect(body.html).toMatch(/href="http[^"]*\/verify-email\?token=raw-token"/);
-    expect(body.text).toContain("/verify-email?token=raw-token");
+    expect(createTransportMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        host: "smtp-mail.outlook.com",
+        port: 587,
+        secure: false,
+        auth: { user: "user@outlook.com", pass: "pw" },
+      }),
+    );
   });
 
-  // Diagnostic logging (added while chasing a real "API returns 200 but
-  // nothing arrives" case, root-caused to Resend's shared resend.dev
-  // sending domain silently rejecting real recipients): a 2xx from Resend
-  // only means the send request was accepted into its queue, not that it
-  // was actually delivered — this just confirms the id gets logged so a
-  // specific send can be looked up in Resend's own dashboard later, and
-  // that a rejection's exact reason (not just a status code) gets logged
-  // too, rather than treating either as a black box.
-  it("logs the Resend email id on a successful send", async () => {
-    const fetchSpy = vi.fn().mockResolvedValue(mockResponse(true, 200, { id: "email-id-3" }));
-    vi.stubGlobal("fetch", fetchSpy);
+  it("sends the expected copy, with the verification link in both the html and text bodies, from SMTP_FROM", async () => {
+    sendMailMock.mockResolvedValue({ messageId: "msg-3", accepted: [], rejected: [] });
+
+    await sendVerificationEmail("user@example.com", "raw-token");
+
+    const mail = sendMailMock.mock.calls[0][0];
+    expect(mail.from).toBe("SubSentry <user@outlook.com>");
+    expect(mail.to).toBe("user@example.com");
+    expect(mail.html).toContain("Thanks for creating a SubSentry account");
+    expect(mail.html).toContain("Verify email address");
+    expect(mail.html).toContain("Once your email has been verified");
+    expect(mail.text).toContain("Thanks for creating a SubSentry account");
+    expect(mail.html).toMatch(/href="http[^"]*\/verify-email\?token=raw-token"/);
+    expect(mail.text).toContain("/verify-email?token=raw-token");
+  });
+
+  // Diagnostic logging (same reasoning this carried over from the prior
+  // Resend implementation): a successful sendMail() only means the SMTP
+  // server *accepted* the message, not that it reached the recipient's
+  // inbox — logging the messageId lets a specific send be traced, and
+  // logging the full SMTP failure (code/responseCode/response), not just
+  // "it failed", is what actually distinguishes a bad password from a
+  // rejected recipient from a timed-out connection.
+  it("logs the message id on a successful send", async () => {
+    sendMailMock.mockResolvedValue({ messageId: "msg-4", accepted: ["user@example.com"], rejected: [] });
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
     await sendVerificationEmail("user@example.com", "raw-token");
 
-    const logged = logSpy.mock.calls.map((c) => c[0]).find((line) => String(line).includes("email-id-3"));
+    const logged = logSpy.mock.calls.map((c) => c[0]).find((line) => String(line).includes("msg-4"));
     expect(logged).toBeDefined();
   });
 
-  it("logs Resend's own rejection reason, not just a bare status code", async () => {
-    const rejection = { statusCode: 403, name: "validation_error", message: "You can only send testing emails to your own email address" };
-    const fetchSpy = vi.fn().mockResolvedValue(mockResponse(false, 403, rejection));
-    vi.stubGlobal("fetch", fetchSpy);
+  it("logs the SMTP failure's code/responseCode, not just that it failed", async () => {
+    const error = Object.assign(new Error("Invalid login"), { code: "EAUTH", responseCode: 535 });
+    sendMailMock.mockRejectedValue(error);
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await expect(sendVerificationEmail("user@example.com", "raw-token")).rejects.toThrow(/403/);
+    await expect(sendVerificationEmail("user@example.com", "raw-token")).rejects.toThrow(/Invalid login/);
 
-    const logged = errorSpy.mock.calls.map((c) => c[0]).find((line) => String(line).includes("validation_error"));
+    const logged = errorSpy.mock.calls.map((c) => c[0]).find((line) => String(line).includes("EAUTH"));
     expect(logged).toBeDefined();
   });
 
-  it("retries on a 5xx and succeeds on the second attempt", async () => {
-    const fetchSpy = vi
-      .fn()
-      .mockResolvedValueOnce(mockResponse(false, 503))
-      .mockResolvedValueOnce(mockResponse(true, 200, { id: "email-id-4" }));
-    vi.stubGlobal("fetch", fetchSpy);
+  it("does not retry EAUTH (bad credentials) — retrying can't fix a wrong password", async () => {
+    const error = Object.assign(new Error("Invalid login"), { code: "EAUTH", responseCode: 535 });
+    sendMailMock.mockRejectedValue(error);
+
+    await expect(sendVerificationEmail("user@example.com", "raw-token")).rejects.toThrow(/Invalid login/);
+    expect(sendMailMock).toHaveBeenCalledOnce();
+  });
+
+  it("retries a 4xx SMTP response (temporary failure per RFC 5321) and succeeds on the second attempt", async () => {
+    sendMailMock
+      .mockRejectedValueOnce(Object.assign(new Error("Mailbox busy"), { responseCode: 450 }))
+      .mockResolvedValueOnce({ messageId: "msg-5", accepted: [], rejected: [] });
 
     await expect(sendVerificationEmail("user@example.com", "raw-token")).resolves.toBeUndefined();
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(sendMailMock).toHaveBeenCalledTimes(2);
   });
 
-  it("retries on a network error (fetch throwing) and succeeds on a later attempt", async () => {
-    const fetchSpy = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("network down"))
-      .mockResolvedValueOnce(mockResponse(true, 200, { id: "email-id-5" }));
-    vi.stubGlobal("fetch", fetchSpy);
+  it("does not retry a 5xx SMTP response (permanent failure per RFC 5321)", async () => {
+    sendMailMock.mockRejectedValue(Object.assign(new Error("Mailbox unavailable"), { responseCode: 550 }));
+
+    await expect(sendVerificationEmail("user@example.com", "raw-token")).rejects.toThrow(/Mailbox unavailable/);
+    expect(sendMailMock).toHaveBeenCalledOnce();
+  });
+
+  it("retries a connection-level error (no SMTP response at all) and succeeds on a later attempt", async () => {
+    sendMailMock
+      .mockRejectedValueOnce(Object.assign(new Error("connect ETIMEDOUT"), { code: "ETIMEDOUT" }))
+      .mockResolvedValueOnce({ messageId: "msg-6", accepted: [], rejected: [] });
 
     await expect(sendVerificationEmail("user@example.com", "raw-token")).resolves.toBeUndefined();
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(sendMailMock).toHaveBeenCalledTimes(2);
   });
 
-  it("does not retry a 4xx — fails fast since it isn't transient", async () => {
-    const fetchSpy = vi.fn().mockResolvedValue(mockResponse(false, 422));
-    vi.stubGlobal("fetch", fetchSpy);
+  it("throws after exhausting all retries on a persistent 4xx", async () => {
+    sendMailMock.mockRejectedValue(Object.assign(new Error("Mailbox busy"), { responseCode: 450 }));
 
-    await expect(sendVerificationEmail("user@example.com", "raw-token")).rejects.toThrow(/422/);
-    expect(fetchSpy).toHaveBeenCalledOnce();
+    await expect(sendVerificationEmail("user@example.com", "raw-token")).rejects.toThrow(/Mailbox busy/);
+    expect(sendMailMock).toHaveBeenCalledTimes(3);
   });
 
-  it("throws after exhausting all retries on persistent 5xx failures", async () => {
-    const fetchSpy = vi.fn().mockResolvedValue(mockResponse(false, 500));
-    vi.stubGlobal("fetch", fetchSpy);
-
-    await expect(sendVerificationEmail("user@example.com", "raw-token")).rejects.toThrow(/500/);
-    expect(fetchSpy).toHaveBeenCalledTimes(3);
-  });
-
-  it("throws after exhausting all retries on persistent network errors", async () => {
-    const fetchSpy = vi.fn().mockRejectedValue(new Error("still down"));
-    vi.stubGlobal("fetch", fetchSpy);
+  it("throws after exhausting all retries on persistent connection errors", async () => {
+    sendMailMock.mockRejectedValue(Object.assign(new Error("still down"), { code: "ECONNECTION" }));
 
     await expect(sendVerificationEmail("user@example.com", "raw-token")).rejects.toThrow(/still down/);
-    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(sendMailMock).toHaveBeenCalledTimes(3);
   });
 });
