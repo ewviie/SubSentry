@@ -1,20 +1,28 @@
 import { test, expect } from "@playwright/test";
-import { uniqueEmail, getRawVerificationTokenForEmail, deleteTestUser, closeDb } from "./helpers/db";
+import { uniqueEmail, deleteTestUser, closeDb } from "./helpers/db";
 
 test.afterAll(async () => {
   await closeDb();
 });
 
+// Email verification is disabled in the active signup flow — CAPTCHA + rate
+// limiting + lockout are the bot/abuse protection instead (see
+// api/auth/signup/route.ts). The underlying verification implementation
+// (token issuance, /api/auth/verify-email, /api/auth/resend-verification)
+// is kept intact and isolated for a future re-enable; the "an
+// invalid-looking token" case below still exercises /verify-email directly
+// to confirm that dormant code path hasn't bit-rotted, without depending on
+// signup ever producing an unverified user to test the valid-token case
+// against.
 test.describe("signup", () => {
-  test("valid signup shows the check-your-email screen, not the dashboard", async ({ page }) => {
+  test("valid signup logs the user in immediately and lands on the dashboard", async ({ page }) => {
     const email = uniqueEmail("e2e-signup");
     await page.goto("/signup");
     await page.getByLabel("Email").fill(email);
     await page.getByLabel("Password", { exact: true }).fill("a-strong-password-123");
     await page.getByRole("button", { name: "Create account" }).click();
 
-    await expect(page.getByText("Check your email")).toBeVisible();
-    await expect(page).toHaveURL(/\/signup$/);
+    await expect(page).toHaveURL(/\/dashboard$/, { timeout: 5000 });
 
     await deleteTestUser(email);
   });
@@ -31,61 +39,7 @@ test.describe("signup", () => {
   });
 });
 
-test.describe("email verification -> login", () => {
-  test("verifying activates the account and logs the user in; logging out then requires a real login", async ({
-    page,
-  }) => {
-    const email = uniqueEmail("e2e-verify");
-    const password = "a-strong-password-123";
-
-    await page.goto("/signup");
-    await page.getByLabel("Email").fill(email);
-    await page.getByLabel("Password", { exact: true }).fill(password);
-    await page.getByRole("button", { name: "Create account" }).click();
-    await expect(page.getByText("Check your email")).toBeVisible();
-
-    // Login must be blocked pre-verification.
-    await page.goto("/login");
-    await page.getByLabel("Email").fill(email);
-    await page.getByLabel("Password", { exact: true }).fill(password);
-    await page.getByRole("button", { name: "Log in" }).click();
-    await expect(page.getByText(/verify your email/i)).toBeVisible();
-    await expect(page).toHaveURL(/\/login$/);
-
-    const rawToken = await getRawVerificationTokenForEmail(email);
-    expect(rawToken).not.toBeNull();
-
-    await page.goto(`/verify-email?token=${rawToken}`);
-    await expect(page.getByText("Email verified")).toBeVisible();
-    await page.waitForURL(/\/dashboard$/, { timeout: 5000 });
-    // The dashboard just mounted via a client-side router.push() from
-    // /verify-email — clicking the (client-component) logout button before
-    // React finishes hydrating it is a real flake risk: the element is
-    // already "visible" by Playwright's actionability check, but its
-    // onClick isn't wired up yet, so the click silently no-ops. Waiting for
-    // the network to settle is a reasonable proxy for "hydration finished"
-    // without pinning this on a fixed sleep.
-    await page.waitForLoadState("networkidle");
-    const logoutButton = page.getByRole("button", { name: /log out/i });
-
-    // Now log out and confirm a real login (post-verification) succeeds.
-    // Asserting on the login form appearing (not waitForURL) — logout
-    // navigates via router.push(), a client-side history change rather
-    // than a full page load, which is a more brittle thing to pin a
-    // navigation-event wait on than just checking the page we actually
-    // expect to land on renders.
-    await logoutButton.click();
-    await expect(page.getByRole("button", { name: "Log in" })).toBeVisible({ timeout: 10_000 });
-
-    await page.goto("/login");
-    await page.getByLabel("Email").fill(email);
-    await page.getByLabel("Password", { exact: true }).fill(password);
-    await page.getByRole("button", { name: "Log in" }).click();
-    await expect(page).toHaveURL(/\/dashboard$/);
-
-    await deleteTestUser(email);
-  });
-
+test.describe("email verification (dormant, kept for a future re-enable)", () => {
   test("an invalid/expired-looking token shows a clear error, not a crash", async ({ page }) => {
     await page.goto("/verify-email?token=this-token-was-never-issued");
     await expect(page.getByText("Verification failed")).toBeVisible();

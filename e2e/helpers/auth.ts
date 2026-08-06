@@ -1,5 +1,5 @@
 import type { Browser, Page } from "@playwright/test";
-import { uniqueEmail, getRawVerificationTokenForEmail } from "./db";
+import { uniqueEmail } from "./db";
 
 export interface TestUser {
   email: string;
@@ -9,9 +9,16 @@ export interface TestUser {
 
 let syntheticIpCounter = 0;
 
-// Full signup -> verify -> login for one fresh user in a brand-new browser
-// context, so two calls in the same test never share cookies/session state
-// — the exact isolation an IDOR test needs between "attacker" and "victim".
+// Signup for one fresh user in a brand-new browser context, so two calls in
+// the same test never share cookies/session state — the exact isolation an
+// IDOR test needs between "attacker" and "victim". Named createVerifiedUser
+// (not createUser) because every caller in this suite still just wants "a
+// logged-in user" regardless of the name — kept as-is rather than a
+// rename-only churn across every spec file that imports it. Signup logs
+// the user straight in now: email verification is disabled in the active
+// auth flow (see api/auth/signup/route.ts), though the underlying
+// implementation and its own e2e coverage (verify-email's standalone
+// token-handling behavior) are kept intact for a future re-enable.
 export async function createVerifiedUser(browser: Browser, emailPrefix: string): Promise<TestUser> {
   const email = uniqueEmail(emailPrefix);
   const password = "a-strong-password-123";
@@ -33,10 +40,6 @@ export async function createVerifiedUser(browser: Browser, emailPrefix: string):
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Create account" }).click();
-  await page.waitForSelector("text=Check your email");
-
-  const rawToken = await getRawVerificationTokenForEmail(email);
-  await page.goto(`/verify-email?token=${rawToken}`);
   await page.waitForURL(/\/dashboard$/, { timeout: 5000 });
 
   return { email, password, page };

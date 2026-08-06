@@ -86,20 +86,12 @@ export async function POST(request: Request) {
 
   await resetLoginAttempts(email);
 
-  // Checked only after the password has already been confirmed correct —
-  // telling an unauthenticated caller "this account needs verification"
-  // before they've proven they own it would leak account existence the
-  // same way a distinct "no such user" error would (see DUMMY_HASH above).
-  if (!user.emailVerified) {
-    return NextResponse.json(
-      {
-        error: "email_not_verified",
-        message: "Verify your email before logging in. Check your inbox, or request a new link.",
-      },
-      { status: 403 },
-    );
-  }
-
+  // No emailVerified gate here — email verification is disabled for the
+  // active auth flow (see signup/route.ts's comment: CAPTCHA + rate
+  // limiting + lockout are the bot/abuse protection instead). The
+  // emailVerified column and the rest of the verification implementation
+  // are kept intact for a future re-enable; this route just doesn't
+  // consult it right now.
   await createSession(user.id);
 
   return NextResponse.json({ ok: true });
