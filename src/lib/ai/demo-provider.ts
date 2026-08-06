@@ -1,6 +1,8 @@
 import type { AIProvider, ParsedSubscriptionResult } from "./provider";
 import type { ComputedInsight } from "@/lib/subscriptions/insights";
+import { normalizeName } from "@/lib/subscriptions/insights";
 import { CATEGORIES } from "@/lib/subscriptions/validation";
+import { KNOWN_MERCHANTS } from "@/lib/imports/merchant-normalizer";
 
 const CURRENCY_SYMBOLS: Record<string, string> = { "£": "gbp", "€": "eur", "$": "usd", "¥": "jpy" };
 const CYCLE_KEYWORDS: Record<string, ParsedSubscriptionResult["billingCycle"]> = {
@@ -12,11 +14,31 @@ const CYCLE_KEYWORDS: Record<string, ParsedSubscriptionResult["billingCycle"]> =
   quarter: "quarterly",
 };
 
-const CATEGORY_KEYWORDS: Partial<Record<(typeof CATEGORIES)[number], string[]>> = {
-  streaming: ["netflix", "spotify", "disney", "hulu", "hbo", "prime video", "youtube"],
-  software: ["adobe", "microsoft", "github", "notion", "figma", "office"],
+// Longest alias first: KNOWN_MERCHANTS has both a generic "apple" (bank
+// descriptors like "APL*ITUNES.COM/BILL" can't tell Apple Music from
+// iCloud+, so that entry is deliberately generic — see
+// merchant-normalizer.ts) and a specific "applemusic" — checking longest
+// first means typing "Apple Music" in quick-add matches the specific
+// streaming entry, not the shorter, less-precise "apple" one.
+//
+// >= 4 chars only — same gate merchant-normalizer.ts's own substring
+// matcher uses (see its FUZZY_MIN_KEY_LENGTH/length-4 comment): a short
+// alias like "max" (HBO's rebrand) is a real merchant but too short to
+// safely substring-match against a whole free-typed sentence rather than
+// a terse bank descriptor — "my max budget this month" would otherwise
+// false-positive as HBO Max.
+const KNOWN_MERCHANT_ALIASES = Object.keys(KNOWN_MERCHANTS)
+  .filter((alias) => alias.length >= 4)
+  .sort((a, b) => b.length - a.length);
+
+// Categories/services genuinely absent from KNOWN_MERCHANTS (which is
+// curated for bank-descriptor matching — brand names, not generic word
+// patterns like "gym" or "news") — checked only after KNOWN_MERCHANTS
+// finds nothing, so a real, curated merchant match always wins over a
+// generic keyword guess.
+const FALLBACK_CATEGORY_KEYWORDS: Partial<Record<(typeof CATEGORIES)[number], string[]>> = {
   fitness: ["gym", "peloton", "strava", "fitness"],
-  gaming: ["xbox", "playstation", "steam", "nintendo"],
+  gaming: ["steam", "nintendo"],
   news: ["times", "post", "journal", "news"],
 };
 
@@ -45,11 +67,22 @@ export class DemoProvider implements AIProvider {
       }
     }
 
+    // "other" is a real, honest answer when nothing matches — never
+    // overridden with a guessed category this parser can't back — but it
+    // shouldn't be reached just because a merchant this app already knows
+    // (KNOWN_MERCHANTS, shared with the CSV/bank-import path) wasn't
+    // checked. Real curated data first, generic keyword fallback second.
     let category: (typeof CATEGORIES)[number] = "other";
-    for (const [cat, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
-      if (keywords?.some((k) => lower.includes(k))) {
-        category = cat as (typeof CATEGORIES)[number];
-        break;
+    const normalizedText = normalizeName(text);
+    const matchedAlias = KNOWN_MERCHANT_ALIASES.find((alias) => normalizedText.includes(alias));
+    if (matchedAlias) {
+      category = KNOWN_MERCHANTS[matchedAlias].category;
+    } else {
+      for (const [cat, keywords] of Object.entries(FALLBACK_CATEGORY_KEYWORDS)) {
+        if (keywords?.some((k) => lower.includes(k))) {
+          category = cat as (typeof CATEGORIES)[number];
+          break;
+        }
       }
     }
 

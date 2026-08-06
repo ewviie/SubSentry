@@ -40,8 +40,15 @@ const CANONICAL_MERCHANTS: CanonicalMerchant[] = [
   { displayName: "Canal+", category: "streaming", aliases: ["canalplus"] },
   { displayName: "Adobe", category: "software", aliases: ["adobe"] },
   // "itunes" covers Apple's real billing descriptor for subscriptions,
-  // typically seen as "APL*ITUNES.COM/BILL" on a card statement.
+  // typically seen as "APL*ITUNES.COM/BILL" on a card statement — that
+  // descriptor never distinguishes Apple Music from iCloud+ or a third-party
+  // App Store subscription, so "software" is the safest inference a bank
+  // import can make from it alone. "Apple Music" is a separate, more
+  // specific entry below for contexts (quick-add's free-typed text) where
+  // the actual service name is unambiguous.
   { displayName: "Apple", category: "software", aliases: ["apple", "itunes"] },
+  { displayName: "Apple Music", category: "streaming", aliases: ["applemusic"] },
+  { displayName: "Apple TV+", category: "streaming", aliases: ["appletv", "appletvplus"] },
   { displayName: "Google", category: "software", aliases: ["google"] },
   { displayName: "Google One", category: "software", aliases: ["googleone"] },
   { displayName: "Amazon", category: "other", aliases: ["amazon", "amzn"] },
