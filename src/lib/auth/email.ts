@@ -7,11 +7,53 @@
 // real email vendor. Swap the body of sendVerificationEmail for a real
 // Resend (or any provider) API call once one is chosen; every caller
 // already treats this as async and failure-tolerant.
+function appBaseUrl(): string {
+  return process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+}
+
 function buildVerificationUrl(rawToken: string): string {
-  const base = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-  const url = new URL("/verify-email", base);
+  const url = new URL("/verify-email", appBaseUrl());
   url.searchParams.set("token", rawToken);
   return url.toString();
+}
+
+// support@subsentry.app is a placeholder, same convention as
+// PRIVACY.md's privacy@subsentry.app — swap for a real support address
+// (or a real support site URL) once one exists.
+const SUPPORT_EMAIL = "support@subsentry.app";
+const EMERALD = "#007a49"; // globals.css --emerald (light mode), converted to sRGB — email clients don't support oklch()
+
+function buildVerificationEmailHtml(verificationUrl: string): string {
+  const logoUrl = new URL("/logo-mark.png", appBaseUrl()).toString();
+  return `
+<div style="background-color:#f4f4f5;padding:32px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <div style="max-width:480px;margin:0 auto;background-color:#ffffff;border-radius:12px;padding:40px 32px;">
+    <img src="${logoUrl}" width="32" height="32" alt="SubSentry" style="display:block;border-radius:9999px;margin-bottom:24px;" />
+    <p style="margin:0 0 24px;font-size:15px;line-height:1.5;color:#18181b;">
+      Thanks for creating a SubSentry account. Verify your email address so that you can get up and running quickly.
+    </p>
+    <div style="text-align:center;margin:0 0 24px;">
+      <a href="${verificationUrl}" style="display:inline-block;background-color:${EMERALD};color:#fafafa;text-decoration:none;font-size:15px;font-weight:600;padding:12px 28px;border-radius:8px;">
+        Verify email address
+      </a>
+    </div>
+    <p style="margin:0;font-size:13px;line-height:1.5;color:#71717a;">
+      Once your email has been verified, you can start setting up your account. Visit our
+      <a href="mailto:${SUPPORT_EMAIL}" style="color:${EMERALD};">support site</a>
+      if you have questions or need help.
+    </p>
+  </div>
+</div>`.trim();
+}
+
+function buildVerificationEmailText(verificationUrl: string): string {
+  return [
+    "Thanks for creating a SubSentry account. Verify your email address so that you can get up and running quickly.",
+    "",
+    `Verify email address: ${verificationUrl}`,
+    "",
+    `Once your email has been verified, you can start setting up your account. Visit our support site (${SUPPORT_EMAIL}) if you have questions or need help.`,
+  ].join("\n");
 }
 
 export function isEmailSendingConfigured(): boolean {
@@ -79,7 +121,8 @@ export async function sendVerificationEmail(email: string, rawToken: string): Pr
           from: process.env.RESEND_FROM_EMAIL || "SubSentry <onboarding@resend.dev>",
           to: email,
           subject: "Verify your SubSentry email",
-          html: `<p>Confirm your email to finish setting up SubSentry:</p><p><a href="${verificationUrl}">${verificationUrl}</a></p><p>This link expires in 24 hours.</p>`,
+          html: buildVerificationEmailHtml(verificationUrl),
+          text: buildVerificationEmailText(verificationUrl),
         }),
         signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
       });
