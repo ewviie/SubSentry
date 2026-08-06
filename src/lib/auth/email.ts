@@ -1,12 +1,15 @@
-// Same "leave the key unset and the feature degrades gracefully" pattern as
-// src/lib/ai/provider.ts (ANTHROPIC_API_KEY absent -> demo provider) and
-// src/lib/billing/plan.ts (STRIPE_SECRET_KEY absent -> feature hidden): no
-// email provider is configured for this app yet, so RESEND_API_KEY absent
-// means the verification link is logged server-side instead of mailed —
-// the signup/verify flow stays fully functional and testable without a
-// real email vendor. Swap the body of sendVerificationEmail for a real
-// Resend (or any provider) API call once one is chosen; every caller
-// already treats this as async and failure-tolerant.
+import nodemailer from "nodemailer";
+import { logServerError } from "@/lib/observability/log-error";
+
+// Same "leave the config unset and the feature degrades gracefully"
+// pattern as src/lib/ai/provider.ts (ANTHROPIC_API_KEY absent -> demo
+// provider) and src/lib/billing/plan.ts (STRIPE_SECRET_KEY absent ->
+// feature hidden): no SMTP config unset means the verification link is
+// logged server-side instead of mailed — the signup/verify flow stays
+// fully functional and testable without a real mailbox. Provider layer
+// is Nodemailer/SMTP (previously Resend's HTTP API); buildVerificationUrl
+// and the html/text template functions below are provider-agnostic and
+// unchanged by that swap.
 function appBaseUrl(): string {
   return process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 }
@@ -57,30 +60,56 @@ function buildVerificationEmailText(verificationUrl: string): string {
 }
 
 export function isEmailSendingConfigured(): boolean {
-  return Boolean(process.env.RESEND_API_KEY);
+  return Boolean(
+    process.env.SMTP_HOST && process.env.SMTP_PORT && process.env.SMTP_USER && process.env.SMTP_PASSWORD && process.env.SMTP_FROM,
+  );
 }
 
-// Bounded retry for the Resend call only — a transient network blip or a
-// momentary 5xx from Resend shouldn't force a user to notice their
-// verification email never arrived and manually hit "resend". Deliberately
-// narrow: retries only network errors (fetch throwing) and 5xx responses,
-// never a 4xx (bad API key, malformed request, invalid "from" address) —
-// those aren't transient, and retrying them just delays the same failure
-// signupUser/resend-verification's own caller already handles (log +
-// generic response, account still exists, user can request a fresh link).
-// Short, fixed backoff, not exponential — this runs synchronously in the
-// signup/resend-verification request path, so the total added latency on
-// the worst case (every attempt fails) needs to stay small, not tuned for
-// squeezing out one more retry.
+// Bounded retry for the SMTP send only — a transient connection blip or a
+// momentary 4xx (SMTP's "temporary failure, try again") shouldn't force a
+// user to notice their verification email never arrived and manually hit
+// "resend". Short, fixed backoff, not exponential — this runs synchronously
+// in the signup/resend-verification request path, so the total added
+// latency on the worst case (every attempt fails) needs to stay small, not
+// tuned for squeezing out one more retry.
 const MAX_SEND_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 300;
-// Without a timeout, a hung Resend call would hold the signup/resend
-// request open indefinitely instead of hitting the retry/failure path
-// below like a normal network error does.
-const SEND_TIMEOUT_MS = 5000;
+// Without a timeout, a hung SMTP connection/greeting/send would hold the
+// signup/resend request open indefinitely instead of hitting the
+// retry/failure path below like a normal connection error does. 15s, not
+// 5s: observed empirically against smtp-mail.outlook.com — a rejected AUTH
+// (e.g. "SmtpClientAuthentication is disabled for the Mailbox") can take
+// ~5-6s to arrive, and a too-tight timeout means socketTimeout fires
+// first, surfacing a generic ETIMEDOUT instead of the server's actual,
+// far more actionable rejection reason.
+const SEND_TIMEOUT_MS = 15000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+interface SmtpError {
+  code?: string;
+  responseCode?: number;
+  response?: string;
+}
+
+// Per RFC 5321, an SMTP server's reply code tells you whether a failure is
+// worth retrying: 4xx is a *temporary* negative completion (server is
+// asking the client to try again later — a full mailbox, a greylisting
+// delay, a momentary rate limit), 5xx is *permanent* (retrying sends the
+// identical request into the identical rejection). That 4xx/5xx split is
+// the opposite way round from the HTTP convention the previous Resend
+// implementation used here. EAUTH (bad SMTP_USER/SMTP_PASSWORD) is called
+// out explicitly since a credential failure isn't guaranteed to always
+// surface with a 5xx responseCode across every SMTP server implementation,
+// and no amount of retrying fixes bad credentials either way.
+function isRetryableSmtpError(error: SmtpError): boolean {
+  if (error.code === "EAUTH") return false;
+  if (typeof error.responseCode === "number") return error.responseCode < 500;
+  // No SMTP response at all — a connection/DNS/timeout-level failure,
+  // same "always worth a retry" reasoning the old fetch()-throw case had.
+  return true;
 }
 
 export async function sendVerificationEmail(email: string, rawToken: string): Promise<void> {
@@ -97,7 +126,7 @@ export async function sendVerificationEmail(email: string, rawToken: string): Pr
       // treats this as a normal async failure and reports a generic error
       // to the client, so this doesn't leak anything new, it just refuses
       // to silently degrade to "print secrets in prod logs."
-      throw new Error("RESEND_API_KEY is not configured; refusing to log a verification link in production.");
+      throw new Error("SMTP is not configured; refusing to log a verification link in production.");
     }
     // Demo mode (non-production only): no real inbox to deliver to yet.
     // Logged so a developer (or this app's own test suite) can complete the
@@ -107,77 +136,69 @@ export async function sendVerificationEmail(email: string, rawToken: string): Pr
     return;
   }
 
+  // Not cached at module scope: this app has no other long-lived
+  // connection-pooled client, this is low-volume transactional mail (one
+  // send per signup/resend-verification request), and a fresh transporter
+  // per call means a mid-flight SMTP_* env change (or a test stubbing one)
+  // always takes effect on the very next send rather than needing an
+  // explicit cache-invalidation path.
+  const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT),
+    secure: false,
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASSWORD,
+    },
+    connectionTimeout: SEND_TIMEOUT_MS,
+    greetingTimeout: SEND_TIMEOUT_MS,
+    socketTimeout: SEND_TIMEOUT_MS,
+  });
+
   let lastError: unknown;
   for (let attempt = 1; attempt <= MAX_SEND_ATTEMPTS; attempt++) {
-    let response: Response;
     try {
-      response = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          from: process.env.RESEND_FROM_EMAIL || "SubSentry <onboarding@resend.dev>",
-          to: email,
-          subject: "Verify your SubSentry email",
-          html: buildVerificationEmailHtml(verificationUrl),
-          text: buildVerificationEmailText(verificationUrl),
-        }),
-        signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+      const info = await transporter.sendMail({
+        from: process.env.SMTP_FROM,
+        to: email,
+        subject: "Verify your SubSentry email",
+        html: buildVerificationEmailHtml(verificationUrl),
+        text: buildVerificationEmailText(verificationUrl),
       });
-    } catch (error) {
-      // Network error (DNS, connection reset, timeout) — always transient
-      // enough to be worth a retry, unlike a definite HTTP response.
-      lastError = error;
-      if (attempt < MAX_SEND_ATTEMPTS) await sleep(RETRY_DELAY_MS * attempt);
-      continue;
-    }
-
-    // Diagnostic logging: a 2xx here only means Resend *accepted* the
-    // send request into its own queue — it is not proof of actual inbox
-    // delivery, which only Resend's own dashboard/webhooks know about
-    // later. Logging the returned id lets a specific send be looked up
-    // there; logging the full error body on failure surfaces Resend's
-    // own reason (e.g. "You can only send testing emails to your own
-    // email address" for an unverified sending domain) instead of just a
-    // bare status code.
-    const responseBody = await response.json().catch(() => null);
-
-    if (response.ok) {
+      // A successful sendMail() only means the SMTP server *accepted* the
+      // message for delivery — not proof it reached the recipient's
+      // inbox (vs. e.g. their spam folder), which only the receiving
+      // mailbox provider ultimately decides. messageId/accepted/rejected
+      // are logged so a specific send can be traced without needing to
+      // reproduce it.
       console.log(
         JSON.stringify({
           level: "info",
-          context: "auth.email.resend-accepted",
-          resendId: responseBody?.id,
-          status: response.status,
+          context: "auth.email.smtp-sent",
+          messageId: info.messageId,
+          accepted: info.accepted,
+          rejected: info.rejected,
           timestamp: new Date().toISOString(),
         }),
       );
       return;
+    } catch (error) {
+      const smtpError = error as SmtpError;
+      logServerError("auth.email.smtp-failed", error, {
+        attempt,
+        code: smtpError.code,
+        responseCode: smtpError.responseCode,
+        response: smtpError.response,
+      });
+
+      if (!isRetryableSmtpError(smtpError)) {
+        throw error instanceof Error ? error : new Error("SMTP send failed");
+      }
+
+      lastError = error;
+      if (attempt < MAX_SEND_ATTEMPTS) await sleep(RETRY_DELAY_MS * attempt);
     }
-
-    console.error(
-      JSON.stringify({
-        level: "error",
-        context: "auth.email.resend-rejected",
-        status: response.status,
-        resendError: responseBody,
-        timestamp: new Date().toISOString(),
-      }),
-    );
-
-    if (response.status < 500) {
-      // Not transient — a 4xx will fail identically on every retry
-      // (bad/missing API key, malformed payload, invalid from-address).
-      // Failing fast here is strictly better than burning the remaining
-      // retry budget on a guaranteed-repeat failure.
-      throw new Error(`Resend API request failed: ${response.status}`);
-    }
-
-    lastError = new Error(`Resend API request failed: ${response.status}`);
-    if (attempt < MAX_SEND_ATTEMPTS) await sleep(RETRY_DELAY_MS * attempt);
   }
 
-  throw lastError instanceof Error ? lastError : new Error("Resend API request failed after retries");
+  throw lastError instanceof Error ? lastError : new Error("SMTP send failed after retries");
 }
