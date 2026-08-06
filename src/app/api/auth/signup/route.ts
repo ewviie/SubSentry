@@ -3,7 +3,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
-import { hashPassword } from "@/lib/auth/password";
+import { hashPassword, checkPasswordStrength } from "@/lib/auth/password";
 import { createSession } from "@/lib/auth/session";
 import { checkSignupRateLimit } from "@/lib/auth/rate-limit";
 import { getClientIp } from "@/lib/http/client-ip";
@@ -57,6 +57,17 @@ export async function POST(request: Request) {
   }
 
   const { email, password, name, captchaToken } = parsed.data;
+
+  // Cheap, no DB/network involved — checked right after schema parsing,
+  // same "reject cheaply before expensive work" ordering as the CAPTCHA
+  // check below. Zod's min(8) alone doesn't stop "password123"/"aaaaaaaa".
+  const strength = checkPasswordStrength(password, email);
+  if (!strength.ok) {
+    return NextResponse.json(
+      { error: "weak_password", message: strength.reason, field: "password" },
+      { status: 400 },
+    );
+  }
 
   // Server-side CAPTCHA verification — never trusts that a token merely
   // being present means it's valid; verifyCaptchaToken makes its own call

@@ -14,7 +14,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 // Keyed by IP+email so a credential-stuffing script grinding through many
 // accounts from one IP gets bounded per account, without one attacker's
 // traffic locking out other accounts sharing that IP.
-const LOGIN_LIMIT = 10;
+const LOGIN_LIMIT = 5;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 export const checkLoginRateLimit = createRateLimiterAsync(LOGIN_LIMIT, LOGIN_WINDOW_MS);
 

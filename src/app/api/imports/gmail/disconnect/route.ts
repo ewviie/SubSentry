@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { deleteEmailConnection } from "@/lib/imports/email-connections";
+import { checkBankConnectRateLimit } from "@/lib/imports/rate-limit";
 
 // Deletes the stored connection row outright (not a soft "disabled" flag) —
 // the whole point of a disconnect action is that the encrypted token stops
@@ -14,6 +15,16 @@ import { deleteEmailConnection } from "@/lib/imports/email-connections";
 export async function POST() {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  // Shares authorize's limiter (see rate-limit.ts's comment) — this route
+  // was left out when that comment was written; wiring it in now.
+  const rateLimit = checkBankConnectRateLimit(session.user.id);
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: "rate_limited", message: "Too many attempts. Try again in a bit." },
+      { status: 429 },
+    );
+  }
 
   await deleteEmailConnection(session.user.id, "gmail");
   return NextResponse.json({ ok: true });

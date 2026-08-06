@@ -40,3 +40,12 @@ const GMAIL_SYNC_LIMIT = 10;
 const GMAIL_SYNC_WINDOW_MS = 60 * 60 * 1000;
 
 export const checkGmailSyncRateLimit = createRateLimiter(GMAIL_SYNC_LIMIT, GMAIL_SYNC_WINDOW_MS);
+
+// A cheap, session-gated, read-your-own-data GET — generous ceiling, purely
+// defense-in-depth (every other route in this file guards a real write or
+// an outbound third-party call; this one guards against nothing more than
+// an unbounded polling loop).
+const HISTORY_LIMIT = 60;
+const HISTORY_WINDOW_MS = 60 * 60 * 1000;
+
+export const checkImportHistoryRateLimit = createRateLimiter(HISTORY_LIMIT, HISTORY_WINDOW_MS);
