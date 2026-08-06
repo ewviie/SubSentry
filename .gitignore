@@ -1,5 +1,9 @@
 node_modules/
 .env
+.env.local
+.env.*.local
+.env.save
+.env.local.save
 .next/
 next-env.d.ts
 .pglite/
