@@ -69,6 +69,21 @@ describe("sendVerificationEmail — configured (Resend API)", () => {
     expect(fetchSpy).toHaveBeenCalledOnce();
   });
 
+  it("sends the expected copy, with the verification link in both the html and text bodies", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await sendVerificationEmail("user@example.com", "raw-token");
+
+    const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+    expect(body.html).toContain("Thanks for creating a SubSentry account");
+    expect(body.html).toContain("Verify email address");
+    expect(body.html).toContain("Once your email has been verified");
+    expect(body.text).toContain("Thanks for creating a SubSentry account");
+    expect(body.html).toMatch(/href="http[^"]*\/verify-email\?token=raw-token"/);
+    expect(body.text).toContain("/verify-email?token=raw-token");
+  });
+
   it("retries on a 5xx and succeeds on the second attempt", async () => {
     const fetchSpy = vi
       .fn()
