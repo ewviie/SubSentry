@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Loader2, MailCheck } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,48 +28,14 @@ const CAPTCHA_REQUIRED = Boolean(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY);
 
 type FormField = "name" | "email" | "password";
 
-function CheckEmailCard({ email }: { email: string }) {
-  const headingRef = useRef<HTMLHeadingElement>(null);
-
-  // The signup form is replaced wholesale by this card on success — a
-  // screen-reader user gets no cue that anything happened unless focus
-  // moves here and the change is announced. tabIndex=-1 makes an <h2>
-  // programmatically focusable without adding it to tab order.
-  useEffect(() => {
-    headingRef.current?.focus();
-  }, []);
-
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex size-10 items-center justify-center rounded-full bg-emerald-muted text-emerald">
-          <MailCheck className="size-5" aria-hidden="true" />
-        </div>
-        <CardTitle as="h1" ref={headingRef} tabIndex={-1} className="font-heading mt-3 text-2xl outline-none">
-          Check your email
-        </CardTitle>
-        <CardDescription role="status" aria-live="polite">
-          We sent a verification link to <span className="font-medium text-foreground">{email}</span>. Click it to
-          finish setting up your account.
-        </CardDescription>
-      </CardHeader>
-      <CardFooter>
-        <Link href="/login" className="text-sm text-muted-foreground underline underline-offset-4">
-          Back to log in
-        </Link>
-      </CardFooter>
-    </Card>
-  );
-}
-
 export default function SignupPage() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [errorField, setErrorField] = useState<FormField | null>(null);
   const [loading, setLoading] = useState(false);
-  const [awaitingVerification, setAwaitingVerification] = useState(false);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
 
   const nameRef = useRef<HTMLInputElement>(null);
@@ -116,7 +83,11 @@ export default function SignupPage() {
         return;
       }
 
-      setAwaitingVerification(true);
+      // Signup creates a session directly now (no email-verification step
+      // in the active flow — see api/auth/signup/route.ts's comment), so
+      // this lands the user straight in the app, the same way login does.
+      router.push("/dashboard");
+      router.refresh();
     } catch {
       setError("Network error. Try again.");
       setErrorField(null);
@@ -129,10 +100,6 @@ export default function SignupPage() {
       setCaptchaToken(null);
       turnstileRef.current?.reset();
     }
-  }
-
-  if (awaitingVerification) {
-    return <CheckEmailCard email={email} />;
   }
 
   return (

@@ -4,12 +4,10 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { hashPassword } from "@/lib/auth/password";
+import { createSession } from "@/lib/auth/session";
 import { checkSignupRateLimit } from "@/lib/auth/rate-limit";
 import { getClientIp } from "@/lib/http/client-ip";
 import { isContentLengthWithinLimit, MAX_JSON_BODY_BYTES } from "@/lib/http/request-size";
-import { issueVerificationToken } from "@/lib/auth/email-verification";
-import { sendVerificationEmail } from "@/lib/auth/email";
-import { logServerError } from "@/lib/observability/log-error";
 import { isCaptchaConfigured, verifyCaptchaToken } from "@/lib/security/captcha";
 import { logSecurityEvent } from "@/lib/observability/log-security-event";
 
@@ -103,12 +101,21 @@ export async function POST(request: Request) {
     // constraint (schema.ts), so that race surfaces here as a Postgres
     // unique-violation (23505) instead of a duplicate row, and gets mapped
     // to the same 409 rather than bubbling up as an unhandled 500.
+    //
+    // No explicit emailVerified override here (unlike the prior
+    // email-verification flow) — email verification is disabled for the
+    // active signup flow (bot protection is CAPTCHA + rate limiting +
+    // lockout instead; see verifyCaptchaToken above), so new accounts fall
+    // through to the column's own default of `true`. This is deliberate,
+    // not an oversight: the email-verification implementation
+    // (lib/auth/email-verification.ts, api/auth/verify-email,
+    // api/auth/resend-verification) is kept intact and isolated for a
+    // future re-enable, but a user created while it's inactive was never
+    // asked to verify anything, so marking them `false` would misrepresent
+    // them as "pending verification" if the feature is switched back on.
     const [user] = await db
       .insert(users)
-      // Explicit emailVerified: false overrides the column's own default of
-      // true (see schema.ts's comment — that default exists to backfill
-      // pre-verification rows as already-verified, not to apply here).
-      .values({ email, passwordHash, name: name || null, emailVerified: false })
+      .values({ email, passwordHash, name: name || null })
       .returning({ id: users.id });
     userId = user.id;
   } catch (error) {
@@ -121,18 +128,7 @@ export async function POST(request: Request) {
     throw error;
   }
 
-  // No session is created here — the account exists but stays unusable
-  // until the link below is clicked (see api/auth/verify-email/route.ts,
-  // which creates the session once verification succeeds).
-  const { rawToken } = await issueVerificationToken(userId);
-  try {
-    await sendVerificationEmail(email, rawToken);
-  } catch (error) {
-    // The account and its verification token both exist regardless — a
-    // delivery failure shouldn't surface as a signup failure when the user
-    // can still request a fresh link via /api/auth/resend-verification.
-    logServerError("auth.signup.send-verification-email", error, { userId });
-  }
+  await createSession(userId);
 
-  return NextResponse.json({ ok: true, requiresVerification: true });
+  return NextResponse.json({ ok: true });
 }
