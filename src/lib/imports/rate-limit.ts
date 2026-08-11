@@ -29,9 +29,25 @@ const BANK_CONNECT_WINDOW_MS = 60 * 60 * 1000;
 
 export const checkBankConnectRateLimit = createRateLimiter(BANK_CONNECT_LIMIT, BANK_CONNECT_WINDOW_MS);
 
-// Gmail's authorize/disconnect are cheap (no external API call yet) and
-// share checkBankConnectRateLimit's "one connect flow at a time" ceiling —
-// no separate limiter needed for those. Sync is different: it's a Gmail
+// Deliberately separate from checkBankConnectRateLimit, not shared with it:
+// disconnecting is a self-service revocation action, not a connect attempt,
+// and a user who's already exhausted their connect budget (retries, a
+// flaky OAuth callback) must still be able to remove their own data — the
+// opposite of the abuse shape BANK_CONNECT_LIMIT exists to bound. More
+// generous than BANK_CONNECT_LIMIT accordingly, but not unbounded: each
+// disconnect can still make one real outbound call per connection
+// (Plaid's item/remove, Google's token revoke), so this stays a real
+// ceiling, not a no-op. Shared across all three disconnect routes
+// (Gmail, Plaid, TrueLayer) — same "one flow at a time" reasoning as
+// checkBankConnectRateLimit above, just its own, larger budget.
+const DISCONNECT_LIMIT = 30;
+const DISCONNECT_WINDOW_MS = 60 * 60 * 1000;
+
+export const checkDisconnectRateLimit = createRateLimiter(DISCONNECT_LIMIT, DISCONNECT_WINDOW_MS);
+
+// Gmail's authorize is cheap (no external API call yet) and shares
+// checkBankConnectRateLimit's "one connect flow at a time" ceiling — no
+// separate limiter needed there. Sync is different: it's a Gmail
 // messages.list call plus up to MAX_MESSAGES_PER_SYNC messages.get calls
 // (see gmail-extract.ts) each time, real outbound API cost per call closer
 // to ANALYZE_LIMIT's "expensive operation" ceiling than a cheap CRUD

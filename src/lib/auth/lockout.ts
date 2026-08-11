@@ -31,6 +31,19 @@ export interface LockoutStatus {
   delayMs: number;
 }
 
+// Whether a login attempt against this email should be gated behind a
+// CAPTCHA check (see api/auth/login/route.ts) before the password is even
+// looked at. Reuses delayForAttempt's own "2+ prior failures" threshold
+// rather than introducing a second, independently-tunable one that could
+// drift out of sync with it — the two exist for the same reason (repeated
+// failures against one email are worth more friction) and should always
+// agree on when that friction starts. Pulled out as its own named function,
+// not an inline `lockout.delayMs > 0` check at the call site, so this
+// specific security decision has one place to read, change, and unit-test.
+export function shouldRequireCaptcha(delayMs: number): boolean {
+  return delayMs > 0;
+}
+
 export async function checkLockout(email: string): Promise<LockoutStatus> {
   const [row] = await db.select().from(loginAttempts).where(eq(loginAttempts.email, email)).limit(1);
   if (!row) return { locked: false, delayMs: 0 };

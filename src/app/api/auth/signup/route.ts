@@ -7,7 +7,7 @@ import { hashPassword, checkPasswordStrength } from "@/lib/auth/password";
 import { createSession } from "@/lib/auth/session";
 import { checkSignupRateLimit } from "@/lib/auth/rate-limit";
 import { getClientIp } from "@/lib/http/client-ip";
-import { isContentLengthWithinLimit, MAX_JSON_BODY_BYTES } from "@/lib/http/request-size";
+import { readJsonBody, MAX_JSON_BODY_BYTES } from "@/lib/http/request-size";
 import { isCaptchaConfigured, verifyCaptchaToken } from "@/lib/security/captcha";
 import { logSecurityEvent } from "@/lib/observability/log-security-event";
 
@@ -27,7 +27,8 @@ const bodySchema = z.object({
 });
 
 export async function POST(request: Request) {
-  if (!isContentLengthWithinLimit(request, MAX_JSON_BODY_BYTES)) {
+  const body = await readJsonBody(request, MAX_JSON_BODY_BYTES);
+  if (body.tooLarge) {
     return NextResponse.json({ error: "payload_too_large", message: "Request body is too large." }, { status: 413 });
   }
 
@@ -39,7 +40,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const parsed = bodySchema.safeParse(await request.json().catch(() => null));
+  const parsed = bodySchema.safeParse(body.data);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     return NextResponse.json(
@@ -90,6 +91,22 @@ export async function POST(request: Request) {
     }
   }
 
+  // Reviewed again in this pass (account enumeration was explicitly in
+  // scope) and deliberately left as-is — same conclusion as
+  // PROJECT_SECURITY_MAP.md's existing note on this. Making this
+  // enumeration-safe (the way forgot-password/resend-verification already
+  // are — see their own GENERIC_RESPONSE comments) would mean never telling
+  // a real user their email is already registered, which only works if
+  // signup itself becomes indirect (e.g. always "check your email to
+  // continue" for both new and existing addresses, with the actual
+  // outcome — new account vs. "log in instead" — resolved out-of-band).
+  // That's a different flow, not a same-shape fix, and this app's signup
+  // deliberately creates a session directly with no such intermediate step
+  // (see the comment below on why email verification is inactive) — bolting
+  // an indirection step on top for this alone would be a real UX
+  // regression (a slower, more confusing signup) for a lower-severity,
+  // industry-common tradeoff. Left unchanged; revisit if this flow is ever
+  // redesigned around an email-confirmation step for other reasons.
   const existing = await db
     .select({ id: users.id })
     .from(users)

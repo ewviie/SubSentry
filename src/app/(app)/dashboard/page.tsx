@@ -1,22 +1,20 @@
 import Link from "next/link";
-import { DollarSign, TrendingUp, Layers, CalendarClock, PiggyBank, BarChart3 } from "lucide-react";
+import { DollarSign, Layers, PiggyBank, BarChart3 } from "lucide-react";
 import { requireUser } from "@/lib/auth/session";
 import { getDashboardData } from "@/lib/subscriptions/queries";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CountUp } from "@/components/ui/count-up";
 import { StatCard } from "@/components/dashboard/stat-card";
+import { formatCents } from "@/lib/subscriptions/money";
 import { CategorySpendBar } from "@/components/dashboard/category-spend-bar";
 import { SectionHeading } from "@/components/dashboard/section-heading";
 import { QuickAddBar } from "@/components/subscriptions/quick-add-bar";
 import { InsightsSection } from "@/components/dashboard/insights-section";
-import { RenewalsList } from "@/components/dashboard/renewals-list";
 import { AllSubscriptionsList } from "@/components/dashboard/all-subscriptions-list";
 import { DashboardHeroRow } from "@/components/dashboard/dashboard-hero-row";
 import { StaggerSection } from "@/components/dashboard/stagger-section";
 import { computeInsights, computePotentialSavingsMonthlyCents } from "@/lib/subscriptions/insights";
-import { computeGrowthOverTime } from "@/lib/subscriptions/analytics";
-import { GrowthChart } from "@/components/analytics/growth-chart";
 import { getUpgradeUrl, hasPaidAccess } from "@/lib/billing/plan";
 import { runInsightsEngine } from "@/lib/insights-engine";
 import {
@@ -40,15 +38,46 @@ export default async function DashboardPage() {
   const potentialSavingsMonthlyCents = computePotentialSavingsMonthlyCents(insights);
   const duplicateInsights = insights.filter((i) => i.potentialSavingsMonthlyCents !== undefined);
   const engineOutput = runInsightsEngine(data.subscriptions, isPremium);
+  // Insights and the Savings opportunities section below both ultimately
+  // read from the same overlap/duplicate detection — left unfiltered here,
+  // "Possible duplicate: Netflix and Netflix Premium" and "3 active
+  // streaming subscriptions" rendered as Insights cards up top, then
+  // rendered again verbatim (same title text) inside Savings opportunities
+  // further down the same page: a real user scrolling past both reads the
+  // identical sentence twice. Savings opportunities already gives overlap
+  // findings a fuller, more actionable treatment (dollar impact, a specific
+  // "review" target) than an Insights card can, so Insights keeps only the
+  // findings that don't get their own second home elsewhere on this page —
+  // overdue renewals and cost spikes. duplicateInsights/AllSubscriptionsList
+  // above and below still read the unfiltered `insights` array; only what
+  // InsightsSection renders is narrowed.
+  const dashboardInsights = insights.filter((i) => i.type !== "possible_overlap");
   const healthScore = engineOutput.healthScore;
-  const growthPoints = computeGrowthOverTime(data.subscriptions);
   const hasActive = data.activeCount > 0;
+  // Distinct from hasActive: someone with subscriptions that are all paused
+  // or canceled still gets real information from "$0.00 monthly, 0 active"
+  // — that's a legitimate state, not an empty one. True first-run (nothing
+  // added yet) is the one where a stat row and an "insights" section have
+  // nothing to report by construction, not by outcome.
+  const hasAnySubscriptions = data.subscriptions.length > 0;
 
   return (
     <div className="space-y-12">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="font-heading text-h1 font-semibold">Welcome, {user.name || user.email}</h1>
+        {/* min-w-0 — without it, a flex item's automatic minimum width is
+            its content's min-content size (spec default, applies in
+            flex-col too), not 0. A name falls back to the account's
+            email when unset, and an email has no natural break point;
+            with no min-w-0 here, the browser reserved room to fit it on
+            one unbroken line and forced this whole row (and the page)
+            wider than the viewport on mobile — confirmed via a real
+            production build (a long email caused ~230px of horizontal
+            overflow at every tested mobile width). break-words on the
+            h1 below is the other half of the fix: min-w-0 alone would
+            still let the text overflow its own box; break-words gives
+            it somewhere to actually wrap to once it's allowed to shrink. */}
+        <div className="min-w-0">
+          <h1 className="break-words font-heading text-h1 font-semibold">Welcome, {user.name || user.email}</h1>
           <p className="mt-1 text-muted-foreground">Here&apos;s what you&apos;re paying for.</p>
         </div>
         <div className="flex items-center gap-2">
@@ -63,12 +92,21 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      {/* Section 1 — Financial overview: the KPIs and alerts a user opens
-          this page to check, all visible without scrolling past a wall of
-          equally-weighted cards. */}
+      {/* Back to one column — the left-rail shell got tried and rejected.
+          Every other decluttering change (size="sm" everywhere, the merged
+          renewals card, the 3-col savings grid, dropping the chart that
+          duplicated /analytics below) stays.
+
+          Refinement pass: the section heading itself is gated on
+          hasAnySubscriptions too now, not just its contents — a heading
+          promising "your spend, savings, and health at a glance" with
+          nothing underneath it on a brand-new account was its own small
+          version of the same problem (a container with nothing in it),
+          just missed on the first pass. */}
+      {hasAnySubscriptions ? (
       <section className="space-y-6">
         <SectionHeading
-          title="Financial overview"
+          title="Financial Overview"
           description="Your spend, savings, and subscription health at a glance."
         />
         {hasActive ? (
@@ -78,38 +116,50 @@ export default async function DashboardPage() {
             healthScore={healthScore}
           />
         ) : null}
-        <StaggerSection className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {/* Was 4 stat cards; down to 2. "Annual spend" was Monthly × 12 with
+            no information Monthly didn't already imply — folded into
+            Monthly's own caption instead of a whole separate box. "Next
+            renewal" duplicated the Renewals card's own list further down
+            the page outright (same date, same subscription) — the exact
+            redundancy already fixed once inside that card, just missed here
+            the first time. Active subscriptions stays: it's the one number
+            that answers this app's actual question ("how many things am I
+            paying for"), not a derived restatement of another card.
+
+            Both this row and Insights below are gated on hasAnySubscriptions
+            now — they used to render unconditionally, so a brand-new
+            account saw "$0.00" and "0" stat cards plus an empty-insights
+            notice before ever reaching the one deliberately-designed empty
+            state further down. Every other section on this page already
+            knew to hide itself with no data; these two were the ones that
+            got missed. Real, useful side effect: since these mount fresh
+            (rather than sitting static at zero) the moment the first
+            subscription is added, their existing entrance animations
+            (StaggerSection, CountUp) now actually play at a moment that
+            means something, instead of never firing at all. No inner
+            hasAnySubscriptions check needed here anymore — the whole
+            section above is gated on it now. */}
+        <StaggerSection className="grid gap-4 sm:grid-cols-2">
           <StatCard
             icon={DollarSign}
             label="Monthly spend"
             accentClassName="bg-emerald-muted text-emerald"
-            caption={`Across ${data.activeCount} active subscription${data.activeCount === 1 ? "" : "s"}`}
+            caption={`Across ${data.activeCount} active subscription${data.activeCount === 1 ? "" : "s"} · ${formatCents(data.annualTotalCents)}/yr`}
             emphasis
           >
             <CountUp value={data.monthlyTotalCents} format="currency" />
           </StatCard>
-          <StatCard icon={TrendingUp} label="Annual spend" accentClassName="bg-chart-2/10 text-chart-2">
-            <CountUp value={data.annualTotalCents} format="currency" />
-          </StatCard>
           <StatCard icon={Layers} label="Active subscriptions" accentClassName="bg-chart-3/10 text-chart-3">
             <CountUp value={data.activeCount} format="integer" />
           </StatCard>
-          <StatCard icon={CalendarClock} label="Next renewal" accentClassName="bg-chart-4/10 text-chart-4">
-            {data.upcomingRenewals[0] ? (
-              data.upcomingRenewals[0].nextRenewalDate
-            ) : (
-              <span className="text-muted-foreground">—</span>
-            )}
-          </StatCard>
         </StaggerSection>
-        <InsightsSection insights={insights} />
+        <InsightsSection insights={dashboardInsights} />
       </section>
+      ) : null}
 
-      {/* Section 2 — Subscription management: add, review, and track
-          what's renewing next. */}
       <section className="space-y-6">
         <SectionHeading
-          title="Subscription management"
+          title="Subscription Management"
           description="Add a subscription and see what's renewing next."
           action={
             <Link href="/subscriptions" className="text-sm text-muted-foreground hover:underline">
@@ -117,30 +167,20 @@ export default async function DashboardPage() {
             </Link>
           }
         />
-        <Card>
-          <CardContent className="pt-6">
+        <Card size="sm">
+          <CardContent>
             <QuickAddBar />
           </CardContent>
         </Card>
-        {hasActive ? (
-          <div className="grid gap-6 lg:grid-cols-2">
-            <RenewalForecastCard output={engineOutput} />
-            <Card>
-              <CardHeader>
-                <CardTitle>Upcoming renewals</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <RenewalsList renewals={data.upcomingRenewals} />
-              </CardContent>
-            </Card>
-          </div>
-        ) : null}
+        {/* One merged card instead of two side-by-side ones that led with
+            the same fact (see RenewalForecastCard's own comment). */}
+        {hasActive ? <RenewalForecastCard output={engineOutput} renewals={data.upcomingRenewals} /> : null}
         <AllSubscriptionsList subscriptions={data.subscriptions} insights={insights} />
       </section>
 
-      {/* Section 3 — Savings opportunities: pulled out of the old flat
-          8-card grid so the highest-intent content (real dollar recs)
-          stops competing for attention with informational panels. */}
+      {/* Pulled out of the old flat 8-card grid so the highest-intent
+          content (real dollar recs) stops competing for attention with
+          informational panels. */}
       {hasActive ? (
         <section className="space-y-6">
           <SectionHeading
@@ -149,7 +189,13 @@ export default async function DashboardPage() {
             icon={PiggyBank}
             iconClassName="text-emerald"
           />
-          <div className="grid gap-4 lg:grid-cols-2">
+          {/* 3-wide, not the 2-wide grid every other section uses —
+              Optimization score is one short number next to three cards
+              that are each a short list, so a uniform 2-column split kept
+              leaving one side of the row visually heavier than the other.
+              3 columns lets the score sit on its own instead of stretching
+              to match a list card's height. */}
+          <div className="grid gap-4 lg:grid-cols-3">
             <SavingsOpportunitiesCard output={engineOutput} />
             <QuickWinsCard output={engineOutput} />
             <OptimizationScoreCard output={engineOutput} isPremium={isPremium} upgradeUrl={upgradeUrl} />
@@ -158,24 +204,26 @@ export default async function DashboardPage() {
         </section>
       ) : null}
 
-      {/* Section 4 — Analytics: trends, categories, patterns. */}
+      {/* "Spending trend" used to render its own full GrowthChart card here
+          — the exact same chart, over the exact same data, as /analytics'
+          "Spend growth" card. Not a padding problem, a real duplicate page
+          section. Dropped in favor of a link to the real thing; what's
+          dashboard-only (category breakdown, risk alerts, score breakdown)
+          stays, since none of that exists on /analytics. */}
       {hasActive ? (
         <section className="space-y-6">
           <SectionHeading
             title="Analytics"
             description="Trends, categories, and patterns across your subscriptions."
             icon={BarChart3}
+            action={
+              <Link href="/analytics" className="text-sm text-muted-foreground hover:underline">
+                View full analytics →
+              </Link>
+            }
           />
-          <Card>
-            <CardHeader>
-              <CardTitle>Spending trend</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <GrowthChart points={growthPoints} />
-            </CardContent>
-          </Card>
           <div className="grid gap-4 lg:grid-cols-2">
-            <Card>
+            <Card size="sm">
               <CardHeader>
                 <CardTitle>Spend by category</CardTitle>
               </CardHeader>

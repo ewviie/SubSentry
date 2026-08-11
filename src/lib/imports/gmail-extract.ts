@@ -45,6 +45,18 @@ function stripHtml(html: string): string {
     .trim();
 }
 
+// Any real message (even a deeply nested multipart/mixed-with-attachments
+// one) bottoms out in a handful of levels — mail clients that build MIME
+// trees don't nest more than this in practice. Bounds `walk` below against
+// a maliciously-crafted message with a pathologically deep (or cyclic, if a
+// malformed payload ever looped back on itself) `parts` tree, which would
+// otherwise recurse without limit and risk a stack overflow on that one
+// request. This is a message Gmail's own search already surfaced as a
+// receipt/renewal candidate (see GMAIL_SEARCH_QUERY) — narrow, but not
+// something this app controls the shape of, since it's whatever a sender
+// crafted.
+const MAX_MIME_DEPTH = 10;
+
 // Gmail's payload is a MIME tree, not a flat body — a multipart/alternative
 // message nests text/plain and text/html as siblings, and either can
 // itself be nested under multipart/mixed (e.g. alongside an attachment).
@@ -56,15 +68,16 @@ function extractBodyText(payload: GmailMessage["payload"]): string {
   let plain: string | null = null;
   let html: string | null = null;
 
-  function walk(part: GmailMessagePart) {
+  function walk(part: GmailMessagePart, depth: number) {
+    if (depth > MAX_MIME_DEPTH) return;
     if (part.mimeType === "text/plain" && part.body?.data && !plain) {
       plain = decodeBase64Url(part.body.data);
     } else if (part.mimeType === "text/html" && part.body?.data && !html) {
       html = decodeBase64Url(part.body.data);
     }
-    for (const child of part.parts ?? []) walk(child);
+    for (const child of part.parts ?? []) walk(child, depth + 1);
   }
-  walk(payload);
+  walk(payload, 0);
 
   if (plain) return plain;
   if (html) return stripHtml(html);

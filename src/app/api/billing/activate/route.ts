@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { getSession } from "@/lib/auth/session";
 import { checkoutSessions, users } from "@/lib/db/schema";
 import { checkActivateRateLimit } from "@/lib/billing/rate-limit";
+import { readJsonBody, MAX_JSON_BODY_BYTES } from "@/lib/http/request-size";
 
 const activateSchema = z.object({
   checkoutSessionId: z.string().trim().min(1),
@@ -32,7 +33,12 @@ export async function POST(request: Request) {
     );
   }
 
-  const parsed = activateSchema.safeParse(await request.json().catch(() => null));
+  const body = await readJsonBody(request, MAX_JSON_BODY_BYTES);
+  if (body.tooLarge) {
+    return NextResponse.json({ error: "payload_too_large", message: "Request body is too large." }, { status: 413 });
+  }
+
+  const parsed = activateSchema.safeParse(body.data);
   if (!parsed.success) {
     return NextResponse.json({ error: "invalid_request", message: "Invalid input." }, { status: 400 });
   }

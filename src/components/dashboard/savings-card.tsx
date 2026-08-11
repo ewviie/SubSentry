@@ -15,6 +15,19 @@ import type { ComputedInsight } from "@/lib/subscriptions/insights";
 // "this matters" treatment; when the account is already clean, that's a
 // real, positive fact too — showing it instead of hiding an empty state
 // keeps the card honest for the common case where there's nothing to save.
+//
+// Scope is stated in the label itself, not just implied by the subtext
+// below it — this is the single most prominent number on the dashboard,
+// and further down the page Optimization score reports a genuinely larger
+// total (this figure plus estimated optimizations like switching to annual
+// billing — see engine.ts's totalUnrealizedMonthlyCents). Both numbers are
+// correct; they answer different questions. Without "from confirmed
+// duplicates" on the biggest, first-seen number, a user who reads only
+// this card walks away thinking it's the complete picture, then hits a
+// bigger, unexplained number scrolling further down. "Confirmed" (not
+// "likely") to match the exact wording Savings opportunities and
+// Optimization score already use below for this same deterministic,
+// non-fuzzy-AI-guessed match — not a new term, reused on purpose.
 export function SavingsCard({
   potentialYearlySavingsCents,
   duplicateInsights,
@@ -47,7 +60,7 @@ export function SavingsCard({
               {hasSavings ? <PiggyBank className="size-4.5" /> : <ShieldCheck className="size-4.5" />}
             </div>
             <p className="text-sm font-medium text-muted-foreground">
-              {hasSavings ? "Potential yearly savings" : "Duplicate check"}
+              {hasSavings ? "Yearly savings from confirmed duplicates" : "Duplicate check"}
             </p>
           </div>
 
@@ -58,8 +71,8 @@ export function SavingsCard({
               </p>
               <p className="text-sm text-muted-foreground">
                 {duplicateInsights.length === 1
-                  ? "1 likely duplicate is flagged below. Canceling it gets you this back."
-                  : `${duplicateInsights.length} likely duplicates are flagged below. Canceling them gets you this back.`}
+                  ? "1 confirmed duplicate is flagged below. Canceling it gets you this back."
+                  : `${duplicateInsights.length} confirmed duplicates are flagged below. Canceling them gets you this back.`}
               </p>
               {firstDuplicateSubscriptionId ? (
                 <Button

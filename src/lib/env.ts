@@ -8,6 +8,9 @@
 // visible in logs at startup instead of failing confusingly on the first
 // request that happens to need it. See instrumentation.ts for where this
 // runs once per server start.
+import { isEmailSendingConfigured } from "./auth/email";
+import { getAppUrl } from "./seo";
+
 export interface EnvIssue {
   variable: string;
   problem: string;
@@ -106,6 +109,47 @@ export function validateEnv(): EnvIssue[] {
     issues.push({
       variable: "SMTP_PORT",
       problem: `set to "${process.env.SMTP_PORT}", which is not a valid port number`,
+    });
+  }
+
+  // NEXT_PUBLIC_APP_URL has no dedicated isXConfigured() gate of its own —
+  // every *other* place that reads it (metadataBase, sitemap.ts, robots.ts,
+  // the structured-data `url` field) goes through lib/seo.ts's getAppUrl(),
+  // which already treats "unset" *or* "malformed" as "omit this field"
+  // rather than fabricating a URL against localhost or throwing, exactly to
+  // avoid shipping something broken (see that file's own comment on the
+  // convention). auth/email.ts's appBaseUrl() is the one place that can't
+  // follow that convention the same way — a verification/reset email link
+  // has to point *somewhere* — so it falls back to
+  // "http://localhost:3000" instead. That fallback is correct for local
+  // dev, where SMTP is normally unconfigured too and the link only ever
+  // gets logged to a developer's own terminal — but if SMTP *is*
+  // configured (a real send will actually happen) and this is still
+  // unset, every verification/password-reset email a real user receives
+  // would contain a dead localhost link with no way to complete either
+  // flow. That combination is what the first branch below flags, not
+  // NEXT_PUBLIC_APP_URL being unset on its own (which is a normal, safe
+  // "not deployed yet" state everywhere else in the app).
+  //
+  // The second branch below is a distinct problem: the var *is* set but
+  // isn't a well-formed absolute http(s) URL (missing scheme, a typo'd
+  // protocol, etc.). getAppUrl() degrades that gracefully at render time
+  // (treats it as unset rather than letting `new URL()` throw and crash
+  // metadata generation site-wide) — but silently falling back everywhere
+  // is exactly the kind of misconfiguration this module exists to surface
+  // loudly instead of leaving to be noticed later as "why do all my pages
+  // have relative canonical URLs / no sitemap link."
+  const rawAppUrl = process.env.NEXT_PUBLIC_APP_URL;
+  if (rawAppUrl && !getAppUrl()) {
+    issues.push({
+      variable: "NEXT_PUBLIC_APP_URL",
+      problem: `set to "${rawAppUrl}", which is not a valid absolute http(s) URL — canonical links, sitemap entries, and OG/Twitter image URLs will silently fall back to relative paths instead of using it`,
+    });
+  } else if (!rawAppUrl && isEmailSendingConfigured()) {
+    issues.push({
+      variable: "NEXT_PUBLIC_APP_URL",
+      problem:
+        "not set, but SMTP is fully configured — every verification/password-reset email sent from here will link to http://localhost:3000 instead of the real app",
     });
   }
 

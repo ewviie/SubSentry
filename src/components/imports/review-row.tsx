@@ -4,6 +4,7 @@ import { Pencil, X } from "lucide-react";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ConfidenceBadge } from "./confidence-badge";
 import { CATEGORY_LABELS, BILLING_CYCLE_LABELS } from "@/lib/subscriptions/labels";
 import { amountStringToCents, formatCents } from "@/lib/subscriptions/money";
@@ -56,22 +57,36 @@ export function ReviewRow({
       <TableCell className="text-muted-foreground">{sourceLabel}</TableCell>
       <TableCell>
         <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={() => onEdit(detected.id)}
-            aria-label={`Edit ${currentValues.name}`}
-          >
-            <Pencil className="size-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={() => onToggleIgnored(detected.id)}
-            aria-label={ignored ? `Restore ${currentValues.name}` : `Ignore ${currentValues.name}`}
-          >
-            <X className="size-3.5" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => onEdit(detected.id)}
+                  aria-label={`Edit ${currentValues.name}`}
+                >
+                  <Pencil className="size-3.5" />
+                </Button>
+              }
+            />
+            <TooltipContent>Edit</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => onToggleIgnored(detected.id)}
+                  aria-label={ignored ? `Restore ${currentValues.name}` : `Ignore ${currentValues.name}`}
+                >
+                  <X className="size-3.5" />
+                </Button>
+              }
+            />
+            <TooltipContent>{ignored ? "Restore" : "Ignore"}</TooltipContent>
+          </Tooltip>
         </div>
       </TableCell>
     </TableRow>

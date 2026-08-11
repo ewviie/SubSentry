@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PasswordField } from "@/components/auth/password-field";
+import { TurnstileWidget, type TurnstileWidgetHandle } from "@/components/auth/turnstile-widget";
 import {
   Card,
   CardContent,
@@ -23,7 +24,15 @@ export function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Stays false through every normal login — the server only ever responds
+  // with captcha_required once an account has already failed a couple of
+  // logins in a row (see api/auth/login/route.ts). Progressive disclosure,
+  // not a permanent fixture on this form: a first-time correct login never
+  // sees a CAPTCHA at all.
+  const [captchaRequired, setCaptchaRequired] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const errorRef = useRef<HTMLParagraphElement>(null);
+  const turnstileRef = useRef<TurnstileWidgetHandle>(null);
 
   // Runs after the DOM commits, so this can't race the fields' still-true
   // disabled={loading} the way a synchronous focus() call inside
@@ -41,11 +50,14 @@ export function LoginForm() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, captchaToken }),
       });
 
       if (!res.ok) {
         const data = await res.json().catch(() => null);
+        if (data?.error === "captcha_required") {
+          setCaptchaRequired(true);
+        }
         // The API deliberately never says whether the email or the password
         // was wrong (see login/route.ts's DUMMY_HASH comment — that's an
         // anti-enumeration measure, not an oversight), so there's no single
@@ -61,6 +73,10 @@ export function LoginForm() {
       setError("Network error. Try again.");
     } finally {
       setLoading(false);
+      // Same single-use-token reasoning as signup-form.tsx: every submit
+      // needs a fresh token queued up before the next attempt.
+      setCaptchaToken(null);
+      turnstileRef.current?.reset();
     }
   }
 
@@ -95,14 +111,22 @@ export function LoginForm() {
             ariaInvalid={Boolean(error)}
             ariaDescribedBy={error ? "auth-error" : undefined}
           />
+          <p className="text-right text-sm">
+            <Link href="/forgot-password" className="text-muted-foreground underline underline-offset-4 hover:text-foreground">
+              Forgot password?
+            </Link>
+          </p>
           {error ? (
             <p ref={errorRef} id="auth-error" role="alert" tabIndex={-1} className="text-sm text-destructive outline-none">
               {error}
             </p>
           ) : null}
+          {captchaRequired ? (
+            <TurnstileWidget ref={turnstileRef} action="login" onVerify={setCaptchaToken} onExpire={() => setCaptchaToken(null)} />
+          ) : null}
         </CardContent>
         <CardFooter className="flex flex-col gap-4">
-          <Button type="submit" className="w-full" disabled={loading}>
+          <Button type="submit" className="w-full" disabled={loading || (captchaRequired && !captchaToken)}>
             {loading ? (
               <>
                 <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { isEmailSendingConfigured, sendVerificationEmail } from "./email";
+import { isEmailSendingConfigured, sendVerificationEmail, sendPasswordResetEmail } from "./email";
 
 // vi.mock calls are hoisted above imports by Vitest's transform, so the
 // mocked module applies before ./email's own `import nodemailer from
@@ -198,5 +198,69 @@ describe("sendVerificationEmail — configured (SMTP via Nodemailer)", () => {
 
     await expect(sendVerificationEmail("user@example.com", "raw-token")).rejects.toThrow(/still down/);
     expect(sendMailMock).toHaveBeenCalledTimes(3);
+  });
+});
+
+// sendPasswordResetEmail shares its demo-mode/production-throw/retry-loop
+// implementation with sendVerificationEmail (see sendTransactionalEmail in
+// email.ts) — that mechanism's full retry/backoff matrix is already
+// exercised above via sendVerificationEmail; these just confirm
+// sendPasswordResetEmail is wired to it correctly and sends its own
+// distinct copy (subject, link path, wording), not a second copy of the
+// same test matrix.
+describe("sendPasswordResetEmail — unconfigured (demo mode)", () => {
+  it("logs the link (not the demo-mode label) and returns in non-production", async () => {
+    delete process.env.SMTP_HOST;
+    vi.stubEnv("NODE_ENV", "test");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await expect(sendPasswordResetEmail("user@example.com", "raw-token")).resolves.toBeUndefined();
+    expect(logSpy).toHaveBeenCalledOnce();
+    expect(String(logSpy.mock.calls[0][0])).toContain("[email:password-reset]");
+    expect(createTransportMock).not.toHaveBeenCalled();
+  });
+
+  it("throws in production rather than logging a live reset link", async () => {
+    delete process.env.SMTP_HOST;
+    vi.stubEnv("NODE_ENV", "production");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await expect(sendPasswordResetEmail("user@example.com", "raw-token")).rejects.toThrow(/password-reset/);
+    expect(logSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("sendPasswordResetEmail — configured (SMTP via Nodemailer)", () => {
+  beforeEach(() => {
+    process.env.SMTP_HOST = "smtp-mail.outlook.com";
+    process.env.SMTP_PORT = "587";
+    process.env.SMTP_USER = "user@outlook.com";
+    process.env.SMTP_PASSWORD = "pw";
+    process.env.SMTP_FROM = "SubSentry <user@outlook.com>";
+  });
+
+  it("sends the expected copy, with the reset link in both the html and text bodies, from SMTP_FROM", async () => {
+    sendMailMock.mockResolvedValue({ messageId: "msg-reset-1", accepted: [], rejected: [] });
+
+    await sendPasswordResetEmail("user@example.com", "raw-token");
+
+    const mail = sendMailMock.mock.calls[0][0];
+    expect(mail.from).toBe("SubSentry <user@outlook.com>");
+    expect(mail.to).toBe("user@example.com");
+    expect(mail.subject).toBe("Reset your SubSentry password");
+    expect(mail.html).toContain("We received a request to reset your SubSentry password");
+    expect(mail.html).toContain("expires in 1 hour");
+    expect(mail.text).toContain("We received a request to reset your SubSentry password");
+    expect(mail.html).toMatch(/href="http[^"]*\/reset-password\?token=raw-token"/);
+    expect(mail.text).toContain("/reset-password?token=raw-token");
+  });
+
+  it("retries a transient SMTP failure the same way sendVerificationEmail does (shared retry logic)", async () => {
+    sendMailMock
+      .mockRejectedValueOnce(Object.assign(new Error("Mailbox busy"), { responseCode: 450 }))
+      .mockResolvedValueOnce({ messageId: "msg-reset-2", accepted: [], rejected: [] });
+
+    await expect(sendPasswordResetEmail("user@example.com", "raw-token")).resolves.toBeUndefined();
+    expect(sendMailMock).toHaveBeenCalledTimes(2);
   });
 });

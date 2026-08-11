@@ -5,6 +5,8 @@ import { listSubscriptions } from "@/lib/subscriptions/queries";
 import { isAIConfigured } from "@/lib/ai/provider";
 import { FREE_PLAN_SUBSCRIPTION_LIMIT, getUpgradeUrl, isBillingPortalConfigured, hasPaidAccess, isBetaAllAccess } from "@/lib/billing/plan";
 import { initials } from "@/lib/utils";
+import { getEmailConnection } from "@/lib/imports/email-connections";
+import { listBankConnections } from "@/lib/imports/bank-connections";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,6 +14,8 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { LogoutButton } from "@/components/app-shell/logout-button";
 import { EditNameForm } from "@/components/settings/edit-name-form";
 import { ManageBillingButton } from "@/components/billing/manage-billing-button";
+import { ConnectedAccountRow } from "@/components/settings/connected-account-row";
+import { DeleteAccountCard } from "@/components/settings/delete-account-card";
 import { FadeInSection } from "@/components/dashboard/fade-in-section";
 
 const PRO_BENEFITS = [
@@ -29,6 +33,19 @@ export default async function SettingsPage() {
   const portalConfigured = isBillingPortalConfigured();
   const beta = isBetaAllAccess();
 
+  // Self-service disconnect surface for every live-API import connection —
+  // see api/imports/{gmail,plaid,truelayer}/disconnect. Fetched here
+  // (Server Component) rather than client-side so a disconnect's
+  // router.refresh() (see ConnectedAccountRow) re-derives this from the
+  // database instead of trusting client-side state to stay in sync with it.
+  const [emailConnection, bankConnections] = await Promise.all([
+    getEmailConnection(user.id, "gmail"),
+    listBankConnections(user.id),
+  ]);
+  const plaidConnections = bankConnections.filter((c) => c.provider === "plaid");
+  const truelayerConnections = bankConnections.filter((c) => c.provider === "truelayer");
+  const hasConnectedAccounts = Boolean(emailConnection) || plaidConnections.length > 0 || truelayerConnections.length > 0;
+
   return (
     <div className="max-w-2xl">
       <div className="flex items-center gap-4">
@@ -37,8 +54,15 @@ export default async function SettingsPage() {
             {initials(user.name, user.email)}
           </AvatarFallback>
         </Avatar>
-        <div>
-          <h1 className="font-heading text-h1 font-semibold">{user.name || user.email}</h1>
+        {/* min-w-0 + break-words — same fix and reasoning as
+            dashboard/page.tsx's identical header row: a flex item's
+            automatic minimum width defaults to its content's min-content
+            size, and a name-less account's email (no natural break
+            point) forced this row wider than the viewport on mobile
+            without min-w-0 to allow it to shrink and break-words to give
+            the now-shrunk text somewhere to wrap. */}
+        <div className="min-w-0">
+          <h1 className="break-words font-heading text-h1 font-semibold">{user.name || user.email}</h1>
           <p className="mt-0.5 text-sm text-muted-foreground">
             Manage your account, plan, and AI configuration.
           </p>
@@ -126,7 +150,7 @@ export default async function SettingsPage() {
             <CardDescription>
               {aiConfigured
                 ? "Quick-add and insight narration are powered by Claude."
-                : "Running in demo mode. Quick-add and insight narration return realistic canned responses. Set ANTHROPIC_API_KEY to enable live AI."}
+                : "AI features aren't fully enabled yet. Quick-add and insight narration return realistic canned responses in the meantime."}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -136,12 +160,59 @@ export default async function SettingsPage() {
           </CardContent>
         </Card>
 
+        {hasConnectedAccounts ? (
+          <Card className="shadow-elevation-low">
+            <CardHeader>
+              <CardTitle>Connected accounts</CardTitle>
+              <CardDescription>Bank and email connections used to detect subscriptions automatically.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {emailConnection ? (
+                <ConnectedAccountRow
+                  label="Google (Gmail)"
+                  detail={`Connected as ${emailConnection.emailAddress}`}
+                  disconnectUrl="/api/imports/gmail/disconnect"
+                />
+              ) : null}
+              {plaidConnections.length > 0 ? (
+                <ConnectedAccountRow
+                  label="Plaid"
+                  detail={
+                    plaidConnections.length === 1
+                      ? (plaidConnections[0].institutionName ?? "1 bank connected")
+                      : `${plaidConnections.length} banks connected`
+                  }
+                  disconnectUrl="/api/imports/plaid/disconnect"
+                />
+              ) : null}
+              {truelayerConnections.length > 0 ? (
+                <ConnectedAccountRow
+                  label="TrueLayer"
+                  detail={
+                    truelayerConnections.length === 1
+                      ? (truelayerConnections[0].institutionName ?? "1 bank connected")
+                      : `${truelayerConnections.length} banks connected`
+                  }
+                  disconnectUrl="/api/imports/truelayer/disconnect"
+                />
+              ) : null}
+            </CardContent>
+          </Card>
+        ) : null}
+
+        <DeleteAccountCard />
+
         <div className="flex items-center justify-between">
           <Link href="/dashboard" className="text-sm text-muted-foreground underline underline-offset-4">
             Back to dashboard
           </Link>
           <LogoutButton />
         </div>
+
+        <nav aria-label="Legal" className="flex items-center gap-4 text-xs text-muted-foreground">
+          <Link href="/privacy" className="hover:text-foreground hover:underline">Privacy Policy</Link>
+          <Link href="/terms" className="hover:text-foreground hover:underline">Terms of Service</Link>
+        </nav>
       </FadeInSection>
     </div>
   );

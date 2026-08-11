@@ -86,13 +86,26 @@ export class DemoProvider implements AIProvider {
       }
     }
 
-    // Two separate passes: \b requires a word-character/non-word-character
-    // transition, which never matches directly before "/" when it's
-    // preceded by whitespace (e.g. "$139 /yr") — so the slash-prefixed
+    // Strip whichever match actually supplied the amount (symbol-prefixed
+    // or bare — amountMatch is already resolved to the one that won above),
+    // not just the symbol-prefixed pattern unconditionally. That fixed
+    // pattern alone left the number sitting in the name for any input
+    // with no currency symbol at all ("Netflix 15.99 monthly" → name
+    // "Netflix 15.99" — a real bug, not a demo-mode quirk to shrug off,
+    // since this is exactly the text a user re-reads to check SubSentry
+    // understood them). A number that's genuinely part of a name ("Office
+    // 365") is untouched whenever a symbol elsewhere in the string already
+    // won the amount match instead (see the "Office 365 $6.99/mo" case
+    // above) — only the specific substring that became the amount is ever
+    // removed, never every digit in the text.
+    //
+    // Two separate passes below: \b requires a word-character/non-word-
+    // character transition, which never matches directly before "/" when
+    // it's preceded by whitespace (e.g. "$139 /yr") — so the slash-prefixed
     // shorthand can't share a \b-bounded alternation with the word-based
     // terms the way "/mo"|"/yr" previously did.
     const name = text
-      .replace(/[£€$¥]\s?\d+(?:\.\d{1,2})?/, "")
+      .replace(amountMatch ? amountMatch[0] : "", "")
       .replace(/\b(monthly|yearly|annual|weekly|quarterly|per month|per year)\b/gi, "")
       .replace(/\/(mo|yr)\b/gi, "")
       .replace(/\s+/g, " ")

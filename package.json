@@ -66,5 +66,9 @@
     "sharp@0.34.5": true,
     "unrs-resolver@1.12.2": true,
     "fsevents@2.3.3": true
+  },
+  "overrides": {
+    "js-yaml": "^4.3.1",
+    "nanoid": "^3.3.18"
   }
 }

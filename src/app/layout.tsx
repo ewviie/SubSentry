@@ -4,7 +4,9 @@ import { Geist, Geist_Mono, Space_Grotesk } from "next/font/google";
 import { cn } from "@/lib/utils";
 import { Toaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "@/components/theme-provider";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { MotionConfig } from "framer-motion";
+import { absoluteUrl, getAppUrl } from "@/lib/seo";
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-sans" });
 const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-mono" });
@@ -22,32 +24,51 @@ const spaceGrotesk = Space_Grotesk({
 // real domain exists.
 const SITE_TITLE = "SubSentry";
 const SITE_DESCRIPTION = "AI-powered subscription management";
-const appUrl = process.env.NEXT_PUBLIC_APP_URL;
 
-export const metadata: Metadata = {
-  // title.template applies to every page under this layout that sets its
-  // own `title` (e.g. login/signup below) without repeating "SubSentry" —
-  // `default` is what renders on pages (like this one, the landing page)
-  // that don't override title at all. Previously every single page in the
-  // app rendered the exact same title/description, since nothing below the
-  // root ever overrode them.
-  title: { default: SITE_TITLE, template: `%s | ${SITE_TITLE}` },
-  description: SITE_DESCRIPTION,
-  metadataBase: appUrl ? new URL(appUrl) : undefined,
-  alternates: { canonical: "/" },
-  openGraph: {
-    title: SITE_TITLE,
+// generateMetadata (a function), not a static `export const metadata`
+// object — metadataBase needs process.env.NEXT_PUBLIC_APP_URL read fresh
+// per render, not once at module-import time. Verified empirically
+// (against a real production build) that a module-scope read of that env
+// var produces `undefined` for metadataBase on every dynamically-rendered
+// page (/, /login, /signup, /forgot-password, /subscription-tracker —
+// anything that calls getSession(), which makes it dynamic), even with the
+// var genuinely set for the running process — see lib/seo.ts's own comment
+// for the fuller story and why absoluteUrl() below has the same
+// read-inside-the-function shape.
+export async function generateMetadata(): Promise<Metadata> {
+  return {
+    // title.template applies to every page under this layout that sets its
+    // own `title` (e.g. login/signup) without repeating "SubSentry" —
+    // `default` is what renders on pages (like the landing page) that
+    // don't override title at all.
+    title: { default: SITE_TITLE, template: `%s | ${SITE_TITLE}` },
     description: SITE_DESCRIPTION,
-    images: ["/logo-mark.png"],
-    type: "website",
-  },
-  twitter: {
-    card: "summary",
-    title: SITE_TITLE,
-    description: SITE_DESCRIPTION,
-    images: ["/logo-mark.png"],
-  },
-};
+    // getAppUrl() (not a raw `new URL(process.env.NEXT_PUBLIC_APP_URL)`) —
+    // a malformed value is treated as unset instead of throwing here and
+    // crashing metadata generation for every page; see lib/seo.ts's own
+    // comment.
+    metadataBase: (() => {
+      const appUrl = getAppUrl();
+      return appUrl ? new URL(appUrl) : undefined;
+    })(),
+    // Explicit absolute URLs via absoluteUrl(), not left as bare relative
+    // strings for metadataBase to resolve — this is the fallback every
+    // page that doesn't set its own canonical/openGraph inherits.
+    alternates: { canonical: absoluteUrl("/") ?? "/" },
+    openGraph: {
+      title: SITE_TITLE,
+      description: SITE_DESCRIPTION,
+      images: [absoluteUrl("/logo-mark.png") ?? "/logo-mark.png"],
+      type: "website",
+    },
+    twitter: {
+      card: "summary",
+      title: SITE_TITLE,
+      description: SITE_DESCRIPTION,
+      images: [absoluteUrl("/logo-mark.png") ?? "/logo-mark.png"],
+    },
+  };
+}
 
 export default function RootLayout({
   children,
@@ -71,8 +92,10 @@ export default function RootLayout({
           Skip to content
         </a>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-          <MotionConfig reducedMotion="user">{children}</MotionConfig>
-          <Toaster />
+          <TooltipProvider>
+            <MotionConfig reducedMotion="user">{children}</MotionConfig>
+            <Toaster />
+          </TooltipProvider>
         </ThemeProvider>
       </body>
     </html>

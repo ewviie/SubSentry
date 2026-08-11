@@ -51,3 +51,22 @@ describe("DemoProvider.parseSubscriptionText — category inference", () => {
     expect(result.category).toBe("other");
   });
 });
+
+describe("DemoProvider.parseSubscriptionText — name extraction", () => {
+  // The reported bug: with no currency symbol, the amount comes from the
+  // bare-number fallback match, but the name-cleanup regex only ever
+  // stripped a symbol-prefixed amount — so the number stayed stuck in the
+  // name the user would then see in the confirm dialog as "what SubSentry
+  // understood."
+  it("strips a bare (no currency symbol) amount out of the name", async () => {
+    const result = await provider.parseSubscriptionText("Netflix 15.99 monthly");
+    expect(result.name).toBe("Netflix");
+    expect(result.amount).toBe("15.99");
+  });
+
+  it("still leaves a product-name number alone when a symbol elsewhere wins the amount match", async () => {
+    const result = await provider.parseSubscriptionText("Office 365 $6.99/mo");
+    expect(result.name).toBe("Office 365");
+    expect(result.amount).toBe("6.99");
+  });
+});

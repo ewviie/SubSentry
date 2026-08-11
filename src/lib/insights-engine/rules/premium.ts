@@ -30,15 +30,22 @@ const annualSwitchSavings: InsightRule = {
     const totalAnnualCents = monthlySubs.reduce((sum, s) => sum + s.amountCents * 12, 0);
     const estimatedSavingsCents = Math.round(totalAnnualCents * ASSUMED_ANNUAL_PLAN_DISCOUNT);
     if (estimatedSavingsCents < 500) return null;
+    // monthlySavingsCents is the one number the Optimization score (see
+    // engine.ts) actually sums — the description below is derived from it
+    // (monthlySavingsCents * 12), not from estimatedSavingsCents directly,
+    // so the two can never quietly disagree by a few cents the way they did
+    // before this was reconciled: round(x/12)*12 != x in general, and this
+    // rule's own text is the one place that rounding was visible to a user.
+    const monthlySavingsCents = Math.round(estimatedSavingsCents / 12);
     return {
       ruleId: this.id,
       title: "You could save by switching to annual plans",
-      description: `If providers that bill you monthly offer an annual plan at a typical discount, switching could save an estimated ${formatCents(estimatedSavingsCents)}/year.`,
+      description: `If providers that bill you monthly offer an annual plan at a typical discount, switching could save an estimated ${formatCents(monthlySavingsCents * 12)}/year.`,
       severity: "info",
       category: "optimization",
       premium: true,
       subscriptionIds: monthlySubs.map((s) => s.id),
-      monthlySavingsCents: Math.round(estimatedSavingsCents / 12),
+      monthlySavingsCents,
     };
   },
 };

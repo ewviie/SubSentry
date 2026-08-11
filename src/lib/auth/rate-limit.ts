@@ -4,12 +4,14 @@ import { createRateLimiter } from "@/lib/rate-limit";
 // Every limiter in this file is async and Redis-backed when
 // UPSTASH_REDIS_REST_URL/TOKEN are configured (falls back to this
 // process's own memory otherwise — see rate-limit-distributed.ts). These
-// five are specifically the authentication surfaces named in the
-// production-readiness mission as needing distributed protection; every
-// other limiter in the app (billing, imports, AI, subscriptions) stays on
-// the simpler synchronous in-memory limiter — smaller blast radius, all
-// already behind an authenticated session, and migrating all ~15 call
-// sites in one pass was judged lower value than doing these 5 correctly.
+// are specifically the authentication surfaces named in the
+// production-readiness mission as needing distributed protection (login,
+// signup, verify/resend, and forgot/reset-password — an account-takeover
+// path as sensitive as login itself); every other limiter in the app
+// (billing, imports, AI, subscriptions) stays on the simpler synchronous
+// in-memory limiter — smaller blast radius, all already behind an
+// authenticated session, and migrating every call site in one pass was
+// judged lower value than doing these correctly.
 
 // Keyed by IP+email so a credential-stuffing script grinding through many
 // accounts from one IP gets bounded per account, without one attacker's
@@ -87,3 +89,52 @@ export const checkResendVerificationIpRateLimit = createRateLimiterAsync(
   RESEND_VERIFICATION_IP_LIMIT,
   RESEND_VERIFICATION_IP_WINDOW_MS,
 );
+
+// Keyed by IP+email, same shape and reasoning as
+// checkResendVerificationRateLimit — bounds how fast one address can be
+// spammed with fresh password-reset emails (each one invalidates the
+// previous outstanding link, so this also bounds how often a legitimate
+// user's own in-flight reset link gets yanked out from under them by repeat
+// submits).
+const FORGOT_PASSWORD_LIMIT = 3;
+const FORGOT_PASSWORD_WINDOW_MS = 15 * 60 * 1000;
+export const checkForgotPasswordRateLimit = createRateLimiterAsync(
+  FORGOT_PASSWORD_LIMIT,
+  FORGOT_PASSWORD_WINDOW_MS,
+);
+
+// Aggregate bucket keyed by IP alone, same reasoning as
+// checkResendVerificationIpRateLimit — bounds a script sweeping many
+// different target addresses from one IP, each of which would otherwise
+// stay under its own fresh per-email allowance.
+const FORGOT_PASSWORD_IP_LIMIT = 20;
+const FORGOT_PASSWORD_IP_WINDOW_MS = 15 * 60 * 1000;
+export const checkForgotPasswordIpRateLimit = createRateLimiterAsync(
+  FORGOT_PASSWORD_IP_LIMIT,
+  FORGOT_PASSWORD_IP_WINDOW_MS,
+);
+
+// Keyed by IP — a reset token is already unguessable (32 random bytes), so
+// this bounds brute-force *guessing* attempts against the token space, not
+// a per-account concern. Same shape as checkVerifyEmailRateLimit.
+const RESET_PASSWORD_LIMIT = 20;
+const RESET_PASSWORD_WINDOW_MS = 15 * 60 * 1000;
+export const checkResetPasswordRateLimit = createRateLimiterAsync(RESET_PASSWORD_LIMIT, RESET_PASSWORD_WINDOW_MS);
+
+// Authenticated and low-frequency by nature (nobody deletes their account
+// twice), but unlike checkProfileUpdateRateLimit/checkDisconnectRateLimit
+// this route re-verifies a *password* (see api/account/route.ts) — the
+// same "password-guessing oracle against an already-stolen session cookie"
+// shape as login, not just a lower-value authenticated action. A
+// process-local in-memory counter bounds that per-instance only: on a
+// horizontally-scaled/serverless deployment (this app's target — see
+// forgot-password/route.ts's after() comment), an attacker's requests can
+// land on multiple warm instances, each with its own fresh 5-per-15-minute
+// counter, so the *effective* ceiling scales with instance count instead of
+// staying at 5. Distributed (keyed by user id alone — no IP-based
+// second bucket the way login's dual limiter has, since the attacker here
+// already holds one specific victim's session and there's no
+// spray-many-accounts-from-one-IP scenario to separately bound).
+const DELETE_ACCOUNT_LIMIT = 5;
+const DELETE_ACCOUNT_WINDOW_MS = 15 * 60 * 1000;
+export const checkDeleteAccountRateLimit = createRateLimiterAsync(DELETE_ACCOUNT_LIMIT, DELETE_ACCOUNT_WINDOW_MS);

@@ -25,6 +25,7 @@ export function StatCard({
   return (
     <MotionCard>
       <Card
+        size="sm"
         className={cn(
           "relative h-full overflow-hidden shadow-elevation-low transition-shadow duration-200 hover:shadow-elevation-medium",
           emphasis && "shadow-sm ring-foreground/[0.08] before:absolute before:inset-x-0 before:top-0 before:h-[3px] before:bg-emerald before:content-['']",

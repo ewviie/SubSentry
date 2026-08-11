@@ -12,6 +12,17 @@ import { logSecurityEvent } from "@/lib/observability/log-security-event";
 const PROTECTED_PREFIXES = ["/dashboard", "/subscriptions", "/settings", "/analytics", "/savings"];
 const STATE_CHANGING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
+// A path-segment match, not a raw string prefix — plain `startsWith` would
+// treat "/dashboard-screenshot.jpg" (a public asset that really exists —
+// see landing/features-section.tsx) as under the protected "/dashboard"
+// the instant a file with that prefix showed up, silently 307-redirecting
+// it to /login. Matches "/dashboard" and "/dashboard/…" only. Exported for
+// direct unit testing (proxy.test.ts), same reasoning as buildCsp/
+// resolveRequestId above it.
+export function isProtectedPath(pathname: string): boolean {
+  return PROTECTED_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+}
+
 // A real upstream load balancer/reverse proxy's request id is a short
 // opaque token — uuid-shaped or similar. Anything else (arbitrary length,
 // odd characters) is treated as not actually inbound-proxy-supplied and
@@ -134,7 +145,7 @@ export function proxy(request: NextRequest) {
   }
 
   const { pathname } = request.nextUrl;
-  const isProtected = PROTECTED_PREFIXES.some((p) => pathname.startsWith(p));
+  const isProtected = isProtectedPath(pathname);
 
   // Cheap cookie-presence redirect only — no DB round trip here. The
   // authoritative check lives in requireUser() (lib/auth/session.ts), called

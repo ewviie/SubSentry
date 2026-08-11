@@ -115,8 +115,21 @@ export function runInsightsEngine(subscriptions: Subscription[], isPremium: bool
   const savingsRecommendations = computeSavingsRecommendations(subscriptions);
   const monthlySavingsCents = computeTotalPotentialSavingsMonthlyCents(savingsRecommendations);
 
+  // The score's own job is "unrealized savings as a share of spend" — that's
+  // strictly broader than "confirmed duplicates," so it needs every
+  // optimization-category rule's dollar figure folded in (currently just
+  // premium.annual_switch_savings), not only the duplicate-detection total.
+  // These don't double-count the same fix: canceling a duplicate and moving
+  // the survivor to an annual plan are two independent actions a user could
+  // take on the same subscription, so summing them is the real combined
+  // opportunity, not an inflated one. `savingsForecast` below stays scoped
+  // to confirmed duplicates on purpose — that card's whole promise is "never
+  // a guessed percentage," and folding in an estimate would break that.
+  const optimizationRuleSavingsCents = optimization.reduce((sum, r) => sum + (r.monthlySavingsCents ?? 0), 0);
+  const totalUnrealizedMonthlyCents = monthlySavingsCents + optimizationRuleSavingsCents;
+
   const healthScore = computeHealthScore(ctx);
-  const optimizationScore = computeOptimizationScore(ctx, monthlySavingsCents * 12);
+  const optimizationScore = computeOptimizationScore(ctx, totalUnrealizedMonthlyCents * 12);
 
   const totalMonthlyCents = monthlyTotalCents(active);
   const longest = active.length > 0 ? [...active].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0] : null;

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { extractTransactionsFromMessages, GMAIL_SEARCH_QUERY, MAX_MESSAGES_PER_SYNC } from "./gmail-extract";
-import type { GmailMessage } from "./gmail-client";
+import type { GmailMessage, GmailMessagePart } from "./gmail-client";
 
 function b64(text: string): string {
   return Buffer.from(text, "utf8").toString("base64url");
@@ -113,6 +113,55 @@ describe("extractTransactionsFromMessages", () => {
       makeMessage({ id: "c", plainBody: "Amount charged: $54.99" }),
     ]);
     expect(result.transactions).toHaveLength(2);
+    expect(result.skippedRowCount).toBe(1);
+  });
+});
+
+// Builds a chain of nested multipart parts `depth` levels deep, with the
+// real text/plain body only at the very bottom — mirrors the shape a
+// maliciously (or just unusually) deeply-nested MIME message would have.
+function makeNestedMessage(depth: number, plainBody: string): GmailMessage {
+  let innermost: GmailMessagePart = { mimeType: "text/plain", body: { data: b64(plainBody) } };
+  for (let i = 0; i < depth; i++) {
+    innermost = { mimeType: "multipart/mixed", parts: [innermost] };
+  }
+  return {
+    id: "nested-msg",
+    internalDate: "1735689600000",
+    snippet: "",
+    payload: {
+      headers: [
+        { name: "From", value: "Netflix <billing@netflix.com>" },
+        { name: "Subject", value: "Your receipt from Netflix" },
+      ],
+      mimeType: "multipart/mixed",
+      parts: [innermost],
+    },
+  };
+}
+
+// Regression coverage for the MIME recursion depth cap — before this,
+// extractBodyText's tree walk had no depth limit at all, so a message with
+// a pathologically deep `parts` chain (crafted by whoever sent it — Gmail's
+// search only filters by subject/sender, not MIME shape) risked a stack
+// overflow on that one request.
+describe("MIME recursion depth cap", () => {
+  it("still extracts a body nested well within the depth cap", () => {
+    const result = extractTransactionsFromMessages([makeNestedMessage(5, "Total: $12.00")]);
+    expect(result.transactions).toHaveLength(1);
+    expect(result.transactions[0].amountCents).toBe(1200);
+  });
+
+  it("does not throw or hang on an extremely deep MIME tree", () => {
+    expect(() => extractTransactionsFromMessages([makeNestedMessage(50_000, "Total: $12.00")])).not.toThrow();
+  });
+
+  it("skips (rather than crashes on) a body nested past the depth cap", () => {
+    // Past the cap, extractBodyText finds nothing — falls back to the
+    // (empty) snippet, so this becomes an unreadable-charge skip like any
+    // other unparseable message, not a crash.
+    const result = extractTransactionsFromMessages([makeNestedMessage(50_000, "Total: $12.00")]);
+    expect(result.transactions).toHaveLength(0);
     expect(result.skippedRowCount).toBe(1);
   });
 });

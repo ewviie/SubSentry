@@ -41,6 +41,18 @@ describe("computeInsights", () => {
     expect(insights.some((i) => i.type === "overdue_renewal")).toBe(false);
   });
 
+  it("combines multiple overdue renewals into one card instead of one per subscription", () => {
+    const appleMusic = sub({ name: "Apple Music", category: "streaming", nextRenewalDate: "2020-01-01" });
+    const spotify = sub({ name: "Spotify", category: "software", nextRenewalDate: "2020-01-05" });
+    const insights = computeInsights([appleMusic, spotify]);
+    const overdueInsights = insights.filter((i) => i.type === "overdue_renewal");
+    expect(overdueInsights).toHaveLength(1);
+    expect(overdueInsights[0].title).toBe("2 subscriptions have overdue renewals");
+    expect(overdueInsights[0].subscriptionIds).toEqual([appleMusic.id, spotify.id]);
+    expect(overdueInsights[0].description).toContain("Apple Music");
+    expect(overdueInsights[0].description).toContain("Spotify");
+  });
+
   it("flags a dominant category once it crosses the 40% share threshold", () => {
     const subs = [
       sub({ category: "streaming", amountCents: 5000, name: "Big Streaming" }),

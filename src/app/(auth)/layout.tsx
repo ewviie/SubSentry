@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { getSession } from "@/lib/auth/session";
 import { AuthShell } from "@/components/auth/auth-shell";
+import { AuthLegalFooter } from "@/components/auth/auth-legal-footer";
 import { SentryRing } from "@/components/ui/sentry-ring";
 import { NonceProvider } from "@/components/security/nonce-context";
 
@@ -42,6 +43,7 @@ export default async function AuthLayout({ children }: { children: React.ReactNo
         <main id="main-content" className="w-full max-w-sm">
           <AuthShell>{children}</AuthShell>
         </main>
+        <AuthLegalFooter />
       </div>
     </NonceProvider>
   );

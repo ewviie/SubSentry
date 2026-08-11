@@ -8,7 +8,7 @@ export default function AppSegmentNotFound() {
       <div className="flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
         <SearchX className="size-5" />
       </div>
-      <p className="font-medium">Not found</p>
+      <h1 className="font-medium">Not found</h1>
       <p className="text-sm text-muted-foreground">
         This page doesn&apos;t exist, or you don&apos;t have access to it.
       </p>

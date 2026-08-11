@@ -20,6 +20,9 @@ test.describe("signup", () => {
     await page.goto("/signup");
     await page.getByLabel("Email").fill(email);
     await page.getByLabel("Password", { exact: true }).fill("a-strong-password-123");
+    // Required consent checkbox (see signup-form.tsx) — submit stays
+    // disabled without it.
+    await page.getByRole("checkbox").check();
     await page.getByRole("button", { name: "Create account" }).click();
 
     await expect(page).toHaveURL(/\/dashboard$/, { timeout: 5000 });
@@ -37,6 +40,29 @@ test.describe("signup", () => {
     // network request fires, which :invalid lets us assert directly.
     await expect(password).toHaveJSProperty("validity.valid", false);
   });
+
+  // Regression coverage for the Product Polish pass's #3 fix: signup used
+  // to show three separate Terms/Privacy touchpoints on one screen (the AI
+  // disclosure line, the consent checkbox, and this standalone footer nav).
+  // The footer nav is gone from signup specifically — the consent
+  // checkbox's own Terms/Privacy links (still present, still required) are
+  // enough on that page — but stays everywhere else in the auth layout,
+  // which has no other way to reach the policies.
+  test("does not show the standalone legal footer nav (the consent checkbox already links Terms/Privacy)", async ({ page }) => {
+    await page.goto("/signup");
+    await expect(page.getByRole("navigation", { name: "Legal" })).toHaveCount(0);
+    // The actual required consent language must still be present.
+    await expect(page.getByText("I agree to the")).toBeVisible();
+  });
+});
+
+test.describe("auth layout legal footer — kept on every other auth page", () => {
+  for (const path of ["/login", "/forgot-password"]) {
+    test(`${path} still shows the standalone Terms/Privacy nav`, async ({ page }) => {
+      await page.goto(path);
+      await expect(page.getByRole("navigation", { name: "Legal" })).toBeVisible();
+    });
+  }
 });
 
 test.describe("email verification (dormant, kept for a future re-enable)", () => {

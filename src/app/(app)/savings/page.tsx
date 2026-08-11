@@ -14,7 +14,7 @@ export default async function SavingsPage() {
 
   return (
     <div className="max-w-3xl">
-      <h1 className="font-heading text-h1 font-semibold">Smart savings</h1>
+      <h1 className="font-heading text-h1 font-semibold">Smart Savings</h1>
       <p className="mt-1 text-muted-foreground">
         Real opportunities found in your own subscriptions — never a guessed percentage.
       </p>

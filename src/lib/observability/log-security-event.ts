@@ -13,7 +13,8 @@ export type SecurityEventType =
   | "signup_rate_limited"
   | "csrf_rejected"
   | "verification_rate_limited"
-  | "captcha_rejected";
+  | "captcha_rejected"
+  | "account_delete_wrong_password";
 
 export function logSecurityEvent(event: SecurityEventType, meta: Record<string, string | number | undefined>): void {
   console.warn(

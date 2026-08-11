@@ -58,7 +58,7 @@ export function InsightsSection({ insights }: { insights: ComputedInsight[] }) {
       </div>
       {error ? <p className="mt-2 text-sm text-destructive">{error}</p> : null}
       {insights.length === 0 ? (
-        <Card className="mt-4 shadow-elevation-low">
+        <Card size="sm" className="mt-4 shadow-elevation-low">
           <CardContent className="flex items-center gap-3">
             <div
               aria-hidden="true"
@@ -69,7 +69,7 @@ export function InsightsSection({ insights }: { insights: ComputedInsight[] }) {
             <div>
               <p className="text-sm font-medium">Nothing needs your attention</p>
               <p className="text-sm text-muted-foreground">
-                No overdue renewals, overlaps, or cost spikes flagged right now.
+                No overdue renewals or cost spikes flagged right now.
               </p>
             </div>
           </CardContent>
@@ -80,7 +80,7 @@ export function InsightsSection({ insights }: { insights: ComputedInsight[] }) {
           initial="hidden"
           whileInView="visible"
           viewport={revealViewport}
-          className="mt-4 grid gap-3 sm:grid-cols-2"
+          className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3"
         >
           {insights.map((insight, idx) => {
             const Icon = ICONS[insight.type];
@@ -93,8 +93,14 @@ export function InsightsSection({ insights }: { insights: ComputedInsight[] }) {
                 whileHover={liftOnHover}
                 transition={springSnappy}
               >
-                <Card className="h-full shadow-elevation-low transition-shadow duration-200 hover:shadow-elevation-medium">
-                  <CardContent className="flex h-full flex-col gap-3 pt-4">
+                <Card size="sm" className="h-full shadow-elevation-low transition-shadow duration-200 hover:shadow-elevation-medium">
+                  {/* No pt override here on purpose — the empty-state Card
+                      just above (when insights.length === 0) doesn't add one
+                      either, and this used to disagree with it for no
+                      documented reason, stacking an extra pt-4 on top of the
+                      Card's own padding. size="sm" alone gets a noticeably
+                      more compact card without losing any information. */}
+                  <CardContent className="flex h-full flex-col gap-2">
                     <div className="flex gap-3">
                       <div
                         className={

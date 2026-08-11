@@ -4,6 +4,7 @@ import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Archive, ChevronDown, Loader2, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -123,9 +124,16 @@ export function BulkActionBar({
               </AlertDialogContent>
             </AlertDialog>
 
-            <Button variant="ghost" size="icon-sm" onClick={onClear} aria-label="Clear selection" disabled={busy}>
-              <X className="size-4" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button variant="ghost" size="icon-sm" onClick={onClear} aria-label="Clear selection" disabled={busy}>
+                    <X className="size-4" />
+                  </Button>
+                }
+              />
+              <TooltipContent>Clear selection</TooltipContent>
+            </Tooltip>
           </div>
         </motion.div>
       ) : null}
