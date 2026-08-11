@@ -1,106 +1,406 @@
-# ⚓ SubSentry
+# SubSentry
 
-AI-powered subscription management. Track what you're paying for, catch
-duplicate and overpriced subscriptions, and add new ones by typing them in
-plain English instead of filling out a form.
+**Find the subscriptions you forgot about. See what they really cost. Take back control.**
 
-## What's implemented
+SubSentry is a subscription-management and personal-finance web app designed to help people discover recurring payments, understand their true annual cost, identify savings opportunities, and manage subscriptions from one place.
 
-- **Auth** — email/password signup and login, database-backed sessions
-  (opaque cookie token, only its hash stored server-side), rate-limited and
-  protected by middleware.
-- **Subscriptions CRUD** — add, edit, and delete subscriptions (name, amount,
-  currency, billing cycle, category, renewal date, status, notes).
-- **Dashboard** — monthly/annual spend, active count, upcoming renewals,
-  spend-by-category breakdown, all with count-up animations, skeleton
-  loaders, empty states, and success/error toasts (respects
-  `prefers-reduced-motion`).
-- **AI quick-add** — type `"Netflix £10.99 monthly"` into the quick-add bar
-  and confirm the parsed result before saving. Falls back to a demo provider
-  with realistic canned responses when no `ANTHROPIC_API_KEY` is set, so the
-  whole loop is testable keyless.
-- **Deterministic insights** — expensive-category, overdue-renewal,
-  high-yearly-spend, and possible-duplicate detection, computed purely from
-  your data (no AI call). An optional "Rewrite with AI" pass can restate them
-  in plainer language.
-- **Billing** — a Stripe Payment Link handles checkout with no Stripe SDK
-  dependency; a hand-verified webhook (`/api/stripe/webhook`) records
-  completed checkouts, and `/api/billing/activate` redeems the Payment
-  Link's redirect to upgrade the account to Pro. Free plan is capped at 5
-  active subscriptions; Pro is unlimited.
-- **Settings** — account info, current plan with usage against the free-plan
-  limit and an upgrade CTA, AI mode (live vs. demo), and logout.
+> Built to fight **subscription creep** — the collection of subscriptions that quietly accumulate over time.
 
-## Run it
+---
 
-```bash
-npm install
-cp .env.example .env   # see below — everything has a safe default for local dev
-npm run db:dev         # starts an embedded Postgres-compatible dev server (keep running)
-npm run dev            # in a second terminal — http://localhost:3000
-```
+## ✨ What SubSentry Does
 
-No `ANTHROPIC_API_KEY`? AI features run in demo mode automatically. No
-`STRIPE_PAYMENT_LINK`? Upgrade buttons are simply hidden and the free-plan
-limit still works — billing is entirely additive.
+SubSentry brings recurring spending into one clear dashboard.
 
-## Environment
+### 🔎 Find recurring subscriptions
 
-See `.env.example` for the full list with explanations. Summary:
+Import transaction data and let SubSentry analyze it for recurring payments.
 
-| Variable | Required? | Purpose |
-|---|---|---|
-| `DATABASE_URL` | Yes | Any Postgres wire-protocol connection string — the embedded `npm run db:dev` server, Docker (`docker-compose.yml`), or a hosted Neon/Supabase instance all work identically. |
-| `ANTHROPIC_API_KEY` | No | Enables live AI (quick-add parsing, insight narration). Omit for demo mode. |
-| `AI_MODEL` | No | Defaults to `claude-opus-4-8`. |
-| `STRIPE_PAYMENT_LINK` | No | A Stripe Payment Link URL. When set, "Upgrade to Pro" buttons appear and point at it. |
-| `STRIPE_WEBHOOK_SECRET` | No (required if using billing) | Signing secret for `/api/stripe/webhook` (`whsec_...`). Local testing: `stripe listen --forward-to localhost:3000/api/stripe/webhook`. |
+Supported/import flows include:
 
-## Maintenance
+* Bank CSV imports
+* Gmail-based transaction discovery
+* Plaid connection infrastructure
+* TrueLayer connection infrastructure
+* Apple export messaging
+* Google Play-related subscription handling
 
-Expired sessions are deleted the moment their token is next presented, but a
-cookie that's simply abandoned never gets looked up again. Run
-`npm run db:cleanup-sessions` on a periodic schedule in production (daily is
-plenty, given the 30-day session lifetime) — via Vercel Cron, a scheduled
-GitHub Actions workflow, plain `cron`, or whatever your deployment platform
-offers.
+The import system is designed around a provider-agnostic transaction pipeline, making it possible to add additional financial data providers without rebuilding the detection engine.
 
-## Architecture
+### 💰 See the real cost
 
-```
-src/app/
-  (auth)/              # login, signup — redirects away if already authenticated
-  (app)/               # dashboard, subscriptions, settings — behind requireUser()
-  api/
-    auth/              # signup, login, logout
-    subscriptions/     # CRUD + quick-add
-    ai/narrate-insights/
-    billing/activate/  # redeems a completed Stripe checkout
-    stripe/webhook/    # records completed checkouts
-src/lib/
-  auth/                # session creation/validation, password hashing
-  subscriptions/       # validation, queries, money math, insights
-  ai/                  # provider abstraction (Anthropic + demo), rate limiting
-  billing/             # plan/limits, Stripe webhook signature verification
-  db/                  # Drizzle schema + client
-src/components/        # dashboard, subscriptions, billing, and shared ui/ primitives
-scripts/dev-db.ts      # embedded PGlite Postgres server for zero-setup local dev
-scripts/cleanup-expired-sessions.ts  # scheduled sweep for abandoned sessions
-drizzle/               # generated SQL migrations
-```
+SubSentry converts subscription spending into understandable numbers:
 
-The AI provider surface (`src/lib/ai/provider.ts`) is a small text-in/
-structured-out interface — swapping models or vendors means implementing it
-once, not touching every call site.
+* Monthly cost
+* Yearly cost
+* Upcoming renewals
+* Spending breakdowns
+* Potential savings
 
-## Testing
+A subscription that looks cheap month-to-month can look very different when viewed over an entire year.
+
+### 🧠 Get useful insights
+
+The insights engine can identify situations such as:
+
+* Unused subscriptions
+* Duplicate subscriptions
+* Upcoming renewals
+* Potential savings opportunities
+* Subscription health indicators
+
+The goal is not simply to show data, but to help users understand what they should act on.
+
+### ⚡ Manage subscriptions quickly
+
+Users can:
+
+* Add subscriptions manually
+* Edit subscriptions
+* Review imported subscriptions
+* Bulk-update subscriptions
+* Bulk-delete subscriptions
+* View subscription details
+* Identify potential duplicates
+
+---
+
+## 🛡️ Security & Privacy
+
+SubSentry is built with security as a core requirement rather than an afterthought.
+
+The project includes protections and infrastructure for:
+
+* Authentication rate limiting
+* Login lockouts
+* Request-size limits
+* CAPTCHA / bot protection
+* Ownership-scoped data access
+* Security event logging
+* Password reset flows
+* Email verification infrastructure
+* Account deletion
+* Protected API routes
+* Environment-based secrets
+* Input validation
+* Database query auditing
+
+Sensitive configuration such as `.env` and `.env.local` is intentionally excluded from Git.
+
+**Never commit real API keys, database credentials, OAuth secrets, or other private credentials to the repository.**
+
+---
+
+## 🧪 Testing
+
+SubSentry has both unit/integration testing and end-to-end browser testing.
+
+Current project verification includes:
+
+* **526** unit/integration tests passing
+* Playwright end-to-end tests
+* Authentication tests
+* Security tests
+* Import-flow tests
+* Password-reset tests
+* Account-deletion tests
+* Subscription duplicate-detection tests
+* Mobile layout tests
+* SEO tests
+* Static-page hydration tests
+
+The project also runs:
 
 ```bash
 npm run typecheck
 npm run lint
-npm run test
+npm test
+npm run build
 ```
 
-Vitest covers the pure logic: money math, insights, Stripe signature
-verification, and plan gating. There's no end-to-end test suite yet —
-UI changes should be verified manually against a running dev server.
+Playwright can be run with:
+
+```bash
+npx playwright test
+```
+
+Some browser tests may depend on external services such as CAPTCHA and can require appropriate local test configuration.
+
+---
+
+## 🎨 Frontend
+
+SubSentry uses a modern Next.js frontend with a focus on a clean, premium fintech-style experience.
+
+The UI uses:
+
+* Next.js
+* React
+* TypeScript
+* Tailwind CSS
+* shadcn/ui
+* Framer Motion
+
+The application includes:
+
+* Responsive dashboard
+* Subscription explorer
+* Savings views
+* Import center
+* Settings
+* Authentication flows
+* Marketing pages
+* Subscription cost calculator
+* Subscription tracker
+* Guides and SEO-focused public pages
+
+---
+
+## 🏗️ Architecture
+
+The project follows a feature-oriented architecture with separation between UI, API routes, domain logic, repositories, and infrastructure.
+
+Major areas include:
+
+```text
+src/
+├── app/
+│   ├── (app)/
+│   ├── (auth)/
+│   ├── api/
+│   ├── guides/
+│   ├── privacy/
+│   ├── terms/
+│   └── ...
+│
+├── components/
+│   ├── dashboard/
+│   ├── imports/
+│   ├── landing/
+│   ├── marketing/
+│   ├── settings/
+│   ├── subscriptions/
+│   └── ui/
+│
+└── lib/
+    ├── ai/
+    ├── auth/
+    ├── db/
+    ├── http/
+    ├── imports/
+    ├── insights-engine/
+    ├── observability/
+    └── subscriptions/
+```
+
+---
+
+## 🤖 AI
+
+SubSentry has an AI layer for generating/narrating subscription insights.
+
+The AI provider architecture is separated from the application logic so that the application can use different providers or a demo provider when required.
+
+Environment configuration is used for API credentials rather than storing secrets in source code.
+
+---
+
+## 🗄️ Database
+
+The project uses:
+
+* Drizzle ORM
+* SQLite/PGlite development infrastructure
+* Migration files under `drizzle/`
+
+Money values are represented in integer minor units where appropriate to avoid floating-point financial calculations.
+
+Database access is designed around ownership-scoped queries and explicit data access rather than exposing arbitrary records to authenticated users.
+
+---
+
+## 🌐 SEO
+
+SubSentry includes a dedicated SEO implementation for public pages.
+
+Current SEO infrastructure includes:
+
+* Unique page titles
+* Meta descriptions
+* Canonical URLs
+* Open Graph metadata
+* Twitter metadata
+* JSON-LD structured data
+* Sitemap generation
+* Robots configuration
+* Proper HTML language declaration
+* Accessible image alt text
+* Branded 404 pages
+* Public marketing/content pages
+
+The SEO implementation intentionally avoids fabricating a production domain when one has not been configured.
+
+---
+
+## 🚀 Getting Started
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/ewviie/SubSentry.git
+cd SubSentry
+```
+
+### 2. Install dependencies
+
+```bash
+npm install
+```
+
+### 3. Configure environment variables
+
+Create a local environment file:
+
+```bash
+cp .env.example .env.local
+```
+
+Then fill in the required values.
+
+**Never commit `.env.local`.**
+
+### 4. Start the development server
+
+```bash
+npm run dev
+```
+
+Then open:
+
+```text
+http://localhost:3000
+```
+
+---
+
+## 🔐 Environment Variables
+
+SubSentry uses environment variables for configuration and secrets.
+
+Depending on the enabled features, configuration may include:
+
+* Database connection
+* Application URL
+* AI provider credentials
+* SMTP configuration
+* OAuth credentials
+* Plaid configuration
+* TrueLayer configuration
+* Stripe configuration
+* CAPTCHA configuration
+
+See `.env.example` for the expected configuration.
+
+Do not copy production secrets into `.env.example`.
+
+---
+
+## 📦 Production Build
+
+To verify the production build locally:
+
+```bash
+npm run build
+npm start
+```
+
+Then inspect the production application rather than relying only on the development server.
+
+---
+
+## 📁 Important Files
+
+| File / Directory           | Purpose                         |
+| -------------------------- | ------------------------------- |
+| `src/app/`                 | Next.js routes and pages        |
+| `src/app/api/`             | API endpoints                   |
+| `src/components/`          | UI components                   |
+| `src/lib/auth/`            | Authentication logic            |
+| `src/lib/imports/`         | Financial import infrastructure |
+| `src/lib/insights-engine/` | Subscription insights engine    |
+| `src/lib/subscriptions/`   | Subscription domain logic       |
+| `src/lib/ai/`              | AI provider infrastructure      |
+| `src/lib/db/`              | Database/schema infrastructure  |
+| `drizzle/`                 | Database migrations             |
+| `e2e/`                     | Playwright end-to-end tests     |
+| `.env.example`             | Environment variable template   |
+
+---
+
+## 🗺️ Project Status
+
+SubSentry is an actively developed project.
+
+The core application includes:
+
+* Subscription tracking
+* Recurring-payment detection
+* Import/review workflows
+* Savings insights
+* Authentication
+* Password reset
+* Account deletion
+* Security protections
+* AI insight infrastructure
+* Marketing/SEO pages
+* Automated testing
+
+Some financial integrations and production infrastructure require external provider configuration before they can be used in a live deployment.
+
+---
+
+## 🤝 Contributing
+
+If you're working on SubSentry with the team:
+
+1. Create a branch for your change.
+2. Make your changes.
+3. Run the relevant tests.
+4. Run the production build when appropriate.
+5. Review your diff.
+6. Open a pull request.
+
+For larger changes, prefer:
+
+```text
+feature branch
+     ↓
+pull request
+     ↓
+review
+     ↓
+main
+```
+
+Avoid committing secrets or local environment files.
+
+---
+
+## 📜 License
+
+This project is currently maintained as a private/controlled project. Licensing terms may change as the project evolves.
+
+---
+
+## 💡 The Idea
+
+Subscriptions are designed to be easy to start and easy to forget.
+
+A few dollars here.
+Another subscription there.
+Then another annual renewal.
+
+Eventually, you're paying for things you barely remember signing up for.
+
+**SubSentry exists to make those payments visible — and give you the information you need to decide what stays and what goes.**
+
