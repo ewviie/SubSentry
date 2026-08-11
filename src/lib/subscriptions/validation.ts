@@ -17,10 +17,17 @@ export const STATUSES = ["active", "paused", "canceled"] as const;
 // an amount above this turns valid-looking input into a failed insert.
 const MAX_AMOUNT = 21_474_836.47;
 
+// Exported for merchant-normalizer.ts's fallback display-name path, which
+// needs to truncate to this exact bound rather than duplicate the literal —
+// see its own comment on why.
+export const MAX_SUBSCRIPTION_NAME_LENGTH = 120;
+
 // The regex only checks YYYY-MM-DD shape — 2026-02-31 would pass it and then
 // get rejected by Postgres's `date` column at insert/update time. Round-trip
 // through Date.UTC to catch calendar-invalid dates before they reach the DB.
-function isValidCalendarDate(value: string): boolean {
+// Exported for csv-parser.ts's parseDateToISO, which needs the exact same
+// check (see its own comment) — not re-derived a second time.
+export function isValidCalendarDate(value: string): boolean {
   const [year, month, day] = value.split("-").map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
   return (
@@ -38,7 +45,7 @@ function isValidCalendarDate(value: string): boolean {
 // them untouched, corrupting real data on any true partial update (e.g. a
 // status-only PATCH would silently reset category back to "other").
 const baseFields = {
-  name: z.string().trim().min(1, "Name is required").max(120),
+  name: z.string().trim().min(1, "Name is required").max(MAX_SUBSCRIPTION_NAME_LENGTH),
   amount: z
     .string()
     .trim()

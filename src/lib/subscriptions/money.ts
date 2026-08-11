@@ -17,12 +17,28 @@ export function monthlyCents(amountCents: number, cycle: Subscription["billingCy
   }
 }
 
+// `currency` isn't always something this app validated before it got here —
+// the import review UI (review-row.tsx) renders a DetectedSubscription's
+// currency straight from RawTransaction, before subscriptionInputSchema's
+// own /^[a-z]{3}$/ check ever runs at confirm time (see validation.ts's own
+// comment on why that check exists). A bank CSV's free-text "Currency"
+// column (csv-parser.ts only trims/lowercases it, never validates its
+// shape) or Plaid's unofficial_currency_code can realistically be anything
+// — Intl.NumberFormat throws a RangeError for any string that isn't a
+// well-formed 3-letter alpha code, which would otherwise crash the whole
+// review table mid-render the moment one detected row had a malformed
+// value. Falls back to a plain amount + the raw code — still honest about
+// what was actually detected, not silently relabeled as USD.
 export function formatCents(cents: number, currency = "usd"): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: currency.toUpperCase(),
-    maximumFractionDigits: 2,
-  }).format(cents / 100);
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: currency.toUpperCase(),
+      maximumFractionDigits: 2,
+    }).format(cents / 100);
+  } catch {
+    return `${(cents / 100).toFixed(2)} ${currency.toUpperCase()}`;
+  }
 }
 
 // Parses a decimal string ("15.99") into integer cents via string math, so

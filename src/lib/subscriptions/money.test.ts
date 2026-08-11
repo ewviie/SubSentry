@@ -32,6 +32,30 @@ describe("formatCents", () => {
   it("respects the currency argument", () => {
     expect(formatCents(1099, "gbp")).toBe("£10.99");
   });
+
+  // Regression: Intl.NumberFormat throws a RangeError for any currency
+  // string that isn't a well-formed 3-letter alpha code — reachable in
+  // practice from a bank CSV's free-text Currency column (csv-parser.ts
+  // only trims/lowercases it, never validates shape) rendered in the
+  // import review UI before subscriptionInputSchema's own check ever runs.
+  // Must degrade, never throw.
+  it("falls back to a plain amount + code instead of throwing on a malformed currency string", () => {
+    expect(() => formatCents(999, "us dollar")).not.toThrow();
+    expect(formatCents(999, "us dollar")).toBe("9.99 US DOLLAR");
+  });
+
+  it("falls back gracefully on an empty currency string", () => {
+    expect(() => formatCents(999, "")).not.toThrow();
+    expect(formatCents(999, "")).toBe("9.99 ");
+  });
+
+  // A well-formed-but-unrecognized 3-letter code (not a real ISO 4217
+  // currency) does NOT throw — V8's Intl.NumberFormat only validates the
+  // shape, not membership in the real currency registry — so this still
+  // takes the normal formatting path, not the fallback.
+  it("formats a well-formed but unrecognized 3-letter code without throwing", () => {
+    expect(() => formatCents(1000, "xzz")).not.toThrow();
+  });
 });
 
 describe("amountStringToCents", () => {

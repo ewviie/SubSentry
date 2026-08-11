@@ -47,6 +47,20 @@ describe("normalizeMerchant", () => {
     expect(result.isKnownSubscriptionMerchant).toBe(false);
   });
 
+  // Regression: the fallback path (unlike every known-merchant branch,
+  // which returns a short curated displayName) used to return an
+  // effectively unbounded string straight from the source description. A
+  // real bank CSV description over subscriptionInputSchema's 120-char
+  // `name` limit would reach the review UI looking fine, then fail
+  // /api/imports/confirm's whole-batch validation with no indication of
+  // which row or why (rows is validated as one Zod array — one invalid row
+  // rejects every row in the batch).
+  it("truncates an unknown merchant's fallback display name to the subscription name limit", () => {
+    const longDescription = "A".repeat(200);
+    const result = normalizeMerchant(longDescription);
+    expect(result.displayName.length).toBeLessThanOrEqual(120);
+  });
+
   it("does not fuzzy-match an unrelated merchant of similar length to a known one", () => {
     // "Costco" and "google"/"notion" are all 6 characters — same length,
     // but not remotely similar text — guards against an overly loose fuzzy
