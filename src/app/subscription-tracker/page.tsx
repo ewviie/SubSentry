@@ -29,6 +29,19 @@ export const metadata: Metadata = {
     images: [absoluteUrl("/logo-mark.png") ?? "/logo-mark.png"],
     type: "website",
   },
+  // Without its own `twitter` block, this page fell back to the root
+  // layout's generic "SubSentry" / "AI-powered subscription management"
+  // pair on Twitter/X specifically, while openGraph above (Facebook,
+  // LinkedIn, Slack, iMessage…) already correctly showed this page's own
+  // title/description — Next only inherits fields a page doesn't set
+  // itself, it doesn't derive `twitter` from a sibling `openGraph`. Mirrors
+  // openGraph's values, same as the homepage's metadata already does.
+  twitter: {
+    card: "summary",
+    title: "Subscription Tracker — Track Every Recurring Charge | SubSentry",
+    description: "Track what you're actually paying for, no bank connection required.",
+    images: [absoluteUrl("/logo-mark.png") ?? "/logo-mark.png"],
+  },
 };
 
 // Distinct from "/" on purpose: the homepage pitches the whole product,
