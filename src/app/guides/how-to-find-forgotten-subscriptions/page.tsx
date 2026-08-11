@@ -29,6 +29,16 @@ export const metadata: Metadata = {
     images: [absoluteUrl("/logo-mark.png") ?? "/logo-mark.png"],
     type: "article",
   },
+  // See subscription-tracker/page.tsx's identical comment — without this,
+  // Twitter/X specifically fell back to the root layout's generic title/
+  // description instead of this page's own, while openGraph already had it
+  // right.
+  twitter: {
+    card: "summary",
+    title: "How to Find Forgotten Subscriptions | SubSentry",
+    description: "A practical, step-by-step method — no bank-linked app required.",
+    images: [absoluteUrl("/logo-mark.png") ?? "/logo-mark.png"],
+  },
 };
 
 // Genuinely useful without ever signing up — the brief's own instruction.

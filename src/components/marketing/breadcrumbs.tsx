@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Route } from "next";
 import { ChevronRight } from "lucide-react";
+import { getAppUrl } from "@/lib/seo";
 
 export interface BreadcrumbItem {
   label: string;
@@ -15,7 +16,13 @@ export function Breadcrumbs({ items }: { items: BreadcrumbItem[] }) {
   // every other absolute-URL field in this app already uses (metadataBase,
   // sitemap.ts, robots.ts, the SoftwareApplication `url` field). Omitted
   // entirely rather than resolved against localhost when unset.
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+  //
+  // getAppUrl(), not a raw process.env read — a malformed (but non-empty)
+  // NEXT_PUBLIC_APP_URL would otherwise reach `new URL(item.href, appUrl)`
+  // below unvalidated and throw, crashing every page that renders
+  // breadcrumbs. getAppUrl() already treats malformed the same as unset;
+  // see its own comment in lib/seo.ts.
+  const appUrl = getAppUrl();
   const structuredData = {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",

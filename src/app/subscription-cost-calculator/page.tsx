@@ -28,6 +28,16 @@ export const metadata: Metadata = {
     images: [absoluteUrl("/logo-mark.png") ?? "/logo-mark.png"],
     type: "website",
   },
+  // See subscription-tracker/page.tsx's identical comment — without this,
+  // Twitter/X specifically fell back to the root layout's generic title/
+  // description instead of this page's own, while openGraph already had it
+  // right.
+  twitter: {
+    card: "summary",
+    title: "Subscription Cost Calculator | SubSentry",
+    description: "See your real monthly and yearly subscription total. Free, no signup, nothing saved.",
+    images: [absoluteUrl("/logo-mark.png") ?? "/logo-mark.png"],
+  },
 };
 
 export default function SubscriptionCostCalculatorPage() {
