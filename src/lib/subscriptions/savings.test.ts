@@ -51,6 +51,28 @@ describe("computeSavingsRecommendations", () => {
     expect(duplicate.involvedSubscriptionIds).toEqual([first.id, second.id]);
   });
 
+  it("uses natural phrasing for two identically-named duplicates instead of 'Netflix and Netflix'", () => {
+    const first = sub({ name: "Netflix", amountCents: 1599, nextRenewalDate: "2099-01-01" });
+    const second = sub({ name: "Netflix", amountCents: 1599, nextRenewalDate: "2099-02-01" });
+    const result = computeSavingsRecommendations([first, second]);
+    const duplicate = result.find((r) => r.type === "duplicate")!;
+    expect(duplicate.title).toBe("Two Netflix subscriptions look like duplicates");
+    expect(duplicate.title).not.toContain("Netflix and Netflix");
+    // Renewal dates (real, already-stored data) stand in for the name as
+    // the way the description tells the two apart, since the name alone
+    // can't here.
+    expect(duplicate.description).toContain("2099-01-01");
+    expect(duplicate.description).toContain("2099-02-01");
+  });
+
+  it("keeps the original 'X and Y' phrasing when the two names actually differ", () => {
+    const first = sub({ name: "Netflix", amountCents: 1599 });
+    const second = sub({ name: "Netflix Premium", amountCents: 2299 });
+    const result = computeSavingsRecommendations([first, second]);
+    const duplicate = result.find((r) => r.type === "duplicate")!;
+    expect(duplicate.title).toBe("Netflix and Netflix Premium look like duplicates");
+  });
+
   it("does not flag genuinely different names as duplicates", () => {
     const result = computeSavingsRecommendations([sub({ name: "Netflix" }), sub({ name: "Spotify" })]);
     expect(result.some((r) => r.type === "duplicate")).toBe(false);

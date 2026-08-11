@@ -8,6 +8,10 @@ const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo";
 const GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
+// Google's standard OAuth2 token revocation endpoint (RFC 7009) — revoking
+// either an access or a refresh token invalidates the whole grant behind
+// it, so disconnect.ts prefers the refresh token when one exists.
+const REVOKE_URL = "https://oauth2.googleapis.com/revoke";
 
 // Minimal permissions, deliberately: gmail.readonly (not gmail.modify or
 // full mail.google.com) — read-only, can't send/delete/modify anything.
@@ -108,6 +112,24 @@ export function exchangeCodeForTokens(code: string, redirectUri: string): Promis
 
 export function refreshAccessToken(refreshToken: string): Promise<GoogleTokens> {
   return requestToken({ grant_type: "refresh_token", refresh_token: refreshToken });
+}
+
+// Best-effort: called by disconnect/route.ts AFTER the local connection row
+// is already deleted, never before — so a Google outage or a network blip
+// here can't block the one guarantee that route exists to provide (this app
+// can no longer use the token). A non-2xx/network failure is swallowed by
+// the caller, not retried or surfaced to the user; the token still expires
+// naturally even if this never reaches Google, same as it always did before
+// this function existed.
+export async function revokeToken(token: string): Promise<void> {
+  const response = await fetchWithTimeout(REVOKE_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ token }).toString(),
+  });
+  if (!response.ok) {
+    throw new GoogleApiError(`Google token revocation failed: ${response.status}`, response.status);
+  }
 }
 
 export async function fetchUserEmail(accessToken: string): Promise<string> {

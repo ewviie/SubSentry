@@ -5,6 +5,7 @@ import { checkBankConnectRateLimit } from "@/lib/imports/rate-limit";
 import { isPlaidConfigured, getPlaidClient } from "@/lib/imports/plaid-client";
 import { createBankConnection } from "@/lib/imports/bank-connections";
 import { logServerError } from "@/lib/observability/log-error";
+import { readJsonBody, MAX_JSON_BODY_BYTES } from "@/lib/http/request-size";
 
 // Plaid Link's own onSuccess callback already hands the client the
 // institution's display name in its metadata — no need for a second
@@ -33,7 +34,12 @@ export async function POST(request: Request) {
     );
   }
 
-  const parsed = exchangeSchema.safeParse(await request.json().catch(() => null));
+  const body = await readJsonBody(request, MAX_JSON_BODY_BYTES);
+  if (body.tooLarge) {
+    return NextResponse.json({ error: "payload_too_large", message: "Request body is too large." }, { status: 413 });
+  }
+
+  const parsed = exchangeSchema.safeParse(body.data);
   if (!parsed.success) {
     return NextResponse.json({ error: "invalid_request", message: "Invalid request." }, { status: 400 });
   }

@@ -1,39 +1,36 @@
 "use client";
 
+import Image from "next/image";
+import Link from "next/link";
 import { motion } from "framer-motion";
-import { Copy, LayoutDashboard, PieChart, Sparkles } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
-import { fadeInUp, liftOnHover, revealViewport, springSnappy, staggerContainer } from "@/lib/motion";
+import { fadeInUp, revealViewport, staggerContainer } from "@/lib/motion";
 
-const FEATURES = [
+// Replaces the old icon-card grid: an icon and a sentence don't prove a
+// product exists or works. A real screenshot does. This is an actual
+// dashboard render — a real test account with real subscriptions entered,
+// screenshotted directly from the running app (see the commit that added
+// this file for exactly how) — not a mockup, not a Figma comp. Every
+// number in it (the $146.97, the 83/100 health score, the insight text)
+// is the app's own deterministic engine computing real input, the same
+// "never fabricate a number" rule the product itself follows applied to
+// its own marketing.
+const POINTS = [
   {
-    icon: Sparkles,
     title: "Add subscriptions by typing them",
     description:
       "“Netflix £10.99 monthly” is enough. The AI parser extracts the amount, currency, and billing cycle, then you confirm before anything is saved.",
-    accent: "bg-ai-muted text-ai",
-    span: "sm:col-span-2",
   },
   {
-    icon: Copy,
     title: "Catch duplicates and overlap",
     description: "Two streaming services covering the same shows? SubSentry flags it before the next renewal.",
-    accent: "bg-chart-2/10 text-chart-2",
-    span: "",
   },
   {
-    icon: PieChart,
     title: "See spend by category",
     description: "Software, streaming, fitness, and more: one glance at where the money actually goes each month.",
-    accent: "bg-emerald-muted text-emerald",
-    span: "",
   },
   {
-    icon: LayoutDashboard,
     title: "A dashboard that answers one question",
     description: "“What am I paying for right now?” Monthly and annual totals, upcoming renewals, and nothing you don't need.",
-    accent: "bg-chart-4/10 text-chart-4",
-    span: "sm:col-span-2",
   },
 ];
 
@@ -54,33 +51,54 @@ export function FeaturesSection() {
         </p>
       </motion.div>
 
-      <motion.div
-        variants={staggerContainer(0.08)}
-        initial="hidden"
-        whileInView="visible"
-        viewport={revealViewport}
-        className="mt-12 grid gap-4 sm:grid-cols-2"
-      >
-        {FEATURES.map((feature) => (
-          <motion.div key={feature.title} variants={fadeInUp} className={feature.span}>
-            <motion.div
-              whileHover={liftOnHover}
-              transition={springSnappy}
-              className="h-full"
-            >
-              <Card className="h-full shadow-elevation-low transition-shadow duration-200 hover:shadow-elevation-medium">
-                <CardContent className="flex h-full flex-col justify-center gap-3 pt-6 pb-6">
-                  <div className={`flex size-9 items-center justify-center rounded-full ${feature.accent}`}>
-                    <feature.icon className="size-4" aria-hidden="true" />
-                  </div>
-                  <p className="font-heading text-lg font-medium">{feature.title}</p>
-                  <p className="text-sm text-muted-foreground">{feature.description}</p>
-                </CardContent>
-              </Card>
+      <div className="mt-12 grid items-center gap-10 lg:grid-cols-5 lg:gap-12">
+        <motion.div
+          variants={fadeInUp}
+          initial="hidden"
+          whileInView="visible"
+          viewport={revealViewport}
+          className="lg:col-span-3"
+        >
+          <div className="overflow-hidden rounded-xl border border-border/60 shadow-elevation-medium">
+            <Image
+              src="/dashboard-screenshot.jpg"
+              alt="SubSentry dashboard showing monthly spend of $146.97 across 6 active subscriptions, an 83/100 subscription health score, and real cost-saving insights"
+              width={1456}
+              height={821}
+              className="w-full"
+              sizes="(min-width: 1024px) 60vw, 100vw"
+            />
+          </div>
+        </motion.div>
+
+        <motion.div
+          variants={staggerContainer(0.08)}
+          initial="hidden"
+          whileInView="visible"
+          viewport={revealViewport}
+          className="space-y-6 lg:col-span-2"
+        >
+          {POINTS.map((point) => (
+            <motion.div key={point.title} variants={fadeInUp}>
+              {/* Was a <p> — visually a sub-point already, but semantically
+                  invisible as a heading, leaving this H2's section with no
+                  H3s under it at all. Tailwind Preflight zeroes default
+                  heading margins, so this is a pure semantics fix: pixel-
+                  identical, real heading hierarchy for once. */}
+              <h3 className="font-heading text-base font-medium">{point.title}</h3>
+              <p className="mt-1 text-sm text-muted-foreground">{point.description}</p>
             </motion.div>
+          ))}
+          {/* The one homepage → SEO-page link: contextual, not a nav item,
+              for the reader who wants more depth on tracking specifically
+              before signing up. */}
+          <motion.div variants={fadeInUp}>
+            <Link href="/subscription-tracker" className="text-sm font-medium text-foreground underline underline-offset-4">
+              More on how subscription tracking works →
+            </Link>
           </motion.div>
-        ))}
-      </motion.div>
+        </motion.div>
+      </div>
     </section>
   );
 }

@@ -80,6 +80,21 @@ test.describe("IDOR — cross-user resource access", () => {
   });
 });
 
+test.describe("self-service disconnect routes require authentication", () => {
+  // Regression coverage for the new Plaid/TrueLayer disconnect routes
+  // (api/imports/{plaid,truelayer}/disconnect) — same auth gate every other
+  // route in this app has (getSession() first), asserted directly for the
+  // two that didn't exist before this pass. Gmail's disconnect route
+  // predates it and already had this property; included for completeness.
+  for (const path of ["/api/imports/plaid/disconnect", "/api/imports/truelayer/disconnect", "/api/imports/gmail/disconnect"]) {
+    test(`POST ${path} without a session returns 401, not a crash`, async ({ page }) => {
+      await page.goto("/login");
+      const response = await apiFetch(page, path, { method: "POST" });
+      expect(response.status).toBe(401);
+    });
+  }
+});
+
 test.describe("malicious input handling", () => {
   test("an XSS-shaped subscription name is rendered as inert text, not executed", async ({ browser }) => {
     const user = await createVerifiedUser(browser, "e2e-xss");
@@ -124,6 +139,82 @@ test.describe("malicious input handling", () => {
       },
     });
     expect(response.status).toBe(400);
+
+    await user.page.context().close();
+    await deleteTestUser(user.email);
+  });
+});
+
+test.describe("malformed subscription id handling", () => {
+  // Regression coverage: subscriptions.id is a Postgres uuid column, so a
+  // non-UUID path segment used to make the query driver throw
+  // "invalid input syntax for type uuid" — an unhandled 500 with an empty
+  // (non-JSON) body — instead of a clean 400/404. Every handler below must
+  // now reject the shape before ever reaching a query.
+  // "../../etc/passwd" is deliberately %2F-encoded, not literal — a literal
+  // "../" in a relative fetch() URL gets resolved away by the browser
+  // itself before the request is ever sent (it collapses against the
+  // current path, landing on a completely different, nonexistent route —
+  // 404 from Next's own router, never reaching this handler at all).
+  // Encoding the slashes keeps it as one opaque path segment that actually
+  // reaches subscriptionIdSchema as the literal id string.
+  const MALFORMED_IDS = ["not-a-valid-uuid", "1", "..%2F..%2Fetc%2Fpasswd", "%20%20%20"];
+
+  for (const badId of MALFORMED_IDS) {
+    test(`GET /api/subscriptions/${badId} returns 400 JSON, not a 500 crash`, async ({ browser }) => {
+      const user = await createVerifiedUser(browser, "e2e-badid-get");
+      const response = await apiFetch(user.page, `/api/subscriptions/${badId}`);
+      expect(response.status).toBe(400);
+      expect(response.body).toMatchObject({ error: "invalid_request" });
+
+      await user.page.context().close();
+      await deleteTestUser(user.email);
+    });
+  }
+
+  test("PATCH with a malformed id returns 400 JSON, not a 500 crash", async ({ browser }) => {
+    const user = await createVerifiedUser(browser, "e2e-badid-patch");
+    const response = await apiFetch(user.page, "/api/subscriptions/not-a-valid-uuid", {
+      method: "PATCH",
+      body: { name: "Hijacked" },
+    });
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({ error: "invalid_request" });
+
+    await user.page.context().close();
+    await deleteTestUser(user.email);
+  });
+
+  test("DELETE with a malformed id returns 400 JSON, not a 500 crash", async ({ browser }) => {
+    const user = await createVerifiedUser(browser, "e2e-badid-delete");
+    const response = await apiFetch(user.page, "/api/subscriptions/not-a-valid-uuid", { method: "DELETE" });
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({ error: "invalid_request" });
+
+    await user.page.context().close();
+    await deleteTestUser(user.email);
+  });
+
+  test("a well-formed but nonexistent id still returns a clean 404, not a crash", async ({ browser }) => {
+    const user = await createVerifiedUser(browser, "e2e-badid-404");
+    const response = await apiFetch(user.page, "/api/subscriptions/00000000-0000-4000-8000-000000000000");
+    expect(response.status).toBe(404);
+
+    await user.page.context().close();
+    await deleteTestUser(user.email);
+  });
+
+  test("visiting the subscription detail page with a malformed id renders not-found, not an error boundary", async ({
+    browser,
+  }) => {
+    const user = await createVerifiedUser(browser, "e2e-badid-page");
+    const response = await user.page.goto("/subscriptions/not-a-valid-uuid");
+    // Next.js's not-found boundary renders with a 200 in the browser (it's
+    // a Server Component render outcome, not an HTTP-level redirect) — the
+    // real assertion is that the page shows the app's actual not-found UI
+    // instead of the generic error boundary a raw query crash used to hit.
+    expect(response?.status()).toBe(200);
+    await expect(user.page.getByText(/not found|doesn.t exist|couldn.t find/i).first()).toBeVisible();
 
     await user.page.context().close();
     await deleteTestUser(user.email);

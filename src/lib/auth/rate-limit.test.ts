@@ -3,6 +3,9 @@ import {
   checkVerifyEmailRateLimit,
   checkResendVerificationRateLimit,
   checkResendVerificationIpRateLimit,
+  checkForgotPasswordRateLimit,
+  checkForgotPasswordIpRateLimit,
+  checkResetPasswordRateLimit,
 } from "./rate-limit";
 
 // The generic limiter mechanics (window reset, per-key isolation) are
@@ -46,6 +49,43 @@ describe("checkResendVerificationIpRateLimit", () => {
     const ip = `test-ip-${Math.random()}`;
     let lastResult;
     for (let i = 0; i < 25; i++) lastResult = await checkResendVerificationIpRateLimit(ip);
+    expect(lastResult?.allowed).toBe(false);
+  });
+});
+
+describe("checkForgotPasswordRateLimit", () => {
+  it("blocks once its limit is exhausted for a given key", async () => {
+    const key = `test-ip-email-${Math.random()}`;
+    let lastResult;
+    for (let i = 0; i < 5; i++) lastResult = await checkForgotPasswordRateLimit(key);
+    expect(lastResult?.allowed).toBe(false);
+  });
+
+  it("tracks a different email independently, even from the same IP", async () => {
+    const ip = `test-ip-${Math.random()}`;
+    for (let i = 0; i < 3; i++) await checkForgotPasswordRateLimit(`${ip}:victim-a@example.com`);
+    expect((await checkForgotPasswordRateLimit(`${ip}:victim-a@example.com`)).allowed).toBe(false);
+    expect((await checkForgotPasswordRateLimit(`${ip}:victim-b@example.com`)).allowed).toBe(true);
+  });
+});
+
+describe("checkForgotPasswordIpRateLimit", () => {
+  // Same gap as checkResendVerificationIpRateLimit: a script sweeping many
+  // different target emails from one IP never exhausts the per-(ip,email)
+  // bucket since each combination is fresh.
+  it("blocks a single IP sweeping many different target emails", async () => {
+    const ip = `test-ip-${Math.random()}`;
+    let lastResult;
+    for (let i = 0; i < 25; i++) lastResult = await checkForgotPasswordIpRateLimit(ip);
+    expect(lastResult?.allowed).toBe(false);
+  });
+});
+
+describe("checkResetPasswordRateLimit", () => {
+  it("blocks once its limit is exhausted for a given key", async () => {
+    const key = `test-ip-${Math.random()}`;
+    let lastResult;
+    for (let i = 0; i < 25; i++) lastResult = await checkResetPasswordRateLimit(key);
     expect(lastResult?.allowed).toBe(false);
   });
 });

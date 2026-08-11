@@ -6,7 +6,7 @@ import { getImportProvider, IMPORT_SOURCE_IDS, type ImportSourceId } from "@/lib
 import { checkImportAnalyzeRateLimit } from "@/lib/imports/rate-limit";
 import { analyzeParsedTransactions } from "@/lib/imports/analyze";
 import { listSubscriptions } from "@/lib/subscriptions/queries";
-import { isContentLengthWithinLimit } from "@/lib/http/request-size";
+import { isContentLengthWithinLimit, capRequestBody } from "@/lib/http/request-size";
 
 const sourceSchema = z.enum(IMPORT_SOURCE_IDS);
 
@@ -37,10 +37,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "payload_too_large", message: "File is too large." }, { status: 413 });
   }
 
+  // capRequestBody, not just the Content-Length precheck above: a chunked
+  // (no Content-Length) multipart upload previously sailed straight past
+  // that check into an unbounded request.formData() buffer — the same class
+  // of bug fixed for every JSON route (see request-size.ts). This caps the
+  // real bytes read regardless of what the client declares.
+  const { request: cappedRequest, exceeded } = capRequestBody(request, MAX_UPLOAD_BYTES);
   let formData: FormData;
   try {
-    formData = await request.formData();
+    formData = await cappedRequest.formData();
   } catch {
+    if (exceeded()) {
+      return NextResponse.json({ error: "payload_too_large", message: "File is too large." }, { status: 413 });
+    }
     return NextResponse.json({ error: "invalid_request", message: "Couldn't read the upload." }, { status: 400 });
   }
 

@@ -4,9 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import type { Route } from "next";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { Check } from "lucide-react";
+import { Check, Search } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { fadeQuick } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { SourcePicker, SOURCE_LABELS } from "./source-picker";
@@ -14,13 +16,14 @@ import { FileUploadStep } from "./file-upload-step";
 import { ConnectBankStep } from "./connect-bank-step";
 import { ConnectEmailStep } from "./connect-email-step";
 import { AnalyzingStep } from "./analyzing-step";
+import { RevealStep } from "./reveal-step";
 import { ReviewTable } from "./review-table";
 import { ImportCompleteStep } from "./import-complete-step";
 import type { ImportSourceId } from "@/lib/imports/provider";
 import type { DetectedSubscription } from "@/lib/imports/types";
 import type { SubscriptionFormValues } from "@/components/subscriptions/subscription-form";
 
-type Step = "source" | "upload" | "connect" | "analyzing" | "review" | "complete";
+type Step = "source" | "upload" | "connect" | "analyzing" | "reveal" | "review" | "complete";
 
 const STEP_ORDER: Step[] = ["source", "upload", "analyzing", "review", "complete"];
 const STEP_LABELS: Record<Step, string> = {
@@ -28,6 +31,7 @@ const STEP_LABELS: Record<Step, string> = {
   upload: "Upload",
   connect: "Connect",
   analyzing: "Analyze",
+  reveal: "Analyze",
   review: "Review",
   complete: "Done",
 };
@@ -78,10 +82,12 @@ const CONFIRM_SOURCE_MAP: Record<
 // wizard's own Step state rather than that component's generic
 // context-provider API, which this single-owner state doesn't need.
 function StepProgress({ step }: { step: Step }) {
-  // "connect" (the live-API bank-link step) stands in for "upload" in the
-  // progress bar — a source is either file-based or connect-based, never
-  // both, so there's no dedicated dot for it.
-  const currentIndex = STEP_ORDER.indexOf(step === "connect" ? "upload" : step);
+  // "connect" stands in for "upload" in the progress bar (a source is
+  // either file-based or connect-based, never both), and "reveal" stands in
+  // for "analyzing" (it's the tail end of the same wait, not a new stage
+  // worth its own dot) — neither gets a dedicated position.
+  const mapped = step === "connect" ? "upload" : step === "reveal" ? "analyzing" : step;
+  const currentIndex = STEP_ORDER.indexOf(mapped);
   return (
     <ol className="mb-6 flex items-center">
       {STEP_ORDER.map((s, i) => {
@@ -105,10 +111,18 @@ function StepProgress({ step }: { step: Step }) {
               >
                 {completed ? <Check className="size-3.5" aria-hidden="true" /> : i + 1}
               </span>
-              <span className={cn("text-sm font-medium", active ? "text-foreground" : "text-muted-foreground")}>
+              {/* Labels hide below sm — 5 circle+label+connector groups
+                  don't fit a phone-width screen without either wrapping
+                  (breaks the horizontal progress metaphor) or overflowing
+                  (cut off "Done" entirely, a real bug this pass caught).
+                  The circles/connectors alone still show real progress;
+                  the current step's name is announced via aria-current
+                  plus the sr-only text below instead of hidden entirely. */}
+              <span className={cn("hidden text-sm font-medium sm:inline", active ? "text-foreground" : "text-muted-foreground")}>
                 {STEP_LABELS[s]}
                 {completed ? <span className="sr-only"> (completed)</span> : null}
               </span>
+              {active ? <span className="sr-only sm:hidden">{STEP_LABELS[s]}</span> : null}
             </div>
             {i < STEP_ORDER.length - 1 ? (
               <div className={cn("mx-3 h-px flex-1 transition-colors", completed ? "bg-primary" : "bg-border")} aria-hidden="true" />
@@ -160,6 +174,22 @@ export function ImportCenterPage({
     setCompletedIgnoredCount(0);
   }
 
+  // Recovery action for a zero-result Review step — narrower than reset():
+  // keeps the already-chosen source (there's no reason to make someone
+  // re-pick "Bank CSV" just because their first file didn't have anything
+  // recurring in it) and only clears the detection output. For a file-based
+  // source this lands back on the same upload dropzone; for a live-API
+  // source (no file to retry) it lands back on the connect/sync screen,
+  // which already offers its own "Sync now" retry.
+  function tryAgain() {
+    setStep(source && LIVE_API_SOURCES.includes(source) ? "connect" : "upload");
+    setUploadError(null);
+    setConnectError(null);
+    setDetected([]);
+    setWarnings([]);
+    setSkippedRowCount(0);
+  }
+
   async function runSync(sourceId: ImportSourceId) {
     const syncRoute = SYNC_ROUTE[sourceId];
     if (!syncRoute) return;
@@ -175,7 +205,10 @@ export function ImportCenterPage({
       setDetected(data.detected ?? []);
       setWarnings(data.warnings ?? []);
       setSkippedRowCount(data.skippedRowCount ?? 0);
-      setStep("review");
+      // Skip the reveal beat when there's nothing to reveal — "0 charges
+      // found, $0.00/mo!" isn't a payoff, it's an anti-climax. "review"
+      // already renders its own "nothing detected" message for this case.
+      setStep((data.detected ?? []).length > 0 ? "reveal" : "review");
     } catch {
       setConnectError("Network error. Try again.");
       setStep("connect");
@@ -265,7 +298,7 @@ export function ImportCenterPage({
       setDetected(data.detected ?? []);
       setWarnings(data.warnings ?? []);
       setSkippedRowCount(data.skippedRowCount ?? 0);
-      setStep("review");
+      setStep((data.detected ?? []).length > 0 ? "reveal" : "review");
     } catch {
       setUploadError("Network error. Try again.");
       setStep("upload");
@@ -309,6 +342,7 @@ export function ImportCenterPage({
             {step === "upload" && `Upload your ${source ? SOURCE_LABELS[source] : ""} file`}
             {step === "connect" && `Connect ${source ? SOURCE_LABELS[source] : ""}`}
             {step === "analyzing" && "Analyzing"}
+            {step === "reveal" && "Here's what we found"}
             {step === "review" && "Review detected subscriptions"}
             {step === "complete" && "Import complete"}
           </CardTitle>
@@ -318,6 +352,7 @@ export function ImportCenterPage({
             {step === "connect" && source === "gmail" && "Nothing is scanned until you finish connecting your Google account."}
             {step === "connect" && source !== "gmail" && "Nothing is fetched until you finish connecting your bank."}
             {step === "analyzing" && "This only takes a moment."}
+            {step === "reveal" && "Nothing has been added yet — you'll confirm each one on the next screen."}
             {step === "review" &&
               "Only high-confidence matches are pre-selected. Nothing is imported until you confirm."}
             {step === "complete" && "You can review everything on your subscriptions page."}
@@ -374,6 +409,7 @@ export function ImportCenterPage({
                 </>
               ) : null}
               {step === "analyzing" ? <AnalyzingStep /> : null}
+              {step === "reveal" ? <RevealStep detected={detected} onContinue={() => setStep("review")} /> : null}
               {step === "review" ? (
                 <>
                   {warnings.length > 0 ? (
@@ -394,9 +430,20 @@ export function ImportCenterPage({
                     </div>
                   ) : null}
                   {detected.length === 0 ? (
-                    <p className="py-12 text-center text-sm text-muted-foreground">
-                      No recurring subscription payments were detected in this file.
-                    </p>
+                    <EmptyState
+                      icon={Search}
+                      title="No recurring subscriptions detected"
+                      description={
+                        source && LIVE_API_SOURCES.includes(source)
+                          ? "We didn't find any charges that repeat often enough to look like a subscription."
+                          : "That file didn't have any charges that repeat often enough to look like a subscription."
+                      }
+                      action={
+                        <Button variant="outline" size="sm" onClick={tryAgain}>
+                          {source && LIVE_API_SOURCES.includes(source) ? "Try again" : "Try a different file"}
+                        </Button>
+                      }
+                    />
                   ) : (
                     <ReviewTable
                       detected={detected}

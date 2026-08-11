@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Check, Loader2, Pencil, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 export function EditNameForm({ initialName }: { initialName: string }) {
   const router = useRouter();
@@ -58,14 +59,16 @@ export function EditNameForm({ initialName }: { initialName: string }) {
         <span className="text-muted-foreground">Name</span>
         <div className="flex items-center gap-1.5">
           <span>{initialName || "—"}</span>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            onClick={() => setEditing(true)}
-            aria-label="Edit name"
-          >
-            <Pencil className="size-3" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button variant="ghost" size="icon-xs" onClick={() => setEditing(true)} aria-label="Edit name">
+                  <Pencil className="size-3" />
+                </Button>
+              }
+            />
+            <TooltipContent>Edit name</TooltipContent>
+          </Tooltip>
         </div>
       </div>
     );
@@ -91,12 +94,30 @@ export function EditNameForm({ initialName }: { initialName: string }) {
             aria-invalid={Boolean(error)}
             aria-describedby={error ? "edit-name-error" : undefined}
           />
-          <Button variant="ghost" size="icon-xs" onClick={handleSave} disabled={saving} aria-label="Save name">
-            {saving ? <Loader2 className="size-3 animate-spin motion-reduce:animate-none" /> : <Check className="size-3" />}
-          </Button>
-          <Button variant="ghost" size="icon-xs" onClick={handleCancel} disabled={saving} aria-label="Cancel">
-            <X className="size-3" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button variant="ghost" size="icon-xs" onClick={handleSave} disabled={saving} aria-label="Save name">
+                  {saving ? (
+                    <Loader2 className="size-3 animate-spin motion-reduce:animate-none" />
+                  ) : (
+                    <Check className="size-3" />
+                  )}
+                </Button>
+              }
+            />
+            <TooltipContent>Save name</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button variant="ghost" size="icon-xs" onClick={handleCancel} disabled={saving} aria-label="Cancel">
+                  <X className="size-3" />
+                </Button>
+              }
+            />
+            <TooltipContent>Cancel</TooltipContent>
+          </Tooltip>
         </div>
       </div>
       {error ? (

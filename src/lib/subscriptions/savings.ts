@@ -1,14 +1,17 @@
 import type { Subscription } from "@/lib/db/schema";
 import { monthlyCents, formatCents } from "./money";
-import { normalizeName, levenshtein } from "./insights";
+import { normalizeName, namesLikelyMatch } from "./insights";
 import { CATEGORY_LABELS } from "./labels";
 
 // A dedicated, actionable savings engine — distinct from insights.ts's
 // dashboard-summary cards (which surface one headline number + a link to
 // "the first" duplicate). This computes every real opportunity, each with
 // its own recommended action and a specific subscription to act on, for the
-// standalone /savings page. Reuses insights.ts's normalizeName/levenshtein
-// primitives rather than re-deriving fuzzy-match logic a second time.
+// standalone /savings page. Reuses insights.ts's normalizeName/
+// namesLikelyMatch primitives rather than re-deriving fuzzy-match logic a
+// second time — the two used to keep separate, byte-for-byte-identical
+// copies of the matching function; see namesLikelyMatch's own comment in
+// insights.ts for why that was a real (not just untidy) risk.
 //
 // Same "deterministic, not fabricated" rule insights.ts already follows:
 // every dollar figure here comes from a real pairwise duplicate match, never
@@ -29,16 +32,6 @@ export interface SavingsRecommendation {
   involvedSubscriptionIds: string[];
 }
 
-function namesLikelyMatch(normA: string, normB: string): boolean {
-  if (!normA || !normB) return false;
-  if (normA === normB) return true;
-  if (normA.length >= 4 && normB.length >= 4 && (normA.includes(normB) || normB.includes(normA))) {
-    return true;
-  }
-  if (Math.abs(normA.length - normB.length) > 2) return false;
-  return levenshtein(normA, normB) <= 2;
-}
-
 export function computeSavingsRecommendations(allSubscriptions: Subscription[]): SavingsRecommendation[] {
   const active = allSubscriptions.filter((s) => s.status === "active");
   const recommendations: SavingsRecommendation[] = [];
@@ -55,11 +48,24 @@ export function computeSavingsRecommendations(allSubscriptions: Subscription[]):
       alreadyFlagged.add(active[j].id);
 
       const savings = monthlyCents(active[j].amountCents, active[j].billingCycle);
+      // Identical raw names (not just namesLikelyMatch's fuzzy sense — two
+      // subscriptions both literally called "Netflix") produce "Netflix and
+      // Netflix look like duplicates" if the two names are just concatenated
+      // — reads like generated copy that never accounted for its own most
+      // common case. Renewal date is real, already-stored data (not a
+      // fabricated distinguisher) and is what actually tells the two apart
+      // in the description below, the same way the badge next to each row
+      // in the list already does.
+      const sameName = active[i].name === active[j].name;
       recommendations.push({
         id: `duplicate-${active[i].id}-${active[j].id}`,
         type: "duplicate",
-        title: `${active[i].name} and ${active[j].name} look like duplicates`,
-        description: `These look like the same service. If ${active[j].name} is the stale one, canceling it saves you money every month.`,
+        title: sameName
+          ? `Two ${active[i].name} subscriptions look like duplicates`
+          : `${active[i].name} and ${active[j].name} look like duplicates`,
+        description: sameName
+          ? `These look like the same service — one renews ${active[i].nextRenewalDate}, the other ${active[j].nextRenewalDate}. If the one renewing ${active[j].nextRenewalDate} is the stale one, canceling it saves you money every month.`
+          : `These look like the same service. If ${active[j].name} is the stale one, canceling it saves you money every month.`,
         actionLabel: `Review ${active[j].name}`,
         monthlySavingsCents: savings,
         targetSubscriptionId: active[j].id,

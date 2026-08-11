@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { checkoutSessions, stripeEvents, users } from "@/lib/db/schema";
 import { verifyStripeSignature, stripeEventSchema } from "@/lib/billing/stripe-webhook";
-import { isContentLengthWithinLimit } from "@/lib/http/request-size";
+import { readTextBody } from "@/lib/http/request-size";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Real Stripe event payloads are a few KB; this endpoint is public and only
@@ -17,11 +17,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "not_configured" }, { status: 503 });
   }
 
-  if (!isContentLengthWithinLimit(request, MAX_WEBHOOK_BODY_BYTES)) {
+  const bodyResult = await readTextBody(request, MAX_WEBHOOK_BODY_BYTES);
+  if (bodyResult.tooLarge) {
     return NextResponse.json({ error: "payload_too_large" }, { status: 413 });
   }
-
-  const rawBody = await request.text();
+  const rawBody = bodyResult.data ?? "";
   const signature = request.headers.get("stripe-signature");
 
   if (!verifyStripeSignature(rawBody, signature, secret)) {

@@ -3,7 +3,7 @@ import { getSession } from "@/lib/auth/session";
 import { listSubscriptions } from "@/lib/subscriptions/queries";
 import { computeInsights } from "@/lib/subscriptions/insights";
 import { getAIProvider } from "@/lib/ai/provider";
-import { checkAndConsumeRateLimit } from "@/lib/ai/rate-limit";
+import { checkNarrateInsightsRateLimit } from "@/lib/ai/rate-limit";
 import { logServerError } from "@/lib/observability/log-error";
 
 // Deliberately recomputes insights server-side from the session's own data
@@ -23,7 +23,7 @@ export async function POST() {
   // Checked after the empty-insights short-circuit above — a call that
   // never reaches the AI provider shouldn't cost the user any of their
   // limited daily quota.
-  const rateLimit = checkAndConsumeRateLimit(session.user.id);
+  const rateLimit = checkNarrateInsightsRateLimit(session.user.id);
   if (!rateLimit.allowed) {
     return NextResponse.json(
       { error: "rate_limited", message: "You've hit your AI usage limit for now. Try again in a few hours." },

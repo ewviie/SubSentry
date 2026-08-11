@@ -68,3 +68,14 @@ export const subscriptionInputSchema = z.object(baseFields).extend({
 export type SubscriptionInput = z.infer<typeof subscriptionInputSchema>;
 export const subscriptionUpdateSchema = z.object(baseFields).partial();
 export type SubscriptionUpdate = z.infer<typeof subscriptionUpdateSchema>;
+
+// subscriptions.id is a Postgres `uuid` column — a malformed string (or
+// anything that isn't a UUID at all) makes the driver throw "invalid input
+// syntax for type uuid" instead of the query just matching zero rows. Every
+// /api/subscriptions/[id] handler must validate the path param against this
+// before it ever reaches getSubscription/updateSubscription/deleteSubscription
+// (lib/subscriptions/queries.ts), the same way a request body is validated
+// before reaching a query — otherwise a non-UUID id (a scanner probe, a
+// stale/corrupted client link) crashes the route with an unhandled 500
+// instead of a clean 400.
+export const subscriptionIdSchema = z.string().uuid();

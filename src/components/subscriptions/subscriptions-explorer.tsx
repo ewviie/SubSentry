@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useEffect, useMemo, useOptimistic, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -54,6 +54,34 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: "recently_added", label: "Recently added" },
 ];
 
+// Drives useOptimistic below — applied synchronously the instant a bulk
+// action starts, before either PATCH/DELETE request has actually reached
+// the server, so status changes/removals are visible immediately instead
+// of only after bulkChangeStatus/bulkDelete's router.refresh() lands. If
+// any of the underlying requests fail, this optimistic state is discarded
+// automatically once router.refresh() re-renders with the real
+// (unchanged, for the failed ids) `subscriptions` prop — useOptimistic's
+// own reconciliation, not manual rollback code here.
+type OptimisticSubscriptionsAction =
+  | { type: "status"; ids: string[]; status: Subscription["status"] }
+  | { type: "delete"; ids: string[] };
+
+function optimisticSubscriptionsReducer(
+  state: Subscription[],
+  action: OptimisticSubscriptionsAction,
+): Subscription[] {
+  switch (action.type) {
+    case "status": {
+      const ids = new Set(action.ids);
+      return state.map((s) => (ids.has(s.id) ? { ...s, status: action.status } : s));
+    }
+    case "delete": {
+      const ids = new Set(action.ids);
+      return state.filter((s) => !ids.has(s.id));
+    }
+  }
+}
+
 export function SubscriptionsExplorer({
   subscriptions,
   insights,
@@ -62,6 +90,10 @@ export function SubscriptionsExplorer({
   insights: ComputedInsight[];
 }) {
   const router = useRouter();
+  const [visibleSubscriptions, applyOptimisticUpdate] = useOptimistic(
+    subscriptions,
+    optimisticSubscriptionsReducer,
+  );
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<Subscription["status"] | "all">("all");
   const [categoryFilter, setCategoryFilter] = useState<Subscription["category"] | "all">("all");
@@ -120,14 +152,23 @@ export function SubscriptionsExplorer({
     }
 
     const query = search.trim().toLowerCase();
-    return subscriptions.filter((s) => {
+    return visibleSubscriptions.filter((s) => {
       if (query && !s.name.toLowerCase().includes(query)) return false;
       if (statusFilter !== "all" && s.status !== statusFilter) return false;
       if (categoryFilter !== "all" && s.category !== categoryFilter) return false;
       if (quickFilters.size > 0 && ![...quickFilters].some((filter) => matchesQuickFilter(s, filter))) return false;
       return true;
     });
-  }, [subscriptions, search, statusFilter, categoryFilter, quickFilters, needsReviewIds, duplicateIds, highCostIds]);
+  }, [
+    visibleSubscriptions,
+    search,
+    statusFilter,
+    categoryFilter,
+    quickFilters,
+    needsReviewIds,
+    duplicateIds,
+    highCostIds,
+  ]);
 
   const sorted = useMemo(() => {
     const list = [...filtered];
@@ -221,7 +262,7 @@ export function SubscriptionsExplorer({
   const hasActiveFilters =
     search.trim() !== "" || statusFilter !== "all" || categoryFilter !== "all" || quickFilters.size > 0;
 
-  if (subscriptions.length === 0) {
+  if (visibleSubscriptions.length === 0) {
     return (
       <EmptyState
         className="mt-8"
@@ -323,7 +364,7 @@ export function SubscriptionsExplorer({
           role="status"
           aria-live="polite"
         >
-          {sorted.length} of {subscriptions.length} subscription{subscriptions.length === 1 ? "" : "s"}
+          {sorted.length} of {visibleSubscriptions.length} subscription{visibleSubscriptions.length === 1 ? "" : "s"}
         </p>
         {sorted.length > 0 ? (
           <label className="flex items-center gap-2 text-sm text-muted-foreground">

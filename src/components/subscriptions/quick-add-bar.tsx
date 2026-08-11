@@ -6,7 +6,6 @@ import { toast } from "sonner";
 import { Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -18,6 +17,7 @@ import {
   SubscriptionForm,
   type SubscriptionFormValues,
 } from "@/components/subscriptions/subscription-form";
+import { QuickAddSummary } from "@/components/subscriptions/quick-add-summary";
 import type { SubscriptionInput } from "@/lib/subscriptions/validation";
 
 type Confidence = "high" | "medium" | "low";
@@ -42,6 +42,10 @@ export function QuickAddBar() {
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<SubscriptionFormValues | null>(null);
   const [confidence, setConfidence] = useState<Confidence>("medium");
+  // Snapshotted separately from `text` (not just read live) so the summary
+  // always reflects exactly what was actually sent to the parser, even in
+  // the edge case where the input underneath a still-open dialog changes.
+  const [parsedText, setParsedText] = useState("");
 
   async function handleParse(event: FormEvent) {
     event.preventDefault();
@@ -58,6 +62,7 @@ export function QuickAddBar() {
         setError(data?.message ?? "Couldn't parse that. Try again or add it manually.");
         return;
       }
+      setParsedText(text);
       setDraft(toFormValues(data.subscription));
       setConfidence(data.confidence ?? "medium");
     } catch {
@@ -104,7 +109,7 @@ export function QuickAddBar() {
           {loading ? (
             <>
               <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-              Parsing…
+              Understanding…
             </>
           ) : (
             "Add with AI"
@@ -122,21 +127,19 @@ export function QuickAddBar() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Sparkles className="size-4 text-ai" />
-              Confirm subscription
+              Here&apos;s what SubSentry understood
             </DialogTitle>
-            <DialogDescription>
-              Review what the AI understood before saving:{" "}
-              <Badge variant="secondary" className="align-middle">
-                {confidence} confidence
-              </Badge>
-            </DialogDescription>
+            <DialogDescription>Nothing is saved until you confirm below.</DialogDescription>
           </DialogHeader>
           {draft ? (
-            <SubscriptionForm
-              initialValues={draft}
-              submitLabel="Add subscription"
-              onSubmit={handleConfirm}
-            />
+            <>
+              <QuickAddSummary originalText={parsedText} draft={draft} confidence={confidence} />
+              <SubscriptionForm
+                initialValues={draft}
+                submitLabel="Add subscription"
+                onSubmit={handleConfirm}
+              />
+            </>
           ) : null}
         </DialogContent>
       </Dialog>

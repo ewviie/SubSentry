@@ -66,4 +66,24 @@ describe("runInsightsEngine", () => {
   it("optimization score is null with no active subscriptions", () => {
     expect(runInsightsEngine([sub({ status: "canceled" })], false).optimizationScore).toBeNull();
   });
+
+  it("optimization score folds in optimization-rule savings, not just confirmed duplicates", () => {
+    const subs = [sub({ name: "Netflix", amountCents: 1000 }), sub({ name: "Netflix Premium", amountCents: 1500 })];
+    // Non-premium: premium.annual_switch_savings never runs, so the score
+    // reflects the $1500/mo confirmed-duplicate total alone.
+    const free = runInsightsEngine(subs, false);
+    expect(free.savingsForecast.monthlySavingsCents).toBe(1500);
+    expect(free.optimizationScore?.unrealizedYearlySavingsCents).toBe(1500 * 12);
+
+    // Premium: the same duplicate is still confirmed (still 1500/mo), but
+    // premium.annual_switch_savings now also fires on both monthly-billed
+    // subs (($1000+$1500)*12*0.15 assumed discount / 12 = $375/mo) — the
+    // score must include both, not just the duplicate figure.
+    const premium = runInsightsEngine(subs, true);
+    expect(premium.savingsForecast.monthlySavingsCents).toBe(1500);
+    expect(premium.optimizationScore?.unrealizedYearlySavingsCents).toBe((1500 + 375) * 12);
+    expect(premium.optimizationScore!.unrealizedYearlySavingsCents).toBeGreaterThan(
+      free.optimizationScore!.unrealizedYearlySavingsCents,
+    );
+  });
 });

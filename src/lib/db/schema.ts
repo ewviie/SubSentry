@@ -257,6 +257,30 @@ export const emailVerificationTokens = pgTable(
   },
 );
 
+// One row per outstanding password-reset token — same single-use,
+// hash-only-storage, upsert-on-userId pattern as emailVerificationTokens
+// above (see its own comment for the full reasoning; not repeated here).
+// A separate table rather than a shared one: the two token kinds have
+// different consumers (consumeVerificationToken flips emailVerified;
+// consumePasswordResetToken sets a new passwordHash and revokes every
+// existing session for the user) and a real password-reset link is a
+// higher-value target than a verification link, so it gets its own
+// shorter TTL (see TOKEN_TTL_MS in lib/auth/password-reset.ts) rather than
+// inheriting whatever TTL email verification happens to use.
+export const passwordResetTokens = pgTable(
+  "password_reset_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .unique()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull().unique(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+);
+
 export const checkoutSessions = pgTable("checkout_sessions", {
   id: text("id").primaryKey(),
   userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
@@ -288,3 +312,4 @@ export type NewEmailConnection = typeof emailConnections.$inferInsert;
 export type CheckoutSession = typeof checkoutSessions.$inferSelect;
 export type LoginAttempt = typeof loginAttempts.$inferSelect;
 export type EmailVerificationToken = typeof emailVerificationTokens.$inferSelect;
+export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { subscriptionInputSchema, subscriptionUpdateSchema } from "./validation";
+import { subscriptionIdSchema, subscriptionInputSchema, subscriptionUpdateSchema } from "./validation";
 
 describe("subscriptionUpdateSchema", () => {
   // Regression test: Zod's .default() fires whenever a key is undefined,
@@ -89,5 +89,36 @@ describe("subscriptionInputSchema", () => {
     const result = subscriptionInputSchema.parse({ ...validInput, isAdmin: true, userId: "attacker-controlled-id" });
     expect(result).not.toHaveProperty("isAdmin");
     expect(result).not.toHaveProperty("userId");
+  });
+});
+
+// Regression coverage for the malformed-id crash: subscriptions.id is a
+// Postgres uuid column, and passing a non-UUID string straight into a query
+// throws "invalid input syntax for type uuid" instead of matching zero rows
+// — every /api/subscriptions/[id] handler and the subscription detail page
+// now reject the shape with this schema before ever reaching a query. See
+// this schema's own comment for the full reasoning.
+describe("subscriptionIdSchema", () => {
+  it("accepts a well-formed UUID", () => {
+    expect(subscriptionIdSchema.safeParse("87c33e06-4412-4a28-871d-60d6f5cd7581").success).toBe(true);
+  });
+
+  it.each([
+    "not-a-valid-uuid",
+    "",
+    "1",
+    "87c33e06-4412-4a28-871d-60d6f5cd758", // one char short
+    "87c33e06-4412-4a28-871d-60d6f5cd75811", // one char long
+    "'; DROP TABLE subscriptions; --",
+    "../../etc/passwd",
+    "00000000-0000-0000-0000-00000000000g", // invalid hex digit
+  ])("rejects a malformed id: %s", (bad) => {
+    expect(subscriptionIdSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it("rejects non-string input without throwing", () => {
+    expect(subscriptionIdSchema.safeParse(null).success).toBe(false);
+    expect(subscriptionIdSchema.safeParse(undefined).success).toBe(false);
+    expect(subscriptionIdSchema.safeParse(12345).success).toBe(false);
   });
 });

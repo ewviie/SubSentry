@@ -1,4 +1,4 @@
-import type { Browser, Page } from "@playwright/test";
+import type { Browser, Page, ViewportSize } from "@playwright/test";
 import { uniqueEmail } from "./db";
 
 export interface TestUser {
@@ -19,7 +19,11 @@ let syntheticIpCounter = 0;
 // auth flow (see api/auth/signup/route.ts), though the underlying
 // implementation and its own e2e coverage (verify-email's standalone
 // token-handling behavior) are kept intact for a future re-enable.
-export async function createVerifiedUser(browser: Browser, emailPrefix: string): Promise<TestUser> {
+export async function createVerifiedUser(
+  browser: Browser,
+  emailPrefix: string,
+  options?: { viewport?: ViewportSize },
+): Promise<TestUser> {
   const email = uniqueEmail(emailPrefix);
   const password = "a-strong-password-123";
   // Every request from this test suite hits the server directly (no real
@@ -31,14 +35,24 @@ export async function createVerifiedUser(browser: Browser, emailPrefix: string):
   // realistic fix (real distinct users would have distinct IPs too), not a
   // reason to loosen the app's actual rate limit.
   syntheticIpCounter += 1;
+  // viewport is opt-in and passed straight to newContext — this helper
+  // creates its own context (not the test fixture's default one), so a
+  // plain `test.use({ viewport })` never reaches it on its own; genuine
+  // mobile-viewport tests (mobile-overflow.spec.ts) need this to actually
+  // land at the requested size, not fall back to Playwright's desktop
+  // default.
   const context = await browser.newContext({
     extraHTTPHeaders: { "x-forwarded-for": `10.0.0.${syntheticIpCounter}` },
+    ...(options?.viewport ? { viewport: options.viewport } : {}),
   });
   const page = await context.newPage();
 
   await page.goto("/signup");
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
+  // Required consent checkbox (see signup-form.tsx) — the submit button
+  // stays disabled without it, same as a real user would have to check it.
+  await page.getByRole("checkbox").check();
   await page.getByRole("button", { name: "Create account" }).click();
   await page.waitForURL(/\/dashboard$/, { timeout: 5000 });
 

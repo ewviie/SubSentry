@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import { DollarSign, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatCard } from "@/components/dashboard/stat-card";
@@ -9,8 +9,11 @@ import { CategorySpendBar } from "@/components/dashboard/category-spend-bar";
 import { CountUp } from "@/components/ui/count-up";
 import { Spotlight } from "@/components/ui/spotlight";
 import { SentryRing } from "@/components/ui/sentry-ring";
+import { CATEGORY_LABELS } from "@/lib/subscriptions/labels";
+import { formatCents } from "@/lib/subscriptions/money";
 import { isBetaAllAccess } from "@/lib/billing/plan";
 import { fadeInUp, liftOnHover, pressScale, scaleIn, springSmooth, springSnappy, staggerContainer } from "@/lib/motion";
+import { cn } from "@/lib/utils";
 
 // Representative sample data for the preview panel, not a real account's
 // numbers — built from the exact same components the real dashboard uses
@@ -21,6 +24,60 @@ const sampleCategoryEntries = [
   { category: "streaming" as const, monthlyCents: 3247 },
   { category: "fitness" as const, monthlyCents: 4400 },
 ];
+
+// Placement/timing only — the actual figures come from sampleCategoryEntries
+// above (zipped by index below) so the chips can never drift out of sync
+// with the totals they resolve into. One entry per sample category.
+const ghostChipLayout = [
+  { className: "-left-4 top-8 sm:-left-9 sm:top-11", x: -28, y: -16, rotate: -7, delay: 0.15 },
+  { className: "-right-3 top-28 sm:-right-8 sm:top-32", x: 26, y: -10, rotate: 5, delay: 0.32 },
+  { className: "left-10 -bottom-4 sm:left-16 sm:-bottom-7", x: -16, y: 22, rotate: 4, delay: 0.5 },
+] as const;
+
+// The one deliberate "moment" on the page: the preview card doesn't just
+// fade in already-resolved, it briefly shows the same figures loose and
+// scattered — standing in for "money disappearing across a bunch of
+// separate charges" — before they converge into the card and the number
+// underneath finishes counting up. Runs once, on mount, alongside the rest
+// of the hero's entrance choreography (staggerContainer above) — not a
+// scroll trigger, since the hero is already the first thing on screen.
+// Reduced-motion users skip straight to the resolved card rather than
+// getting a stripped-down version of the drift: CountUp and MotionConfig
+// already follow that same all-or-nothing rule elsewhere in this file.
+function GhostCharges() {
+  const prefersReducedMotion = useReducedMotion();
+  if (prefersReducedMotion) return null;
+
+  return (
+    <>
+      {sampleCategoryEntries.map((entry, i) => {
+        const layout = ghostChipLayout[i];
+        if (!layout) return null;
+        return (
+          <motion.span
+            key={entry.category}
+            aria-hidden="true"
+            className={cn(
+              "pointer-events-none absolute z-0 whitespace-nowrap rounded-full border border-border bg-card/95 px-2.5 py-1 text-xs text-muted-foreground shadow-elevation-low backdrop-blur-sm",
+              layout.className,
+            )}
+            initial={{ opacity: 0, x: layout.x, y: layout.y, rotate: layout.rotate }}
+            animate={{
+              opacity: [0, 1, 1, 0],
+              x: [layout.x, layout.x, 0, 0],
+              y: [layout.y, layout.y, 0, 0],
+              rotate: [layout.rotate, layout.rotate, 0, 0],
+            }}
+            transition={{ duration: 1.1, times: [0, 0.22, 0.78, 1], delay: layout.delay, ease: "easeInOut" }}
+          >
+            {CATEGORY_LABELS[entry.category]}{" "}
+            <span className="font-financial">{formatCents(entry.monthlyCents)}/mo</span>
+          </motion.span>
+        );
+      })}
+    </>
+  );
+}
 
 const headlineWords = "Know exactly what you're paying for.".split(" ");
 
@@ -96,6 +153,7 @@ export function HeroSection() {
               tying "SubSentry is watching your spend" to the actual proof
               rather than to decoration. */}
           <SentryRing className="-inset-16 sm:-inset-24" />
+          <GhostCharges />
           <div className="flex items-center gap-1.5 px-1 pb-3">
             <span className="size-2.5 rounded-full bg-muted-foreground/30" />
             <span className="size-2.5 rounded-full bg-muted-foreground/30" />

@@ -6,6 +6,7 @@ import { createSubscriptionWithLimitCheck, listSubscriptions } from "@/lib/subsc
 import { checkSubscriptionCreateRateLimit } from "@/lib/subscriptions/rate-limit";
 import { SUBSCRIPTION_SOURCES } from "@/lib/subscriptions/source";
 import { FREE_PLAN_SUBSCRIPTION_LIMIT, MAX_ACTIVE_SUBSCRIPTIONS } from "@/lib/billing/plan";
+import { readJsonBody, MAX_JSON_BODY_BYTES } from "@/lib/http/request-size";
 
 // `source` is provenance metadata only (drives the "AI-parsed"/"Imported"
 // badge in the UI) — it has no effect on validation or authorization, so
@@ -41,7 +42,12 @@ export async function POST(request: Request) {
     );
   }
 
-  const parsed = createSubscriptionSchema.safeParse(await request.json().catch(() => null));
+  const body = await readJsonBody(request, MAX_JSON_BODY_BYTES);
+  if (body.tooLarge) {
+    return NextResponse.json({ error: "payload_too_large", message: "Request body is too large." }, { status: 413 });
+  }
+
+  const parsed = createSubscriptionSchema.safeParse(body.data);
   if (!parsed.success) {
     return NextResponse.json(
       { error: "invalid_request", message: parsed.error.issues[0]?.message ?? "Invalid input." },

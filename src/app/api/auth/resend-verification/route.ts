@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -7,7 +7,7 @@ import { issueVerificationToken } from "@/lib/auth/email-verification";
 import { sendVerificationEmail } from "@/lib/auth/email";
 import { checkResendVerificationRateLimit, checkResendVerificationIpRateLimit } from "@/lib/auth/rate-limit";
 import { getClientIp } from "@/lib/http/client-ip";
-import { isContentLengthWithinLimit, MAX_JSON_BODY_BYTES } from "@/lib/http/request-size";
+import { readJsonBody, MAX_JSON_BODY_BYTES } from "@/lib/http/request-size";
 import { logServerError } from "@/lib/observability/log-error";
 import { isCaptchaConfigured, verifyCaptchaToken } from "@/lib/security/captcha";
 import { logSecurityEvent } from "@/lib/observability/log-security-event";
@@ -36,11 +36,12 @@ function sleep(ms: number): Promise<void> {
 }
 
 export async function POST(request: Request) {
-  if (!isContentLengthWithinLimit(request, MAX_JSON_BODY_BYTES)) {
+  const body = await readJsonBody(request, MAX_JSON_BODY_BYTES);
+  if (body.tooLarge) {
     return NextResponse.json({ error: "payload_too_large", message: "Request body is too large." }, { status: 413 });
   }
 
-  const parsed = bodySchema.safeParse(await request.json().catch(() => null));
+  const parsed = bodySchema.safeParse(body.data);
   if (!parsed.success) {
     // The shape of the input, not the account, is what's wrong here — an
     // empty/malformed body isn't an enumeration-relevant response.
@@ -94,7 +95,21 @@ export async function POST(request: Request) {
 
   try {
     const { rawToken } = await issueVerificationToken(user.id);
-    await sendVerificationEmail(email, rawToken);
+    // after() — same reasoning and same primitive as
+    // forgot-password/route.ts's identical change: the response below is
+    // a fixed, generic message regardless of send outcome, so awaiting
+    // the SMTP round-trip here only held the request open (and widened
+    // the timing gap against the sleep(50) branch above) for no benefit
+    // the caller could observe. after() (not a bare un-awaited promise)
+    // because this is a normal serverless-deployment target, whose
+    // execution can be frozen the moment the response is sent — see
+    // forgot-password/route.ts's own comment for the full reasoning.
+    // Failures are still logged, just without delaying the response.
+    after(() =>
+      sendVerificationEmail(email, rawToken).catch((error) => {
+        logServerError("auth.resend-verification", error, { userId: user.id });
+      }),
+    );
   } catch (error) {
     logServerError("auth.resend-verification", error, { userId: user.id });
   }

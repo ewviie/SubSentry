@@ -3,10 +3,11 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Loader2 } from "lucide-react";
+import { Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { PasswordField } from "@/components/auth/password-field";
 import { TurnstileWidget, type TurnstileWidgetHandle } from "@/components/auth/turnstile-widget";
 import {
@@ -37,6 +38,7 @@ export function SignupForm() {
   const [errorField, setErrorField] = useState<FormField | null>(null);
   const [loading, setLoading] = useState(false);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
 
   const nameRef = useRef<HTMLInputElement>(null);
   const emailRef = useRef<HTMLInputElement>(null);
@@ -159,10 +161,53 @@ export function SignupForm() {
               {error}
             </p>
           ) : null}
+          {/* Not a flex row: an icon + running text that includes an inline
+              <Link> used to sit in a `flex items-start` container, which
+              made each text run and the Link its own flex item — with no
+              flex-wrap, that squeezed the Link's own box down and broke
+              "Terms of Service" across three separate lines even with room
+              to spare beside it. An inline-block icon nudged onto the text
+              baseline flows with the paragraph like a normal leading
+              character instead, so the whole line (including the Link)
+              wraps as ordinary text. */}
+          <p className="text-xs text-muted-foreground">
+            <Sparkles className="mr-1.5 inline-block size-3.5 -translate-y-px align-middle text-ai" aria-hidden="true" />
+            SubSentry uses AI (Anthropic&apos;s Claude) to power optional features like quick-add and AI
+            insight summaries — see our{" "}
+            <Link href="/terms" className="underline underline-offset-4 hover:text-foreground">
+              Terms of Service
+            </Link>{" "}
+            for details.
+          </p>
           <TurnstileWidget ref={turnstileRef} action="signup" onVerify={setCaptchaToken} onExpire={() => setCaptchaToken(null)} />
         </CardContent>
         <CardFooter className="flex flex-col gap-4">
-          <Button type="submit" className="w-full" disabled={loading || (CAPTCHA_REQUIRED && !captchaToken)}>
+          <div className="flex items-start gap-2">
+            <Checkbox
+              id="agree-terms"
+              checked={agreedToTerms}
+              onCheckedChange={(checked) => setAgreedToTerms(checked === true)}
+              disabled={loading}
+              className="mt-0.5"
+              aria-describedby="agree-terms-label"
+            />
+            <Label htmlFor="agree-terms" id="agree-terms-label" className="text-xs font-normal text-muted-foreground">
+              I agree to the{" "}
+              <Link href="/terms" target="_blank" rel="noopener" className="underline underline-offset-4 hover:text-foreground">
+                Terms of Service
+              </Link>{" "}
+              and acknowledge the{" "}
+              <Link href="/privacy" target="_blank" rel="noopener" className="underline underline-offset-4 hover:text-foreground">
+                Privacy Policy
+              </Link>
+              .
+            </Label>
+          </div>
+          <Button
+            type="submit"
+            className="w-full"
+            disabled={loading || (CAPTCHA_REQUIRED && !captchaToken) || !agreedToTerms}
+          >
             {loading ? (
               <>
                 <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />

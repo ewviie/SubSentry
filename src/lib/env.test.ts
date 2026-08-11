@@ -21,6 +21,7 @@ const KEYS = [
   "SMTP_USER",
   "SMTP_PASSWORD",
   "SMTP_FROM",
+  "NEXT_PUBLIC_APP_URL",
 ] as const;
 
 let saved: Record<string, string | undefined>;
@@ -176,5 +177,55 @@ describe("validateEnv", () => {
     process.env.SMTP_FROM = "SubSentry <user@outlook.com>";
     const issues = validateEnv();
     expect(issues.some((i) => i.variable === "SMTP_PORT")).toBe(true);
+  });
+
+  it("flags NEXT_PUBLIC_APP_URL missing when SMTP is fully configured — real emails would link to localhost", () => {
+    process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
+    process.env.SMTP_HOST = "smtp-mail.outlook.com";
+    process.env.SMTP_PORT = "587";
+    process.env.SMTP_USER = "user@outlook.com";
+    process.env.SMTP_PASSWORD = "pw";
+    process.env.SMTP_FROM = "SubSentry <user@outlook.com>";
+    const issues = validateEnv();
+    expect(issues.some((i) => i.variable === "NEXT_PUBLIC_APP_URL")).toBe(true);
+  });
+
+  it("does not flag NEXT_PUBLIC_APP_URL when SMTP isn't configured (nothing will actually send)", () => {
+    process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
+    const issues = validateEnv();
+    expect(issues.some((i) => i.variable === "NEXT_PUBLIC_APP_URL")).toBe(false);
+  });
+
+  it("does not flag NEXT_PUBLIC_APP_URL when both it and SMTP are fully configured", () => {
+    process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
+    process.env.SMTP_HOST = "smtp-mail.outlook.com";
+    process.env.SMTP_PORT = "587";
+    process.env.SMTP_USER = "user@outlook.com";
+    process.env.SMTP_PASSWORD = "pw";
+    process.env.SMTP_FROM = "SubSentry <user@outlook.com>";
+    process.env.NEXT_PUBLIC_APP_URL = "https://subsentry.app";
+    const issues = validateEnv();
+    expect(issues.some((i) => i.variable === "NEXT_PUBLIC_APP_URL")).toBe(false);
+  });
+
+  it("flags NEXT_PUBLIC_APP_URL set to a malformed value, even with SMTP unconfigured", () => {
+    process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
+    process.env.NEXT_PUBLIC_APP_URL = "not-a-url";
+    const issues = validateEnv();
+    expect(issues.some((i) => i.variable === "NEXT_PUBLIC_APP_URL")).toBe(true);
+  });
+
+  it("flags NEXT_PUBLIC_APP_URL set to a non-http(s) scheme", () => {
+    process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
+    process.env.NEXT_PUBLIC_APP_URL = "ftp://subsentry.app";
+    const issues = validateEnv();
+    expect(issues.some((i) => i.variable === "NEXT_PUBLIC_APP_URL")).toBe(true);
+  });
+
+  it("does not flag a well-formed NEXT_PUBLIC_APP_URL with SMTP unconfigured", () => {
+    process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
+    process.env.NEXT_PUBLIC_APP_URL = "https://subsentry.app";
+    const issues = validateEnv();
+    expect(issues.some((i) => i.variable === "NEXT_PUBLIC_APP_URL")).toBe(false);
   });
 });

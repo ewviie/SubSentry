@@ -63,7 +63,18 @@ export function levenshtein(a: string, b: string): number {
 // Takes already-normalized names — computeInsights() normalizes each active
 // subscription's name once, outside the O(n²) comparison loop below, rather
 // than recomputing it on every pair.
-function namesLikelyMatch(normA: string, normB: string): boolean {
+//
+// Exported so savings.ts's computeSavingsRecommendations can use the exact
+// same identity rule instead of maintaining its own copy of this function.
+// The two used to be byte-for-byte duplicated across both files — real risk,
+// not just untidy: the dashboard hero card's "confirmed duplicates" total
+// (computePotentialSavingsMonthlyCents, this file), the Savings-opportunities
+// card, and the Optimization score (savings.ts, via this shared function)
+// all depend on agreeing on what counts as a duplicate. A future tweak to
+// the matching threshold in one copy and not the other would silently
+// reintroduce the exact "two different numbers for the same thing"
+// inconsistency already fixed once on the dashboard hero card.
+export function namesLikelyMatch(normA: string, normB: string): boolean {
   if (!normA || !normB) return false;
   if (normA === normB) return true;
   if (normA.length >= 4 && normB.length >= 4 && (normA.includes(normB) || normB.includes(normA))) {
@@ -114,15 +125,32 @@ export function computeInsights(allSubscriptions: Subscription[]): ComputedInsig
 
   // 2. Overdue renewal — active subscription whose renewal date has passed,
   // suggesting it was cancelled elsewhere or the date was never updated.
+  // One card per subscription used to mean 2 overdue subscriptions produced
+  // 2 nearly-identical cards side by side — real duplication, not just a
+  // visual density problem. A single subscription still gets its own
+  // specific, more useful phrasing; 2+ get one combined card so the section
+  // doesn't repeat the same sentence with the name swapped out.
   const today = todayISO();
   const overdue = active.filter((s) => s.nextRenewalDate < today);
-  for (const s of overdue.slice(0, 3)) {
+  if (overdue.length === 1) {
+    const s = overdue[0];
     insights.push({
       type: "overdue_renewal",
       title: `${s.name}'s renewal date has passed`,
       description: `${s.name} was due to renew on ${s.nextRenewalDate}. If it's still active, update the date. If not, mark it canceled.`,
       severity: "warning",
       subscriptionIds: [s.id],
+    });
+  } else if (overdue.length > 1) {
+    const names = overdue.map((s) => s.name);
+    const namesList =
+      names.length > 3 ? `${names.slice(0, 3).join(", ")}, and ${names.length - 3} more` : names.join(", ");
+    insights.push({
+      type: "overdue_renewal",
+      title: `${overdue.length} subscriptions have overdue renewals`,
+      description: `${namesList} were due to renew but the date hasn't been updated. If they're still active, update the dates. If not, mark them canceled.`,
+      severity: "warning",
+      subscriptionIds: overdue.map((s) => s.id),
     });
   }
 

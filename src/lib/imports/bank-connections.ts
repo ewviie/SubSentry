@@ -57,6 +57,20 @@ export async function listBankConnections(userId: string): Promise<BankConnectio
     .orderBy(desc(bankConnections.createdAt));
 }
 
+// Deletes every connection this user has for the given provider outright —
+// same "the token stops existing in this app's database at all, not just
+// stops being used" reasoning as deleteEmailConnection (email-connections.ts).
+// Plural delete, not a single-row one keyed by id: a user can have more than
+// one bank_connections row per provider (multi-institution linking, unlike
+// email_connections' one-per-provider design — see schema.ts), and
+// "disconnect Plaid" means all of them, not whichever happens to be latest.
+export async function deleteBankConnection(userId: string, provider: BankProvider): Promise<BankConnection[]> {
+  return db
+    .delete(bankConnections)
+    .where(and(eq(bankConnections.userId, userId), eq(bankConnections.provider, provider)))
+    .returning();
+}
+
 // Optimistic-concurrency variant for TrueLayer's refresh path: two
 // near-simultaneous syncs can both see the same connection as "expiring
 // soon" and both call refreshAccessToken with the same refresh token.
