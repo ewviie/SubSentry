@@ -28,7 +28,12 @@ for (const vp of VIEWPORTS) {
     // test.use() configures. viewport is passed explicitly into
     // createVerifiedUser instead, which is what actually lands the page at
     // vp.width/vp.height.
-    test(`/dashboard and /settings have no horizontal overflow at ${vp.name}`, async ({ browser }) => {
+    // /subscriptions/import and /subscriptions/new added alongside the
+    // original /dashboard and /settings coverage — both are on the
+    // first-time activation path (Phase 3's explicit mobile-first
+    // requirement) and neither had any mobile-overflow regression coverage
+    // before, unlike the two pages this test already protected.
+    test(`/dashboard, /settings, /subscriptions/import, and /subscriptions/new have no horizontal overflow at ${vp.name}`, async ({ browser }) => {
       const user = await createVerifiedUser(browser, `e2e-mobile-${vp.name.replace("x", "-")}`, {
         viewport: { width: vp.width, height: vp.height },
       });
@@ -38,7 +43,7 @@ for (const vp of VIEWPORTS) {
         body: { name: "Netflix", amount: "15.99", billingCycle: "monthly", nextRenewalDate: "2030-01-01" },
       });
 
-      for (const path of ["/dashboard", "/settings"]) {
+      for (const path of ["/dashboard", "/settings", "/subscriptions/import", "/subscriptions/new"]) {
         await user.page.goto(path);
         const { innerWidth, scrollWidth } = await user.page.evaluate(() => ({
           innerWidth: window.innerWidth,

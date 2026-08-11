@@ -47,18 +47,18 @@ describe("normalizeMerchant", () => {
     expect(result.isKnownSubscriptionMerchant).toBe(false);
   });
 
-  // Regression: the fallback path (unlike every known-merchant branch,
-  // which returns a short curated displayName) used to return an
-  // effectively unbounded string straight from the source description. A
-  // real bank CSV description over subscriptionInputSchema's 120-char
-  // `name` limit would reach the review UI looking fine, then fail
-  // /api/imports/confirm's whole-batch validation with no indication of
-  // which row or why (rows is validated as one Zod array — one invalid row
-  // rejects every row in the batch).
-  it("truncates an unknown merchant's fallback display name to the subscription name limit", () => {
+  // The fallback path (unlike every known-merchant branch, which returns a
+  // short curated displayName) can return an effectively unbounded string
+  // straight from the source description — deliberately NOT truncated
+  // here, since detection.ts clusters transactions by this exact string;
+  // truncating it here would make two unrelated long descriptions that
+  // only differ after the cutoff collide onto the same cluster key. The
+  // length cap is applied downstream, only once this becomes a submitted
+  // subscription name (see review-table.tsx's detectedToFormValues).
+  it("does not truncate an unknown merchant's fallback display name", () => {
     const longDescription = "A".repeat(200);
     const result = normalizeMerchant(longDescription);
-    expect(result.displayName.length).toBeLessThanOrEqual(120);
+    expect(result.displayName.length).toBe(200);
   });
 
   it("does not fuzzy-match an unrelated merchant of similar length to a known one", () => {

@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { fadeQuick } from "@/lib/motion";
 import { cn } from "@/lib/utils";
+import { sumMonthlyCentsIfSingleCurrency } from "@/lib/subscriptions/money";
 import { SourcePicker, SOURCE_LABELS } from "./source-picker";
 import { FileUploadStep } from "./file-upload-step";
 import { ConnectBankStep } from "./connect-bank-step";
@@ -159,6 +160,9 @@ export function ImportCenterPage({
   const [busy, setBusy] = useState(false);
   const [importedCount, setImportedCount] = useState(0);
   const [completedIgnoredCount, setCompletedIgnoredCount] = useState(0);
+  // null whenever the confirmed batch spans more than one currency — see
+  // sumMonthlyCentsIfSingleCurrency's own comment in lib/subscriptions/money.ts.
+  const [importedTotal, setImportedTotal] = useState<{ totalMonthlyCents: number; currency: string } | null>(null);
   const handledRedirect = useRef(false);
 
   function reset() {
@@ -172,6 +176,7 @@ export function ImportCenterPage({
     setBusy(false);
     setImportedCount(0);
     setCompletedIgnoredCount(0);
+    setImportedTotal(null);
   }
 
   // Recovery action for a zero-result Review step — narrower than reset():
@@ -323,6 +328,12 @@ export function ImportCenterPage({
 
       setImportedCount(data.subscriptions?.length ?? rows.length);
       setCompletedIgnoredCount(ignoredCount);
+      // From the rows actually submitted, not the server response — same
+      // shape sumMonthlyCentsIfSingleCurrency already expects, and this is
+      // exactly what was just confirmed (the server echoes it back
+      // 1:1 on success, so there's no reason to wait for/re-derive from
+      // data.subscriptions).
+      setImportedTotal(sumMonthlyCentsIfSingleCurrency(rows));
       setStep("complete");
       router.refresh();
     } catch {
@@ -338,7 +349,7 @@ export function ImportCenterPage({
       <Card className="shadow-elevation-low">
         <CardHeader>
           <CardTitle className="font-heading text-2xl">
-            {step === "source" && "Choose a source"}
+            {step === "source" && "Where should we look?"}
             {step === "upload" && `Upload your ${source ? SOURCE_LABELS[source] : ""} file`}
             {step === "connect" && `Connect ${source ? SOURCE_LABELS[source] : ""}`}
             {step === "analyzing" && "Analyzing"}
@@ -347,7 +358,7 @@ export function ImportCenterPage({
             {step === "complete" && "Import complete"}
           </CardTitle>
           <CardDescription>
-            {step === "source" && "Pick where you'd like to import subscriptions from."}
+            {step === "source" && "Pick where SubSentry should look for your subscriptions."}
             {step === "upload" && "We only read what's needed to detect subscriptions — the file itself is never stored."}
             {step === "connect" && source === "gmail" && "Nothing is scanned until you finish connecting your Google account."}
             {step === "connect" && source !== "gmail" && "Nothing is fetched until you finish connecting your bank."}
@@ -458,6 +469,7 @@ export function ImportCenterPage({
                 <ImportCompleteStep
                   importedCount={importedCount}
                   ignoredCount={completedIgnoredCount}
+                  total={importedTotal}
                   onImportAnother={reset}
                 />
               ) : null}

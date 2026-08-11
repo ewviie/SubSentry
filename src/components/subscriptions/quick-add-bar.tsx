@@ -18,6 +18,7 @@ import {
   type SubscriptionFormValues,
 } from "@/components/subscriptions/subscription-form";
 import { QuickAddSummary } from "@/components/subscriptions/quick-add-summary";
+import { amountStringToCents, formatCents, monthlyCents } from "@/lib/subscriptions/money";
 import type { SubscriptionInput } from "@/lib/subscriptions/validation";
 
 type Confidence = "high" | "medium" | "low";
@@ -35,7 +36,7 @@ function toFormValues(input: SubscriptionInput): SubscriptionFormValues {
   };
 }
 
-export function QuickAddBar() {
+export function QuickAddBar({ isFirstSubscription = false }: { isFirstSubscription?: boolean }) {
   const router = useRouter();
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
@@ -46,6 +47,14 @@ export function QuickAddBar() {
   // always reflects exactly what was actually sent to the parser, even in
   // the edge case where the input underneath a still-open dialog changes.
   const [parsedText, setParsedText] = useState("");
+  // Local, not derived solely from the isFirstSubscription prop on each
+  // call: that prop reflects the dashboard's state as of its last server
+  // render, and router.refresh() (below) is async — a second add started
+  // before that refresh lands would still see the pre-add `true` and show
+  // the "first ever" toast twice. This flips permanently after the first
+  // real showing, so the celebratory toast can only ever fire once per
+  // mount regardless of how fast two adds happen back-to-back.
+  const [hasShownFirstAddToast, setHasShownFirstAddToast] = useState(false);
 
   async function handleParse(event: FormEvent) {
     event.preventDefault();
@@ -84,7 +93,35 @@ export function QuickAddBar() {
       return { error: data?.message ?? "Couldn't save that subscription. Try again." };
     }
 
-    toast.success("Subscription added");
+    // A user's genuinely first subscription is the one moment this codebase's
+    // own reveal-step.tsx already proves out for imports (name it, show what
+    // it costs monthly, reframe as yearly) but the manual/quick-add path —
+    // the only guaranteed-to-happen path, since Plaid/TrueLayer/Gmail are
+    // disabled and CSV/Apple both require leaving the app first — had no
+    // equivalent: a silent "Subscription added" toast either way. Real
+    // numbers computed from what was actually just saved, not fabricated;
+    // only shown once (isFirstSubscription reflects the dashboard's state
+    // *before* this add), so it reads as a genuine first-time payoff, not
+    // repeated noise on every later add.
+    if (isFirstSubscription && !hasShownFirstAddToast) {
+      setHasShownFirstAddToast(true);
+      // monthlyCents() * 12, not the original amount re-annualized —
+      // deliberately matching every other "annual" figure this codebase
+      // already computes this same way (dashboard's annualTotalCents,
+      // signals.ts's findExpensiveOutliers, reveal-step.tsx's
+      // totalYearlyCents): a yearly subscription's monthly-then-back-to-
+      // yearly round trip can be off by a few cents from the original
+      // entered amount, but computing it differently here would make this
+      // toast disagree with the dashboard the user is about to land on for
+      // the exact same subscription, which is worse than the existing,
+      // consistent, cents-scale rounding characteristic.
+      const monthly = monthlyCents(amountStringToCents(values.amount), values.billingCycle);
+      toast.success(`${values.name} added`, {
+        description: `That's ${formatCents(monthly, values.currency)}/mo — ${formatCents(monthly * 12, values.currency)}/yr.`,
+      });
+    } else {
+      toast.success("Subscription added");
+    }
     setDraft(null);
     setText("");
     router.refresh();

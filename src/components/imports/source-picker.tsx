@@ -107,40 +107,49 @@ export function SourcePicker({
     return source;
   });
 
+  // Split at render time only — SOURCES' own order/content stays exactly as
+  // the array above defines it (that array is already hand-synced with the
+  // provider registry in 3 places; this is deliberately not another one).
+  // In the current deployment (no PLAID_CLIENT_ID/TRUELAYER_CLIENT_ID/
+  // GOOGLE_CLIENT_ID configured), 3 of 5 cards render as permanently
+  // grayed-out "Coming soon" — same visual weight as the 2 that actually
+  // work, which reads as "half of this is broken" to a new user rather
+  // than "two real options, a few more later." Collapsing the disabled
+  // ones to one line does the same job (still names them, sets the same
+  // expectation) without hiding anything or fabricating availability.
+  const enabledSources = sources.filter((s) => s.enabled);
+  const disabledSources = sources.filter((s) => !s.enabled);
+
   return (
-    <StaggerSection className="grid gap-4 sm:grid-cols-3">
-      {sources.map((source) => (
-        <MotionCard key={source.id}>
-          <Card
-            className={
-              source.enabled
-                ? "h-full shadow-elevation-low transition-shadow duration-200 hover:shadow-elevation-medium"
-                : "h-full opacity-70"
-            }
-          >
-            <CardContent className="flex h-full flex-col gap-3">
-              <div className="flex items-center justify-between">
+    <div className="space-y-4">
+      <StaggerSection className="grid gap-4 sm:grid-cols-3">
+        {enabledSources.map((source) => (
+          <MotionCard key={source.id}>
+            <Card className="h-full shadow-elevation-low transition-shadow duration-200 hover:shadow-elevation-medium">
+              <CardContent className="flex h-full flex-col gap-3">
                 <div className="flex size-9 items-center justify-center rounded-full bg-ai-muted text-ai">
                   <source.icon className="size-4" aria-hidden="true" />
                 </div>
-                {source.enabled ? null : <Badge variant="secondary">Coming soon</Badge>}
-              </div>
-              <div>
-                <p className="font-heading text-lg font-medium">{source.label}</p>
-                <p className="mt-1 text-sm text-muted-foreground">{source.description}</p>
-              </div>
-              <Button
-                className="mt-auto w-fit"
-                variant="outline"
-                disabled={!source.enabled}
-                onClick={() => onSelect(source.id)}
-              >
-                {source.buttonLabel ?? "Select"}
-              </Button>
-            </CardContent>
-          </Card>
-        </MotionCard>
-      ))}
-    </StaggerSection>
+                <div>
+                  <p className="font-heading text-lg font-medium">{source.label}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{source.description}</p>
+                </div>
+                <Button className="mt-auto w-fit" variant="outline" onClick={() => onSelect(source.id)}>
+                  {source.buttonLabel ?? "Select"}
+                </Button>
+              </CardContent>
+            </Card>
+          </MotionCard>
+        ))}
+      </StaggerSection>
+      {disabledSources.length > 0 ? (
+        <p className="text-sm text-muted-foreground">
+          <Badge variant="secondary" className="mr-1.5 align-middle">
+            Coming soon
+          </Badge>
+          {disabledSources.map((s) => s.label).join(", ")}
+        </p>
+      ) : null}
+    </div>
   );
 }

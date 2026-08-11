@@ -22,7 +22,7 @@ export function DashboardHeroRow({
       initial="hidden"
       whileInView="visible"
       viewport={revealViewport}
-      className="grid gap-4 lg:grid-cols-[1.3fr_1fr]"
+      className="grid gap-4 lg:grid-cols-2"
     >
       <SavingsCard
         potentialYearlySavingsCents={potentialYearlySavingsCents}

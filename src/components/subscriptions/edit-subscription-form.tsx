@@ -21,6 +21,7 @@ import {
   subscriptionToFormValues,
   type SubscriptionFormValues,
 } from "@/components/subscriptions/subscription-form";
+import { amountStringToCents, formatCents, monthlyCents } from "@/lib/subscriptions/money";
 import type { Subscription } from "@/lib/db/schema";
 
 export function EditSubscriptionForm({ subscription }: { subscription: Subscription }) {
@@ -39,12 +40,34 @@ export function EditSubscriptionForm({ subscription }: { subscription: Subscript
       return { error: data?.message ?? "Couldn't save your changes. Try again." };
     }
 
-    toast.success("Changes saved");
+    // Financial-consequence feedback, gated strictly to a genuine
+    // active-to-canceled transition — not paused (suspended, not actually
+    // saved yet) and not any other edit. A subscription's own already-
+    // persisted amount/currency/billingCycle at the moment of *this* save
+    // is unambiguous here, unlike the delete flow below where the same
+    // action could just as easily be correcting a duplicate/data-entry
+    // mistake rather than a real cancellation — see handleDelete's own
+    // comment for why that one stays a neutral toast.
+    if (subscription.status === "active" && values.status === "canceled") {
+      const monthly = monthlyCents(amountStringToCents(values.amount), values.billingCycle);
+      toast.success("Canceled", {
+        description: `You'll save ${formatCents(monthly, values.currency)}/mo.`,
+      });
+    } else {
+      toast.success("Changes saved");
+    }
     router.push("/dashboard");
     router.refresh();
     return {};
   }
 
+  // Deliberately no "you'll save $X/mo" framing here, unlike the
+  // active→canceled case above — a delete is genuinely ambiguous about
+  // whether real-world spend actually changed (it could just as easily be
+  // removing a duplicate row or fixing a data-entry mistake as ending a
+  // real subscription), and claiming a saving that may not be true would
+  // violate this app's own "never fabricate a number" rule. "Subscription
+  // deleted" states only what actually happened.
   async function handleDelete() {
     setDeleting(true);
     try {
