@@ -83,6 +83,30 @@ describe("extractTransactionsFromMessages", () => {
     expect(result.transactions[0].description).toBe("Billing");
   });
 
+  // The From display name is free text an email's sender fully controls —
+  // unlike a bank-issued CSV/Plaid/TrueLayer description, it's never been
+  // through any bank's own merchant normalization. Same OWASP
+  // formula-injection mitigation csv-parser.ts/plaid-transform.ts/
+  // truelayer-transform.ts already apply to their own descriptions (see
+  // sanitize.test.ts) must hold here too, since this exact `description`
+  // field feeds the same detection pipeline regardless of source.
+  it("neutralizes a formula-injection payload in the From display name", () => {
+    const result = extractTransactionsFromMessages([
+      makeMessage({ from: '"=cmd|\'/c calc\'!A1" <attacker@example.com>', plainBody: "Total: $9.99" }),
+    ]);
+    expect(result.transactions[0].description.startsWith("'")).toBe(true);
+  });
+
+  // Same mitigation, the other free-text source this provider falls back
+  // to when there's no From header at all — see extractTransactionsFromMessages'
+  // own `from ? senderDisplayName(from) : subject.trim()` fallback.
+  it("neutralizes a formula-injection payload in the Subject when there's no From header", () => {
+    const result = extractTransactionsFromMessages([
+      makeMessage({ from: "", subject: "=SUM(A1:A9) Total: $9.99", plainBody: "Total: $9.99" }),
+    ]);
+    expect(result.transactions[0].description.startsWith("'")).toBe(true);
+  });
+
   // Never guesses — a message the heuristic can't confidently read is
   // skipped with a warning, not silently assigned a wrong or zero amount
   // (see gmail-extract.ts's file header on why: a missed subscription is

@@ -117,11 +117,47 @@ describe("parseCsvTransactions", () => {
     expect(result.transactions[1]).toMatchObject({ direction: "credit", amountCents: 2000 });
   });
 
+  // Regression: a debit/credit cell of "--" strips (via cleanAmountString +
+  // the leading-sign strip) down to a bare "-", and Number("-") is NaN, not
+  // 0 — unlike genuine non-numeric garbage ("N/A"), which strips to "" and
+  // was already caught by the zero-amount check. Without its own guard,
+  // this NaN became the row's amountCents silently (NaN !== 0), reaching
+  // the review UI and — since /api/imports/confirm validates its whole
+  // rows array as one Zod parse — failing the user's entire import batch
+  // on confirm if left unedited, not just this one malformed row.
+  it("skips a debit/credit row with an unparseable amount instead of producing NaN", () => {
+    const result = parseCsvTransactions("Date,Merchant,Debit,Credit\n2026-01-01,Netflix,--,\n", { aliases: ALIASES });
+    expect(result.transactions).toEqual([]);
+    expect(result.skippedRowCount).toBe(1);
+    expect(result.warnings.some((w) => w.includes("unparseable debit amount"))).toBe(true);
+  });
+
   it("skips a row with an unparseable date instead of throwing, and records a warning", () => {
     const result = parseCsvTransactions("Date,Merchant,Amount\nnot-a-date,Netflix,15.99\n", { aliases: ALIASES });
     expect(result.transactions).toEqual([]);
     expect(result.skippedRowCount).toBe(1);
     expect(result.warnings.length).toBeGreaterThan(0);
+  });
+
+  // Regression: "2026-02-31" is YYYY-MM-DD-shaped, so the date regex alone
+  // used to accept it unchanged — a calendar-invalid date (Feb has 28/29
+  // days) that then reached the review UI looking like a normal date, and
+  // only surfaced as a failure at /api/imports/confirm, failing the user's
+  // *entire* batch (subscriptionInputSchema validates the whole rows array
+  // as one Zod parse) instead of being skipped here like every other bad
+  // row already is.
+  it("skips a row with a calendar-invalid ISO date (Feb 31) instead of passing it through", () => {
+    const result = parseCsvTransactions("Date,Merchant,Amount\n2026-02-31,Netflix,15.99\n", { aliases: ALIASES });
+    expect(result.transactions).toEqual([]);
+    expect(result.skippedRowCount).toBe(1);
+  });
+
+  // Same gap, the slash-format branch: "4/31/2026" passes the day<=31
+  // bound check but April only has 30 days.
+  it("skips a row with a calendar-invalid slash-format date (April 31) instead of passing it through", () => {
+    const result = parseCsvTransactions("Date,Merchant,Amount\n4/31/2026,Netflix,15.99\n", { aliases: ALIASES });
+    expect(result.transactions).toEqual([]);
+    expect(result.skippedRowCount).toBe(1);
   });
 
   it("skips a row with a missing amount instead of throwing", () => {

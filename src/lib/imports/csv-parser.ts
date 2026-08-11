@@ -1,4 +1,5 @@
 import { amountStringToCents } from "@/lib/subscriptions/money";
+import { isValidCalendarDate } from "@/lib/subscriptions/validation";
 import { neutralizeFormulaInjection } from "./sanitize";
 import type { ImportParseResult, RawTransaction } from "./types";
 
@@ -155,8 +156,21 @@ export function cleanAmountString(raw: string): string {
 
 function parseDateToISO(raw: string): string | null {
   const trimmed = raw.trim();
-  // Accept YYYY-MM-DD directly.
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  // Accept YYYY-MM-DD directly — but only once isValidCalendarDate confirms
+  // it's a real date. The regex alone only checks shape: "2026-02-31" used
+  // to pass straight through unchanged (a calendar-invalid date, same class
+  // of bug validation.ts's own isValidCalendarDate exists to catch for the
+  // manual-add/quick-add path). That let one bad row in an otherwise-valid
+  // CSV reach the review UI showing a bogus date, then fail confirm's
+  // subscriptionInputSchema check well after upload — and since
+  // /api/imports/confirm validates the whole batch as one Zod array, a
+  // single malformed date failed the *entire* import, not just that row,
+  // with no indication of which of possibly dozens of rows was the problem.
+  // Catching it here instead means it's skipped at parse time with the
+  // same "unparseable or missing date" warning every other bad date already
+  // gets, consistent with how this function treats every other malformed
+  // row.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return isValidCalendarDate(trimmed) ? trimmed : null;
   // Accept common bank-export formats: MM/DD/YYYY, DD/MM/YYYY is ambiguous
   // without locale info, so this deliberately only handles the
   // unambiguous ISO and slash-separated-with-4-digit-year cases; anything
@@ -168,7 +182,10 @@ function parseDateToISO(raw: string): string | null {
     const month = Number(a) > 12 ? Number(b) : Number(a);
     const day = Number(a) > 12 ? Number(a) : Number(b);
     if (month < 1 || month > 12 || day < 1 || day > 31) return null;
-    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const iso = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    // Same calendar-validity gap as the ISO branch above — day <= 31 alone
+    // still accepts e.g. "4/31/2026" (April has 30 days).
+    return isValidCalendarDate(iso) ? iso : null;
   }
   return null;
 }
@@ -239,10 +256,33 @@ export function parseCsvTransactions(fileText: string, options: ParseCsvOptions)
       const debitRaw = headerMap.debit !== null ? row[headerMap.debit]?.trim() : "";
       const creditRaw = headerMap.credit !== null ? row[headerMap.credit]?.trim() : "";
       if (debitRaw) {
-        amountCents = amountStringToCents(cleanAmountString(debitRaw).replace(/^-/, ""));
+        const cleaned = cleanAmountString(debitRaw).replace(/^-/, "");
+        // Same guard as the single-amount-column branch below — most
+        // non-numeric garbage in this column (e.g. "N/A") strips down to an
+        // empty string, which amountStringToCents already turns into a
+        // harmless 0 (caught by the zero-amount check further down), but a
+        // value like "--" strips to a bare "-", which Number("-") is NaN,
+        // not 0. Without this check that NaN silently became this row's
+        // amountCents (NaN !== 0, so the zero-amount check doesn't catch
+        // it), reaching the review UI and — since /api/imports/confirm
+        // validates its whole rows array as one Zod parse — failing the
+        // user's *entire* batch on confirm if left unedited, not just this
+        // one row.
+        if (cleaned === "" || Number.isNaN(Number(cleaned))) {
+          warnings.push(`Row ${rowIndex + 1}: unparseable debit amount, skipped.`);
+          skippedRowCount++;
+          continue;
+        }
+        amountCents = amountStringToCents(cleaned);
         direction = "debit";
       } else if (creditRaw) {
-        amountCents = amountStringToCents(cleanAmountString(creditRaw).replace(/^-/, ""));
+        const cleaned = cleanAmountString(creditRaw).replace(/^-/, "");
+        if (cleaned === "" || Number.isNaN(Number(cleaned))) {
+          warnings.push(`Row ${rowIndex + 1}: unparseable credit amount, skipped.`);
+          skippedRowCount++;
+          continue;
+        }
+        amountCents = amountStringToCents(cleaned);
         direction = "credit";
       } else {
         warnings.push(`Row ${rowIndex + 1}: no debit or credit amount, skipped.`);

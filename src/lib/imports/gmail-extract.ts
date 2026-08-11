@@ -1,5 +1,6 @@
 import { amountStringToCents } from "@/lib/subscriptions/money";
 import { cleanAmountString } from "./csv-parser";
+import { neutralizeFormulaInjection } from "./sanitize";
 import type { GmailMessage, GmailMessagePart } from "./gmail-client";
 import type { ImportParseResult, RawTransaction } from "./types";
 
@@ -134,7 +135,17 @@ export function extractTransactionsFromMessages(messages: GmailMessage[]): Impor
       continue;
     }
 
-    const merchant = from ? senderDisplayName(from) : subject.trim();
+    // Both the From display name and the Subject are free text an email's
+    // sender fully controls — unlike a bank-issued CSV/Plaid/TrueLayer
+    // description, nothing here has been through any bank's own merchant
+    // normalization. Same OWASP formula-injection mitigation
+    // csv-parser.ts/plaid-transform.ts/truelayer-transform.ts already apply
+    // to their own descriptions before this exact RawTransaction shape
+    // reaches the shared detection pipeline — this was the one provider
+    // still missing it, leaving a spoofed "receipt" email's sender name or
+    // subject line (e.g. a leading "=") free to reach a detected
+    // subscription's name unsanitized.
+    const merchant = neutralizeFormulaInjection(from ? senderDisplayName(from) : subject.trim());
     if (!merchant) {
       skippedRowCount += 1;
       continue;
