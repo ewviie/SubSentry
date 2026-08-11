@@ -1,5 +1,4 @@
 import { levenshtein, normalizeName } from "@/lib/subscriptions/insights";
-import { MAX_SUBSCRIPTION_NAME_LENGTH } from "@/lib/subscriptions/validation";
 import type { Subscription } from "@/lib/db/schema";
 import type { MerchantMatch } from "./types";
 
@@ -192,16 +191,16 @@ export function normalizeMerchant(raw: string): MerchantMatch {
     }
   }
 
-  // Unlike every known-merchant branch above (a short, curated
-  // displayName), this is the one path that can produce something
-  // effectively unbounded — a raw bank/CSV description, capped only by
-  // whatever the source file's own cell can hold. subscriptionInputSchema's
-  // `name` field caps at MAX_SUBSCRIPTION_NAME_LENGTH; without truncating
-  // here too, one over-long description reaching the review UI unedited
-  // would fail /api/imports/confirm's whole-batch Zod validation (rows is
-  // one array parse — a single invalid row rejects every row in the same
-  // request, not just itself) with no indication in the review table of
-  // which row or why.
-  const fallbackDisplayName = (titleCase(stripped) || raw.trim()).slice(0, MAX_SUBSCRIPTION_NAME_LENGTH);
+  // Deliberately NOT truncated here, even though this is the one path that
+  // can produce something effectively unbounded (a raw bank/CSV
+  // description) and the schema's `name` field caps at
+  // MAX_SUBSCRIPTION_NAME_LENGTH: detection.ts clusters transactions by
+  // this exact displayName string (`clusters.get(merchant.displayName)`).
+  // Truncating it here would make two unrelated long descriptions that
+  // only differ after the cutoff collide onto the same cluster key,
+  // silently merging distinct purchases into one detected "subscription".
+  // The length cap belongs at the point this becomes a submitted `name`
+  // instead — see detectedToFormValues in review-table.tsx.
+  const fallbackDisplayName = titleCase(stripped) || raw.trim();
   return { displayName: fallbackDisplayName, category: "other", isKnownSubscriptionMerchant: false };
 }

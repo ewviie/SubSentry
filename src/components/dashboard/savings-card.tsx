@@ -40,24 +40,30 @@ export function SavingsCard({
 
   return (
     <motion.div variants={fadeInUp} whileHover={liftOnHover} transition={springSnappy} className="h-full">
+      {/* size="sm" — matches the compact footprint the stat-card row above
+          it already uses (see stat-card.tsx); this card previously ran
+          noticeably taller than its neighbors with no extra information to
+          show for it. Icon circle/glyph sized down to that same row's
+          default (non-emphasis) treatment for the same reason. */}
       <Card
+        size="sm"
         className={
           hasSavings
             ? "relative h-full overflow-hidden border-emerald/30 shadow-elevation-glow ring-1 ring-emerald/20"
             : "h-full shadow-elevation-low"
         }
       >
-        <CardContent className="flex h-full flex-col justify-center gap-4 pt-5 pb-7">
+        <CardContent className="flex h-full flex-col justify-center gap-3">
           <div className="flex items-center gap-3">
             <div
               aria-hidden="true"
               className={
                 hasSavings
-                  ? "flex size-9 items-center justify-center rounded-full bg-emerald-muted text-emerald"
-                  : "flex size-9 items-center justify-center rounded-full bg-muted text-muted-foreground"
+                  ? "flex size-8 items-center justify-center rounded-full bg-emerald-muted text-emerald"
+                  : "flex size-8 items-center justify-center rounded-full bg-muted text-muted-foreground"
               }
             >
-              {hasSavings ? <PiggyBank className="size-4.5" /> : <ShieldCheck className="size-4.5" />}
+              {hasSavings ? <PiggyBank className="size-4" /> : <ShieldCheck className="size-4" />}
             </div>
             <p className="text-sm font-medium text-muted-foreground">
               {hasSavings ? "Yearly savings from confirmed duplicates" : "Duplicate check"}

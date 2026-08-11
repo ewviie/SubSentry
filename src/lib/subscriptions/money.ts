@@ -52,3 +52,32 @@ export function amountStringToCents(amount: string): number {
 export function centsToAmountString(cents: number): string {
   return (cents / 100).toFixed(2);
 }
+
+// Shared by review-action-bar.tsx (running total while selecting import
+// rows) and import-complete-step.tsx (total just confirmed) — one summing
+// implementation so the two screens can't independently drift on rounding
+// or currency handling (see each call site's own comment).
+//
+// Returns null, not a number, whenever the rows don't share exactly one
+// currency (including zero rows) — currency is unvalidated free text at
+// this point in the import flow (see formatCents' own comment: a bank
+// CSV's Currency column, or Plaid's unofficial_currency_code, can be
+// anything), so a batch can genuinely mix currencies. Summing raw cents
+// across different currencies and labeling the result with just one of
+// them would be a fabricated number wearing a real one's formatting —
+// exactly what this app's own "never fabricate" rule (see reveal-step.tsx,
+// savings.ts) exists to prevent. Callers show the total only when this
+// returns non-null, and fall back to a currency-free summary (a plain
+// count) otherwise — an honest gap, not a wrong number.
+export function sumMonthlyCentsIfSingleCurrency(
+  rows: { amount: string; currency: string; billingCycle: Subscription["billingCycle"] }[],
+): { totalMonthlyCents: number; currency: string } | null {
+  if (rows.length === 0) return null;
+  const currency = rows[0].currency;
+  if (!rows.every((r) => r.currency === currency)) return null;
+  const totalMonthlyCents = rows.reduce(
+    (sum, r) => sum + monthlyCents(amountStringToCents(r.amount), r.billingCycle),
+    0,
+  );
+  return { totalMonthlyCents, currency };
+}

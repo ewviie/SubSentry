@@ -13,7 +13,12 @@ import { fadeInUp, liftOnHover, springSnappy } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import type { Subscription } from "@/lib/db/schema";
 
-function RenewalBadge({ subscription }: { subscription: Subscription }) {
+// Exported for dashboard/renewals-list.tsx — the dashboard's own upcoming-
+// renewals list used to show only a raw ISO date with no urgency signal;
+// this is the exact tiering logic already established and tested here
+// (overdue/≤3 days/≤7 days), reused rather than re-derived a second time
+// with its own thresholds that could quietly drift from this one.
+export function RenewalBadge({ subscription }: { subscription: Subscription }) {
   const days = daysUntilRenewal(subscription);
   if (subscription.status !== "active") {
     return <span className="text-sm text-muted-foreground">{subscription.nextRenewalDate}</span>;

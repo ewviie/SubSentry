@@ -14,13 +14,24 @@ import type { HealthScoreResult } from "@/lib/insights-engine";
 export function HealthScoreCard({ result }: { result: HealthScoreResult }) {
   return (
     <motion.div variants={fadeInUp} whileHover={liftOnHover} transition={springSnappy} className="h-full">
-      <Card className="h-full shadow-elevation-low">
-        <CardContent className="flex h-full flex-col items-center justify-center gap-4 py-6 text-center sm:flex-row sm:items-center sm:gap-5 sm:text-left">
-          <div className="relative shrink-0">
-            <SentryRing className="-inset-3" />
-            <HealthScoreGauge result={result} />
+      {/* size="sm" + a smaller gauge — matches the compact footprint the
+          stat-card row above it already uses (see stat-card.tsx); this
+          card previously ran noticeably taller than its neighbors with no
+          extra information to show for it. */}
+      <Card size="sm" className="h-full shadow-elevation-low">
+        {/* sm:flex-row-reverse + sm:flex-1 on the gauge's wrapper: text
+            keeps its natural width on the left, and the gauge is centered
+            within whatever space is left over to the right of it (not just
+            gap-spaced from the text) — the actual gap now flexes with the
+            card's width instead of being a fixed value. */}
+        <CardContent className="flex h-full flex-col items-center justify-center gap-6 text-center sm:flex-row-reverse sm:items-center sm:justify-start sm:gap-6 sm:text-left">
+          <div className="flex items-center justify-center sm:flex-1">
+            <div className="relative shrink-0">
+              <SentryRing className="-inset-3" />
+              <HealthScoreGauge result={result} size={88} />
+            </div>
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 shrink-0">
             <p className="text-sm font-medium text-muted-foreground">Subscription health</p>
             <p className="mt-0.5 font-heading text-lg font-semibold">{result.rating}</p>
             <ul className="mt-2 space-y-1">

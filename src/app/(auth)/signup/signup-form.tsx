@@ -113,7 +113,7 @@ export function SignupForm() {
       <form onSubmit={handleSubmit}>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="name">Name</Label>
+            <Label htmlFor="name">Name (optional)</Label>
             <Input
               id="name"
               ref={nameRef}

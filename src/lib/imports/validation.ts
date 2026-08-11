@@ -31,6 +31,14 @@ export const rawTransactionSchema = z.object({
   reference: z.string().trim().max(500).optional(),
 });
 
+// Exported for review-table.tsx's "select all" — without a client-side
+// guard against this exact bound, a user with a large legitimate bank
+// history (a realistic, near-term case, not a hypothetical one — schema.ts
+// has no such ceiling on how many rows one analyze response can detect)
+// could select every row and hit this schema's max() with a generic
+// validation-failure response, instead of a clear "select fewer" message.
+export const MAX_IMPORT_ROWS = 200;
+
 // The confirm endpoint's request body. Each row is re-validated through the
 // exact same subscriptionInputSchema the manual form and quick-add both
 // use — nothing from the analyze response is trusted at confirm time, since
@@ -40,7 +48,7 @@ export const rawTransactionSchema = z.object({
 // "ai_parsed" through this endpoint.
 export const importConfirmSchema = z.object({
   source: z.enum(IMPORT_SOURCES),
-  rows: z.array(subscriptionInputSchema).min(1, "Select at least one subscription to import").max(200),
+  rows: z.array(subscriptionInputSchema).min(1, "Select at least one subscription to import").max(MAX_IMPORT_ROWS),
   // How many detected rows the user chose not to import — carried along
   // purely for the import-history record's context, has no effect on what
   // gets created.

@@ -160,7 +160,18 @@ export default async function DashboardPage() {
       <section className="space-y-6">
         <SectionHeading
           title="Subscription Management"
-          description="Add a subscription and see what's renewing next."
+          // First-run-specific: a brand-new account's only guaranteed-to-work
+          // path to real value is typing one subscription below — Plaid/
+          // TrueLayer/Gmail aren't configured in this deployment (both show
+          // as "Coming soon" in the import wizard) and CSV/Apple both require
+          // leaving the app first to get a file. Naming that here, only when
+          // it's true, is honest framing, not a claim about capability that
+          // doesn't exist yet.
+          description={
+            hasAnySubscriptions
+              ? "Add a subscription and see what's renewing next."
+              : "Type what you're paying for below — takes about 10 seconds."
+          }
           action={
             <Link href="/subscriptions" className="text-sm text-muted-foreground hover:underline">
               View all
@@ -169,7 +180,7 @@ export default async function DashboardPage() {
         />
         <Card size="sm">
           <CardContent>
-            <QuickAddBar />
+            <QuickAddBar isFirstSubscription={!hasAnySubscriptions} />
           </CardContent>
         </Card>
         {/* One merged card instead of two side-by-side ones that led with

@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { monthlyCents, formatCents, amountStringToCents, centsToAmountString } from "./money";
+import {
+  monthlyCents,
+  formatCents,
+  amountStringToCents,
+  centsToAmountString,
+  sumMonthlyCentsIfSingleCurrency,
+} from "./money";
 
 describe("monthlyCents", () => {
   it("returns the amount unchanged for monthly billing", () => {
@@ -75,5 +81,45 @@ describe("amountStringToCents", () => {
 describe("centsToAmountString", () => {
   it("round-trips with amountStringToCents", () => {
     expect(centsToAmountString(amountStringToCents("15.99"))).toBe("15.99");
+  });
+});
+
+describe("sumMonthlyCentsIfSingleCurrency", () => {
+  it("sums monthly-equivalent cents across rows sharing one currency", () => {
+    const result = sumMonthlyCentsIfSingleCurrency([
+      { amount: "15.99", currency: "usd", billingCycle: "monthly" },
+      { amount: "9.99", currency: "usd", billingCycle: "monthly" },
+    ]);
+    expect(result).toEqual({ totalMonthlyCents: 2598, currency: "usd" });
+  });
+
+  it("normalizes non-monthly cycles into the total, same as monthlyCents", () => {
+    const result = sumMonthlyCentsIfSingleCurrency([
+      { amount: "120.00", currency: "usd", billingCycle: "yearly" },
+    ]);
+    expect(result).toEqual({ totalMonthlyCents: monthlyCents(12000, "yearly"), currency: "usd" });
+  });
+
+  // Regression: a batch spanning more than one currency must never collapse
+  // into a single summed number under one currency's label — that's a
+  // fabricated figure wearing a real one's formatting. Every provider sets
+  // `currency` per-row independently (Plaid's iso_currency_code, a CSV's
+  // free-text Currency column), so a mixed batch is a real, reachable case,
+  // not a hypothetical one.
+  it("returns null when rows span more than one currency", () => {
+    const result = sumMonthlyCentsIfSingleCurrency([
+      { amount: "15.99", currency: "usd", billingCycle: "monthly" },
+      { amount: "9.99", currency: "eur", billingCycle: "monthly" },
+    ]);
+    expect(result).toBeNull();
+  });
+
+  it("returns null for an empty selection", () => {
+    expect(sumMonthlyCentsIfSingleCurrency([])).toBeNull();
+  });
+
+  it("returns the single row's own monthly-equivalent total for one row", () => {
+    const result = sumMonthlyCentsIfSingleCurrency([{ amount: "15.99", currency: "gbp", billingCycle: "monthly" }]);
+    expect(result).toEqual({ totalMonthlyCents: 1599, currency: "gbp" });
   });
 });
