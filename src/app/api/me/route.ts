@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
-import { updateUserName } from "@/lib/auth/queries";
+import { updateUserName, setRenewalRemindersEnabled } from "@/lib/auth/queries";
 import { checkProfileUpdateRateLimit } from "@/lib/auth/rate-limit";
 import { readJsonBody, MAX_JSON_BODY_BYTES } from "@/lib/http/request-size";
 
@@ -10,13 +10,24 @@ export async function GET() {
   if (!session) {
     return NextResponse.json({ user: null });
   }
-  const { id, email, name, plan } = session.user;
-  return NextResponse.json({ user: { id, email, name, plan } });
+  const { id, email, name, plan, renewalRemindersEnabled } = session.user;
+  return NextResponse.json({ user: { id, email, name, plan, renewalRemindersEnabled } });
 }
 
-const updateMeSchema = z.object({
-  name: z.string().trim().max(120),
-});
+// Both fields optional, but at least one required (the .refine below) —
+// this one route now backs two independent Settings controls (name,
+// renewal-reminder toggle) that each send only the field they're changing;
+// a bare `{}` body isn't a meaningful update to reject with the same
+// "invalid_request" as truly malformed input, rather than silently a no-op
+// 200.
+const updateMeSchema = z
+  .object({
+    name: z.string().trim().max(120).optional(),
+    renewalRemindersEnabled: z.boolean().optional(),
+  })
+  .refine((data) => data.name !== undefined || data.renewalRemindersEnabled !== undefined, {
+    message: "No fields to update.",
+  });
 
 export async function PATCH(request: Request) {
   const session = await getSession();
@@ -43,6 +54,11 @@ export async function PATCH(request: Request) {
     );
   }
 
-  await updateUserName(session.user.id, parsed.data.name);
+  if (parsed.data.name !== undefined) {
+    await updateUserName(session.user.id, parsed.data.name);
+  }
+  if (parsed.data.renewalRemindersEnabled !== undefined) {
+    await setRenewalRemindersEnabled(session.user.id, parsed.data.renewalRemindersEnabled);
+  }
   return NextResponse.json({ ok: true });
 }

@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { LogoutButton } from "@/components/app-shell/logout-button";
 import { EditNameForm } from "@/components/settings/edit-name-form";
+import { RenewalReminderToggle } from "@/components/settings/renewal-reminder-toggle";
 import { ManageBillingButton } from "@/components/billing/manage-billing-button";
 import { ConnectedAccountRow } from "@/components/settings/connected-account-row";
 import { DeleteAccountCard } from "@/components/settings/delete-account-card";
@@ -81,6 +82,16 @@ export default async function SettingsPage() {
               <span className="text-muted-foreground">Email</span>
               <span>{user.email}</span>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-elevation-low">
+          <CardHeader>
+            <CardTitle>Notifications</CardTitle>
+            <CardDescription>What SubSentry emails you about.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <RenewalReminderToggle initialEnabled={user.renewalRemindersEnabled} />
           </CardContent>
         </Card>
 

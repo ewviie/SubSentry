@@ -10,6 +10,7 @@ import {
   jsonb,
   boolean,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { SUBSCRIPTION_SOURCES } from "@/lib/subscriptions/source";
 
 export const users = pgTable("users", {
@@ -32,6 +33,19 @@ export const users = pgTable("users", {
   // don't set it themselves.
   emailVerified: boolean("email_verified").notNull().default(true),
   emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
+  // Default `true` (opt-out, not opt-in) — this is the one genuinely
+  // debated default in this schema; see renewal-reminders.ts's own
+  // top-of-file comment for the full reasoning and the mitigations that
+  // exist specifically because of it (per-run recipient cap, one-click
+  // unsubscribe with no login required). The short version: an attacker
+  // who fully controls a fake account (see emailVerified's own comment —
+  // signup doesn't confirm email ownership) can flip this toggle
+  // themselves regardless of its default, so the default value doesn't
+  // change attack feasibility either way; it only affects the "typo'd my
+  // own email" case and general product norms (subscription trackers
+  // conventionally default renewal reminders on). The real containment is
+  // the per-run cap + unsubscribe link, not this default.
+  renewalRemindersEnabled: boolean("renewal_reminders_enabled").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -91,6 +105,63 @@ export const subscriptions = pgTable(
   (table) => [
     index("subscriptions_user_status_idx").on(table.userId, table.status),
     index("subscriptions_user_renewal_idx").on(table.userId, table.nextRenewalDate),
+    // Partial, userId-free — every other index on this table leads with
+    // userId because every other query here is scoped to one user's own
+    // subscriptions. The renewal-reminder cron job is the first query in
+    // this codebase that scans *across* users by renewal date; the
+    // existing indexes can't serve a userId-agnostic range scan
+    // efficiently. `WHERE status = 'active'` keeps it small — paused/
+    // canceled rows, which the reminder job already excludes, never
+    // bloat this index in the first place.
+    index("subscriptions_active_renewal_idx")
+      .on(table.nextRenewalDate)
+      .where(sql`${table.status} = 'active'`),
+  ],
+);
+
+// One row per renewal-reminder *event* the cron job has claimed or sent —
+// see src/lib/subscriptions/renewal-reminders.ts for the full job. The
+// unique (subscriptionId, renewalDate) pair is deliberately the identity
+// of "one renewal event," not "one email": if a subscription's
+// nextRenewalDate changes (user edits it, or it rolls forward after
+// renewing), that's a genuinely new event and gets its own row —
+// old rows are left in place as history, never edited or reused for a
+// different date.
+//
+// Two-phase state, not a single "sent" boolean: `claimedAt` is set the
+// moment a row is inserted (before any email is attempted); `sentAt`
+// stays null until the SMTP send actually succeeds. This split exists
+// because an email send can't be wrapped in the same DB transaction as
+// the claim (unlike stripeEvents' onConflictDoNothing-in-one-transaction
+// pattern, which this table's *shape* otherwise mirrors) — if the send
+// fails after the claim already committed, sentAt staying null is what
+// lets a later job run recognize this row as "claimed but never
+// delivered" and safely retry it (see claimReminder's own comment for
+// the exact reclaim condition), instead of the unique constraint
+// silently blocking every future attempt forever.
+//
+// userId is denormalized here rather than reached via
+// subscriptionId -> subscriptions.userId -> users.email — this table
+// exists specifically to drive "who do we email," so storing the
+// recipient's owning user id directly avoids a join on the one query
+// this table is for, at the cost of one extra column kept in sync by
+// construction (set once, at insert, never updated).
+export const renewalReminders = pgTable(
+  "renewal_reminders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    subscriptionId: uuid("subscription_id")
+      .notNull()
+      .references(() => subscriptions.id, { onDelete: "cascade" }),
+    renewalDate: date("renewal_date").notNull(),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }).notNull().defaultNow(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("renewal_reminders_subscription_date_idx").on(table.subscriptionId, table.renewalDate),
   ],
 );
 
@@ -303,6 +374,7 @@ export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
 export type Subscription = typeof subscriptions.$inferSelect;
 export type NewSubscription = typeof subscriptions.$inferInsert;
+export type RenewalReminder = typeof renewalReminders.$inferSelect;
 export type Import = typeof imports.$inferSelect;
 export type NewImport = typeof imports.$inferInsert;
 export type BankConnection = typeof bankConnections.$inferSelect;

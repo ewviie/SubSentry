@@ -53,10 +53,31 @@ export function isUpcomingRenewal(subscription: Subscription, withinDays = 30): 
   return subscription.nextRenewalDate >= today && subscription.nextRenewalDate <= cutoff;
 }
 
-export function daysUntilRenewal(subscription: Subscription): number {
+// Takes just the one field it needs (not the full Subscription) — widened
+// from a full-Subscription param specifically so renewal-reminders.ts's
+// cron job (which selects a lean, join-friendly column set, not a full
+// subscription row — see that file's own comment on why) can call this
+// same function instead of re-deriving "days until renewal" a second way.
+// Every existing caller passing a full Subscription still satisfies this.
+export function daysUntilRenewal(subscription: Pick<Subscription, "nextRenewalDate">): number {
   const today = new Date().toISOString().slice(0, 10);
   const msPerDay = 86_400_000;
   const renewal = new Date(`${subscription.nextRenewalDate}T00:00:00Z`).getTime();
   const todayMs = new Date(`${today}T00:00:00Z`).getTime();
   return Math.round((renewal - todayMs) / msPerDay);
 }
+
+// Shared by renewal-reminders.ts's cron job and its own tests — a RANGE,
+// not an exact "days until renewal === 3" match. A daily job that only
+// fires on the exact day-3 mark has no recovery if that one run is missed
+// (deployment, transient failure): the next day's run would see
+// daysUntilRenewal() === 2 and, with an exact match, silently never send
+// anything for that renewal at all. The range tolerates a missed run
+// while renewal_reminders' unique (subscriptionId, renewalDate) constraint
+// still guarantees exactly one email per renewal event regardless of
+// which day inside the window actually sends it — see that table's own
+// schema comment. Email copy always uses the real daysUntilRenewal()
+// value ("renews in 2 days"), never a hardcoded "3 days", so a late
+// catch-up still reads correctly to the recipient.
+export const REMINDER_WINDOW_MIN_DAYS = 1;
+export const REMINDER_WINDOW_MAX_DAYS = 3;
