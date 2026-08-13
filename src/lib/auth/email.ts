@@ -10,7 +10,10 @@ import { logServerError } from "@/lib/observability/log-error";
 // is Nodemailer/SMTP (previously Resend's HTTP API); buildVerificationUrl
 // and the html/text template functions below are provider-agnostic and
 // unchanged by that swap.
-function appBaseUrl(): string {
+// Exported for renewal-reminders.ts, which needs the same base URL to build
+// its own deep link (/subscriptions/{id}) — one place decides what "this
+// app's own origin" means, rather than a second env-var-with-fallback copy.
+export function appBaseUrl(): string {
   return process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 }
 
@@ -150,7 +153,13 @@ function isRetryableSmtpError(error: SmtpError): boolean {
   return true;
 }
 
-interface TransactionalEmail {
+// Exported for renewal-reminder-email.ts — this is this app's one shared
+// "actually send an email" primitive (demo-mode logging, the production-
+// throw-if-unconfigured guard, bounded SMTP retry), not something specific
+// to auth. Kept in this file rather than moved, since every existing call
+// site (verification, password reset) still lives here and moving it is a
+// bigger diff than the one new caller needs.
+export interface TransactionalEmail {
   to: string;
   subject: string;
   html: string;
@@ -165,7 +174,7 @@ interface TransactionalEmail {
 // only the one line printed in demo mode (and the word used in the
 // production-throw message) — every other behavior is identical regardless
 // of which email is being sent.
-async function sendTransactionalEmail(email: TransactionalEmail, demoLabel: string, demoValue: string): Promise<void> {
+export async function sendTransactionalEmail(email: TransactionalEmail, demoLabel: string, demoValue: string): Promise<void> {
   if (!isEmailSendingConfigured()) {
     if (process.env.NODE_ENV === "production") {
       // A live single-use link (account activation, password reset) is a

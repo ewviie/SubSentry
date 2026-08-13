@@ -14,7 +14,8 @@ export type SecurityEventType =
   | "csrf_rejected"
   | "verification_rate_limited"
   | "captcha_rejected"
-  | "account_delete_wrong_password";
+  | "account_delete_wrong_password"
+  | "cron_unauthorized";
 
 export function logSecurityEvent(event: SecurityEventType, meta: Record<string, string | number | undefined>): void {
   console.warn(
