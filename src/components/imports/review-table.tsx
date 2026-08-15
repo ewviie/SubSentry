@@ -12,10 +12,27 @@ import { MAX_IMPORT_ROWS } from "@/lib/imports/validation";
 import type { DetectedSubscription } from "@/lib/imports/types";
 import type { SubscriptionFormValues } from "@/components/subscriptions/subscription-form";
 
-// Exported for review-table.test.ts — a plain function, no rendering
-// needed, so it's tested directly rather than through component rendering
-// (this codebase has no React component-test setup; see that file's own
-// comment).
+// Exported for review-table.test.ts — same "plain function, no component-
+// test harness" reasoning as detectedToFormValues below.
+//
+// High confidence alone used to be the only bar for landing pre-selected —
+// detectRecurringSubscriptions() (lib/imports/detection.ts) also computes
+// isDuplicateOfExistingId (a fuzzy match against the user's own existing
+// subscriptions), but nothing here ever read it: a high-confidence cluster
+// that's actually a duplicate of something already tracked got checked by
+// default and could be silently re-imported as a second, real, recurring
+// charge with one click on Confirm. reveal-step.tsx already tells the user
+// about this in aggregate ("Including N possible duplicates...") one screen
+// earlier, but the actual decision happens here, per row — that's where the
+// signal needs to change behavior. Still just a *default*: the row's own
+// checkbox (and its new duplicate badge, see review-row.tsx) lets the user
+// select it anyway if they know better; nothing is force-deselected or
+// hidden, matching this file's own "nothing is ever silently imported"
+// principle applied in the other direction too.
+export function isPreselectedByDefault(detected: DetectedSubscription): boolean {
+  return detected.confidence === "high" && !detected.isDuplicateOfExistingId;
+}
+
 export function detectedToFormValues(detected: DetectedSubscription): SubscriptionFormValues {
   return {
     // Truncated here, not in merchant-normalizer.ts's displayName — that
@@ -45,15 +62,17 @@ export function ReviewTable({
   busy: boolean;
   onConfirm: (rows: SubscriptionFormValues[], ignoredCount: number) => void;
 }) {
-  // Only high-confidence rows are pre-selected — everything else requires
-  // explicit user action, per the product requirement that nothing is ever
-  // silently imported. Sliced to MAX_IMPORT_ROWS same as toggleSelectAll/
-  // toggleSelected below — a large legitimate bank history can easily
-  // produce more than 200 high-confidence detections, and without this the
-  // initial state itself (before any user interaction) could already
-  // exceed what /api/imports/confirm accepts.
+  // Only high-confidence, non-duplicate rows are pre-selected — everything
+  // else requires explicit user action, per the product requirement that
+  // nothing is ever silently imported (see isPreselectedByDefault's own
+  // comment above for why duplicates are excluded here specifically).
+  // Sliced to MAX_IMPORT_ROWS same as toggleSelectAll/toggleSelected below —
+  // a large legitimate bank history can easily produce more than 200
+  // high-confidence detections, and without this the initial state itself
+  // (before any user interaction) could already exceed what
+  // /api/imports/confirm accepts.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(
-    () => new Set(detected.filter((d) => d.confidence === "high").map((d) => d.id).slice(0, MAX_IMPORT_ROWS)),
+    () => new Set(detected.filter(isPreselectedByDefault).map((d) => d.id).slice(0, MAX_IMPORT_ROWS)),
   );
   const [ignoredIds, setIgnoredIds] = useState<Set<string>>(new Set());
   const [values, setValues] = useState<Map<string, SubscriptionFormValues>>(

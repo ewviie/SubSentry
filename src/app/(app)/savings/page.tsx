@@ -1,16 +1,21 @@
 import { requireUser } from "@/lib/auth/session";
 import { listSubscriptions } from "@/lib/subscriptions/queries";
-import { computeSavingsRecommendations, computeTotalPotentialSavingsMonthlyCents } from "@/lib/subscriptions/savings";
+import {
+  computeSavingsRecommendations,
+  computeTotalPotentialSavingsMonthlyCents,
+  computeRealizedSavings,
+} from "@/lib/subscriptions/savings";
 import { formatCents } from "@/lib/subscriptions/money";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SavingsRecommendationCard } from "@/components/subscriptions/savings-recommendation-card";
-import { PiggyBank, ShieldCheck } from "lucide-react";
+import { PiggyBank, ShieldCheck, CheckCircle2 } from "lucide-react";
 
 export default async function SavingsPage() {
   const user = await requireUser();
   const subscriptions = await listSubscriptions(user.id);
   const recommendations = computeSavingsRecommendations(subscriptions);
   const totalMonthlyCents = computeTotalPotentialSavingsMonthlyCents(recommendations);
+  const realized = computeRealizedSavings(subscriptions);
 
   return (
     <div className="max-w-3xl">
@@ -18,6 +23,58 @@ export default async function SavingsPage() {
       <p className="mt-1 text-muted-foreground">
         Real opportunities found in your own subscriptions — never a guessed percentage.
       </p>
+
+      {/* Realized savings — distinct from the "potential" section below on
+          purpose, both in data source and in wording: this is what you've
+          actually canceled, not a detected opportunity. Never labeled
+          "confirmed" — that word is already claimed by "confirmed
+          duplicates" elsewhere on this page/dashboard (a different concept:
+          a deterministic name match, not a completed action), and reusing
+          it here would conflate the two. Shown whenever there's history,
+          independent of whether there's anything to flag right now — a
+          clean account with zero current opportunities can still have real
+          past savings to show. */}
+      {realized.canceledCount > 0 ? (
+        <div className="mt-6 rounded-xl border border-border bg-muted/30 p-4">
+          <div className="flex items-center gap-3">
+            <div className="flex size-9 items-center justify-center rounded-full bg-emerald-muted text-emerald">
+              <CheckCircle2 className="size-4.5" aria-hidden="true" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-muted-foreground">Money saved so far</p>
+              {/* monthlyCents/yearlyCents are null when canceled
+                  subscriptions span more than one currency — currency is
+                  unvalidated free text on this schema, so summing raw cents
+                  across two of them would produce a number wearing a real
+                  one's formatting (see computeRealizedSavings' own comment,
+                  same rule money.ts's sumMonthlyCentsIfSingleCurrency
+                  already enforces elsewhere). An honest gap, not a wrong
+                  number: still names the real, currency-independent count. */}
+              {realized.monthlyCents !== null && realized.yearlyCents !== null ? (
+                <>
+                  <p className="font-mono text-2xl font-semibold tabular-nums text-emerald">
+                    {formatCents(realized.monthlyCents, realized.currency ?? undefined)}/mo
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {realized.canceledCount === 1
+                      ? "From 1 subscription you've canceled here"
+                      : `From ${realized.canceledCount} subscriptions you've canceled here`}{" "}
+                    — {formatCents(realized.yearlyCents, realized.currency ?? undefined)}/yr. This reflects each
+                    subscription&apos;s current details — editing or deleting a canceled one changes this total too.
+                  </p>
+                </>
+              ) : (
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  {realized.canceledCount === 1
+                    ? "1 subscription canceled here"
+                    : `${realized.canceledCount} subscriptions canceled here`}{" "}
+                  — spanning more than one currency, so they can&apos;t be honestly added into one total.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {recommendations.length === 0 ? (
         <EmptyState

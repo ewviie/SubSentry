@@ -148,6 +148,29 @@ describe("detectRecurringSubscriptions", () => {
     expect(detected[0].isDuplicateOfExistingId).toBeUndefined();
   });
 
+  // Regression: listSubscriptions() (the caller's data source) returns
+  // every status, not just active — a name match against a canceled or
+  // paused existing row is far more likely a legitimate resubscription
+  // (exactly what a bank-sync import should catch) than an accidental
+  // duplicate of something still being paid for. Phase 7 made this flag
+  // directly consequential (review-table.tsx uses it to change default
+  // selection and show a warning badge), so a false positive here now
+  // actively nudges a user away from correctly re-tracking a real charge.
+  it.each(["canceled", "paused"] as const)(
+    "does not flag a cluster as a duplicate of a %s existing subscription",
+    (status) => {
+      const existing = sub({ name: "Netflix", status });
+      const detected = detectRecurringSubscriptions(
+        [
+          tx({ description: "NETFLIX.COM", date: "2026-01-01" }),
+          tx({ description: "NETFLIX.COM", date: "2026-02-01" }),
+        ],
+        [existing],
+      );
+      expect(detected[0].isDuplicateOfExistingId).toBeUndefined();
+    },
+  );
+
   it.each([
     ["weekly", 7],
     ["monthly", 30],

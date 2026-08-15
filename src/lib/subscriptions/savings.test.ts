@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   computeSavingsRecommendations,
   computeTotalPotentialSavingsMonthlyCents,
+  computeRealizedSavings,
   getSavingsPriority,
   type SavingsRecommendation,
 } from "./savings";
@@ -125,6 +126,55 @@ describe("computeTotalPotentialSavingsMonthlyCents", () => {
 
   it("returns 0 for no recommendations", () => {
     expect(computeTotalPotentialSavingsMonthlyCents([])).toBe(0);
+  });
+});
+
+describe("computeRealizedSavings", () => {
+  it("returns null totals and 0 count for no subscriptions", () => {
+    expect(computeRealizedSavings([])).toEqual({ monthlyCents: null, yearlyCents: null, currency: null, canceledCount: 0 });
+  });
+
+  it("ignores active and paused subscriptions", () => {
+    const result = computeRealizedSavings([
+      sub({ status: "active", amountCents: 1000 }),
+      sub({ status: "paused", amountCents: 1000 }),
+    ]);
+    expect(result).toEqual({ monthlyCents: null, yearlyCents: null, currency: null, canceledCount: 0 });
+  });
+
+  it("sums monthly-equivalent cost across every canceled subscription, mixed billing cycles, same currency", () => {
+    const result = computeRealizedSavings([
+      sub({ status: "canceled", amountCents: 1000, billingCycle: "monthly", currency: "usd" }), // 1000/mo
+      sub({ status: "canceled", amountCents: 12000, billingCycle: "yearly", currency: "usd" }), // 1000/mo
+      sub({ status: "active", amountCents: 99999 }), // excluded
+    ]);
+    expect(result.monthlyCents).toBe(2000);
+    expect(result.yearlyCents).toBe(24000);
+    expect(result.currency).toBe("usd");
+    expect(result.canceledCount).toBe(2);
+  });
+
+  it("counts every canceled subscription toward canceledCount, including a $0 one", () => {
+    const result = computeRealizedSavings([sub({ status: "canceled", amountCents: 0, currency: "usd" })]);
+    expect(result.canceledCount).toBe(1);
+    expect(result.monthlyCents).toBe(0);
+  });
+
+  // Regression: currency is unvalidated free text on this schema (see
+  // money.ts's sumMonthlyCentsIfSingleCurrency, which enforces the same
+  // rule for the import-review total) — summing raw cents across different
+  // currencies would produce a number wearing a real one's formatting.
+  // canceledCount still reflects both (currency-independent), but no dollar
+  // total is claimed.
+  it("returns null totals (never a fabricated cross-currency sum) when canceled subscriptions span more than one currency", () => {
+    const result = computeRealizedSavings([
+      sub({ status: "canceled", amountCents: 1000, currency: "usd" }),
+      sub({ status: "canceled", amountCents: 1000, currency: "eur" }),
+    ]);
+    expect(result.monthlyCents).toBeNull();
+    expect(result.yearlyCents).toBeNull();
+    expect(result.currency).toBeNull();
+    expect(result.canceledCount).toBe(2);
   });
 });
 

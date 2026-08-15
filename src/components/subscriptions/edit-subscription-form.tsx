@@ -153,6 +153,15 @@ export function EditSubscriptionForm({ subscription }: { subscription: Subscript
               <AlertDialogTitle>Delete {subscription.name}?</AlertDialogTitle>
               <AlertDialogDescription>
                 This removes it and its history permanently. This can&apos;t be undone.
+                {/* "Money saved so far" on /savings (see savings.ts's
+                    computeRealizedSavings) is a live total over currently-
+                    canceled rows, not a ledger — deleting one lowers that
+                    total the same way it removes everything else about this
+                    row. Only shown for a subscription that's already
+                    canceled (the only case where this delete actually
+                    changes that other number) so this doesn't add noise to
+                    the far more common "delete a duplicate/mistake" case. */}
+                {subscription.status === "canceled" ? " It'll also come off your “Money saved so far” total on Savings." : ""}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>

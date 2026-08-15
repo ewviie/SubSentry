@@ -37,7 +37,12 @@ for (const vp of VIEWPORTS) {
     // /subscriptions/[id] added in Phase 6 — the detail page gained new
     // content (the cancellation-guidance box and its button, only shown for
     // an active subscription) that had no mobile coverage of its own before.
-    test(`/dashboard, /settings, /subscriptions/import, /subscriptions/new, and /subscriptions/[id] have no horizontal overflow at ${vp.name}`, async ({ browser }) => {
+    //
+    // /savings added in Phase 7 alongside the rest of this list — baseline
+    // coverage without any realized-savings history; the dedicated
+    // long-sentence case (a canceled subscription's "Money saved so far"
+    // block) gets its own test below, same split as the long-name case.
+    test(`/dashboard, /settings, /subscriptions/import, /subscriptions/new, /subscriptions/[id], and /savings have no horizontal overflow at ${vp.name}`, async ({ browser }) => {
       const user = await createVerifiedUser(browser, `e2e-mobile-${vp.name.replace("x", "-")}`, {
         viewport: { width: vp.width, height: vp.height },
       });
@@ -48,7 +53,14 @@ for (const vp of VIEWPORTS) {
       });
       const subscriptionId = (created.body as { subscription: { id: string } }).subscription.id;
 
-      for (const path of ["/dashboard", "/settings", "/subscriptions/import", "/subscriptions/new", `/subscriptions/${subscriptionId}`]) {
+      for (const path of [
+        "/dashboard",
+        "/settings",
+        "/subscriptions/import",
+        "/subscriptions/new",
+        `/subscriptions/${subscriptionId}`,
+        "/savings",
+      ]) {
         await user.page.goto(path);
         const { innerWidth, scrollWidth } = await user.page.evaluate(() => ({
           innerWidth: window.innerWidth,
@@ -90,6 +102,37 @@ for (const vp of VIEWPORTS) {
           scrollWidth: document.documentElement.scrollWidth,
         }));
         expect(scrollWidth, `subscription detail must not scroll horizontally at ${vp.name} with a long name`).toBeLessThanOrEqual(innerWidth);
+
+        await user.page.context().close();
+        await deleteTestUser(user.email);
+      });
+
+      // Phase 7's "Money saved so far" block (savings/page.tsx) has the
+      // same long-unbroken-name overflow shape as the cancellation-guidance
+      // box above, plus a longer wrapping sentence than most of this page's
+      // other content — a real, distinct overflow risk from the plain
+      // baseline /savings check in the main loop above, which never has any
+      // canceled subscriptions to render this block at all.
+      test(`Savings — a long subscription name doesn't overflow the "Money saved so far" block at ${vp.name}`, async ({ browser }) => {
+        const user = await createVerifiedUser(browser, `e2e-mobile-realized-${vp.name.replace("x", "-")}`, {
+          viewport: { width: vp.width, height: vp.height },
+        });
+
+        const longName = "SuperLongStreamingServiceNameWithoutAnySpacesAtAllForTestingPurposesOverflow";
+        const created = await apiFetch(user.page, "/api/subscriptions", {
+          method: "POST",
+          body: { name: longName, amount: "15.99", billingCycle: "monthly", nextRenewalDate: "2030-01-01" },
+        });
+        const subscriptionId = (created.body as { subscription: { id: string } }).subscription.id;
+        await apiFetch(user.page, `/api/subscriptions/${subscriptionId}`, { method: "PATCH", body: { status: "canceled" } });
+
+        await user.page.goto("/savings");
+        await expect(user.page.getByText("Money saved so far")).toBeVisible();
+        const { innerWidth, scrollWidth } = await user.page.evaluate(() => ({
+          innerWidth: window.innerWidth,
+          scrollWidth: document.documentElement.scrollWidth,
+        }));
+        expect(scrollWidth, `/savings must not scroll horizontally at ${vp.name} with realized savings`).toBeLessThanOrEqual(innerWidth);
 
         await user.page.context().close();
         await deleteTestUser(user.email);

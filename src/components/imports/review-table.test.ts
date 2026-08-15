@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { detectedToFormValues } from "./review-table";
+import { detectedToFormValues, isPreselectedByDefault } from "./review-table";
 import type { DetectedSubscription } from "@/lib/imports/types";
 
 // This project has no React component-rendering test setup (no
@@ -66,5 +66,27 @@ describe("detectedToFormValues", () => {
   it("defaults currency to usd when the detected transaction has none", () => {
     const result = detectedToFormValues(makeDetected({ transactions: [] }));
     expect(result.currency).toBe("usd");
+  });
+});
+
+// Regression coverage for a Phase 7 fix: detectRecurringSubscriptions()
+// (lib/imports/detection.ts) already computes isDuplicateOfExistingId, but
+// nothing consulted it when deciding what to pre-select — a high-confidence
+// duplicate of an existing subscription got checked by default and could be
+// silently re-imported as a second, real, recurring charge.
+describe("isPreselectedByDefault", () => {
+  it("pre-selects a high-confidence row with no duplicate match", () => {
+    expect(isPreselectedByDefault(makeDetected({ confidence: "high" }))).toBe(true);
+  });
+
+  it("does not pre-select a high-confidence row that matches an existing subscription", () => {
+    expect(
+      isPreselectedByDefault(makeDetected({ confidence: "high", isDuplicateOfExistingId: "existing-sub-1" })),
+    ).toBe(false);
+  });
+
+  it("does not pre-select a medium/low-confidence row regardless of duplicate status", () => {
+    expect(isPreselectedByDefault(makeDetected({ confidence: "medium" }))).toBe(false);
+    expect(isPreselectedByDefault(makeDetected({ confidence: "low" }))).toBe(false);
   });
 });

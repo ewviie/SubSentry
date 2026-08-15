@@ -184,10 +184,23 @@ export function detectRecurringSubscriptions(
     else clusters.set(merchant.displayName, [transaction]);
   }
 
-  const existingNormalizedNames = existingSubscriptions.map((s) => ({
-    id: s.id,
-    normalized: normalizeName(s.name),
-  }));
+  // Only active existing subscriptions are candidates for a duplicate
+  // match — listSubscriptions() (the caller's data source, see
+  // api/imports/analyze/route.ts) returns every status, and a detected
+  // cluster matching a *canceled* or *paused* existing row is far more
+  // likely to be a legitimate resubscription (the exact case a bank-sync
+  // import should catch) than an accidental re-track of something still
+  // being paid for. Phase 7 made isDuplicateOfExistingId directly
+  // consequential for the first time (review-table.tsx reads it to change
+  // default selection and show a warning badge) — before that it only fed
+  // an aggregate count, so this distinction not mattering as much went
+  // unnoticed; it matters now that a real UI decision hangs on it.
+  const existingNormalizedNames = existingSubscriptions
+    .filter((s) => s.status === "active")
+    .map((s) => ({
+      id: s.id,
+      normalized: normalizeName(s.name),
+    }));
 
   const detected: DetectedSubscription[] = [];
 

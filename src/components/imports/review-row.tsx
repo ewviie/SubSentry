@@ -1,6 +1,6 @@
 "use client";
 
-import { Pencil, X } from "lucide-react";
+import { Copy, Pencil, X } from "lucide-react";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
@@ -45,7 +45,23 @@ export function ReviewRow({
       <TableCell className="max-w-48 truncate text-muted-foreground" title={rawMerchant}>
         {rawMerchant}
       </TableCell>
-      <TableCell className="font-medium">{currentValues.name}</TableCell>
+      <TableCell className="font-medium">
+        <span className="flex items-center gap-1.5">
+          {currentValues.name}
+          {detected.isDuplicateOfExistingId ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span className="inline-flex text-destructive" aria-label="Possible duplicate of a subscription you already track">
+                    <Copy className="size-3.5" />
+                  </span>
+                }
+              />
+              <TooltipContent>This looks like a subscription you already track. Double-check before importing it again.</TooltipContent>
+            </Tooltip>
+          ) : null}
+        </span>
+      </TableCell>
       <TableCell className="font-mono tabular-nums">
         {formatCents(amountStringToCents(currentValues.amount), currentValues.currency)}
       </TableCell>

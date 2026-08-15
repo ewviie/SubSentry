@@ -119,6 +119,62 @@ export function computeTotalPotentialSavingsMonthlyCents(recommendations: Saving
   return total;
 }
 
+// The other half of "potential vs. actually happened" — everything above
+// this point in the file answers "what could you save"; this answers "what
+// have you actually stopped paying for." A canceled subscription's row is
+// never deleted on cancel (only status flips — see queries.ts's
+// updateSubscription; deleteSubscription is a separate, explicit action),
+// so its amountCents/billingCycle are still real, readable data, not
+// something this needs a new table to compute.
+//
+// Deliberately NOT called "confirmed savings" anywhere in this app's UI —
+// "confirmed" already means something specific and different here
+// (SavingsCard/SavingsOpportunitiesCard use "confirmed duplicates" to mean
+// "deterministic name match, not a fuzzy AI guess"). A second, differently-
+// defined "confirmed ___" figure on the same product would conflate two
+// concepts a user has no way to tell apart from the word alone. Callers
+// should use "realized" / "money saved" in copy instead.
+//
+// Three things this number is honest about, on purpose:
+// - It's a live read of current status, not a ledger. Deleting a canceled
+//   subscription (the existing "danger zone" action) removes it from this
+//   total too, same as it removes everything else about that row — callers
+//   should say so in the surrounding copy rather than let the number
+//   silently drop with no explanation.
+// - It counts "you marked this canceled in SubSentry," not "SubSentry
+//   verified you stopped paying the merchant" (no billing-API integration
+//   exists to confirm that, and Phase 6's cancellation guidance is explicit
+//   that this app never claims to cancel anything). Copy should describe
+//   the user's own action ("subscriptions you've canceled"), never imply
+//   SubSentry itself produced the saving.
+// - Same "never sum across currencies" rule money.ts's
+//   sumMonthlyCentsIfSingleCurrency already enforces for the import-review
+//   total: currency is unvalidated free text on this schema (any two
+//   canceled subscriptions could genuinely be in different currencies), and
+//   adding raw cents across currencies together would produce a number
+//   wearing a real one's formatting. monthlyCents/yearlyCents/currency are
+//   all null when the canceled set spans more than one currency — an honest
+//   gap, not a wrong number — leaving canceledCount (currency-independent)
+//   as the only thing still shown in that case.
+export interface RealizedSavings {
+  monthlyCents: number | null;
+  yearlyCents: number | null;
+  currency: string | null;
+  canceledCount: number;
+}
+
+export function computeRealizedSavings(allSubscriptions: Subscription[]): RealizedSavings {
+  const canceled = allSubscriptions.filter((s) => s.status === "canceled");
+  if (canceled.length === 0) return { monthlyCents: null, yearlyCents: null, currency: null, canceledCount: 0 };
+
+  const currency = canceled[0].currency;
+  const singleCurrency = canceled.every((s) => s.currency === currency);
+  if (!singleCurrency) return { monthlyCents: null, yearlyCents: null, currency: null, canceledCount: canceled.length };
+
+  const totalMonthlyCents = canceled.reduce((sum, s) => sum + monthlyCents(s.amountCents, s.billingCycle), 0);
+  return { monthlyCents: totalMonthlyCents, yearlyCents: totalMonthlyCents * 12, currency, canceledCount: canceled.length };
+}
+
 export type SavingsPriority = "high" | "medium" | "low";
 
 // Presentational bucketing only — no new data, just a threshold read on the
