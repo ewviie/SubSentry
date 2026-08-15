@@ -48,13 +48,24 @@ export function QuickWinsCard({ output }: { output: EngineOutput }) {
       </CardHeader>
       <CardContent className="space-y-3">
         {output.quickWins.map((win) => (
-          <div key={win.ruleId} className="flex items-start justify-between gap-3 text-sm">
-            <div className="min-w-0">
-              <p className="font-medium">{win.title}</p>
-              <p className="text-muted-foreground">{win.description}</p>
+          <div key={win.ruleId} className="space-y-1.5 text-sm">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="font-medium">{win.title}</p>
+                <p className="text-muted-foreground">{win.description}</p>
+              </div>
+              {win.monthlySavingsCents ? (
+                <Badge className="shrink-0 bg-emerald text-emerald-foreground">{formatCents(win.monthlySavingsCents)}/mo</Badge>
+              ) : null}
             </div>
-            {win.monthlySavingsCents ? (
-              <Badge className="shrink-0 bg-emerald text-emerald-foreground">{formatCents(win.monthlySavingsCents)}/mo</Badge>
+            {/* Same "one clear next click" pattern SavingsOpportunitiesCard
+                already uses — only rendered when this finding actually
+                points at a specific subscription (some health-rule findings,
+                e.g. a renewal spike, are account-wide and have none). */}
+            {win.subscriptionIds[0] ? (
+              <Button size="sm" variant="outline" className="w-fit" render={<Link href={`/subscriptions/${win.subscriptionIds[0]}`} />} nativeButton={false}>
+                Review
+              </Button>
             ) : null}
           </div>
         ))}

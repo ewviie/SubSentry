@@ -1,6 +1,6 @@
 import type { Subscription } from "@/lib/db/schema";
 import { monthlyCents } from "@/lib/subscriptions/money";
-import { normalizeName, levenshtein } from "@/lib/subscriptions/insights";
+import { normalizeName, namesLikelyMatch } from "@/lib/subscriptions/insights";
 import type { EngineContext } from "./types";
 
 // Pure, side-effect-free computations shared by health/free/premium rules —
@@ -11,14 +11,6 @@ import type { EngineContext } from "./types";
 
 export function monthlyTotalCents(active: Subscription[]): number {
   return active.reduce((sum, s) => sum + monthlyCents(s.amountCents, s.billingCycle), 0);
-}
-
-function namesLikelyMatch(a: string, b: string): boolean {
-  if (!a || !b) return false;
-  if (a === b) return true;
-  if (a.length >= 4 && b.length >= 4 && (a.includes(b) || b.includes(a))) return true;
-  if (Math.abs(a.length - b.length) > 2) return false;
-  return levenshtein(a, b) <= 2;
 }
 
 export interface DuplicatePair {

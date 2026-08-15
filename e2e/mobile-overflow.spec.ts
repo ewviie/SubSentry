@@ -33,17 +33,22 @@ for (const vp of VIEWPORTS) {
     // first-time activation path (Phase 3's explicit mobile-first
     // requirement) and neither had any mobile-overflow regression coverage
     // before, unlike the two pages this test already protected.
-    test(`/dashboard, /settings, /subscriptions/import, and /subscriptions/new have no horizontal overflow at ${vp.name}`, async ({ browser }) => {
+    //
+    // /subscriptions/[id] added in Phase 6 — the detail page gained new
+    // content (the cancellation-guidance box and its button, only shown for
+    // an active subscription) that had no mobile coverage of its own before.
+    test(`/dashboard, /settings, /subscriptions/import, /subscriptions/new, and /subscriptions/[id] have no horizontal overflow at ${vp.name}`, async ({ browser }) => {
       const user = await createVerifiedUser(browser, `e2e-mobile-${vp.name.replace("x", "-")}`, {
         viewport: { width: vp.width, height: vp.height },
       });
 
-      await apiFetch(user.page, "/api/subscriptions", {
+      const created = await apiFetch(user.page, "/api/subscriptions", {
         method: "POST",
         body: { name: "Netflix", amount: "15.99", billingCycle: "monthly", nextRenewalDate: "2030-01-01" },
       });
+      const subscriptionId = (created.body as { subscription: { id: string } }).subscription.id;
 
-      for (const path of ["/dashboard", "/settings", "/subscriptions/import", "/subscriptions/new"]) {
+      for (const path of ["/dashboard", "/settings", "/subscriptions/import", "/subscriptions/new", `/subscriptions/${subscriptionId}`]) {
         await user.page.goto(path);
         const { innerWidth, scrollWidth } = await user.page.evaluate(() => ({
           innerWidth: window.innerWidth,
@@ -56,6 +61,40 @@ for (const vp of VIEWPORTS) {
       await user.page.context().close();
       await deleteTestUser(user.email);
     });
+
+    // The subscription-detail overflow check above uses a short name
+    // ("Netflix") — real risk for the Phase 6 cancellation-guidance box is
+    // a long, unbroken subscription name (it appears 3 times in that box:
+    // the heading, the body text, and the button label), the same overflow
+    // shape as this file's own "Welcome, {email}" regression at the top —
+    // a long single token with no natural break point. Tested at the
+    // tightest viewport only; if it fits at 320px it fits at the wider ones
+    // covered by the loop above.
+    if (vp.width === 320) {
+      test(`subscription detail — a long subscription name doesn't overflow the cancellation-guidance box at ${vp.name}`, async ({ browser }) => {
+        const user = await createVerifiedUser(browser, `e2e-mobile-cancel-${vp.name.replace("x", "-")}`, {
+          viewport: { width: vp.width, height: vp.height },
+        });
+
+        const longName = "SuperLongStreamingServiceNameWithoutAnySpacesAtAllForTestingPurposesOverflow";
+        const created = await apiFetch(user.page, "/api/subscriptions", {
+          method: "POST",
+          body: { name: longName, amount: "15.99", billingCycle: "monthly", nextRenewalDate: "2030-01-01" },
+        });
+        const subscriptionId = (created.body as { subscription: { id: string } }).subscription.id;
+
+        await user.page.goto(`/subscriptions/${subscriptionId}`);
+        await expect(user.page.getByText(`Canceling ${longName}?`)).toBeVisible();
+        const { innerWidth, scrollWidth } = await user.page.evaluate(() => ({
+          innerWidth: window.innerWidth,
+          scrollWidth: document.documentElement.scrollWidth,
+        }));
+        expect(scrollWidth, `subscription detail must not scroll horizontally at ${vp.name} with a long name`).toBeLessThanOrEqual(innerWidth);
+
+        await user.page.context().close();
+        await deleteTestUser(user.email);
+      });
+    }
 
     test(`account-deletion dialog fits the viewport and buttons stay tappable at ${vp.name}`, async ({ browser }) => {
       const user = await createVerifiedUser(browser, `e2e-mobile-del-${vp.name.replace("x", "-")}`, {

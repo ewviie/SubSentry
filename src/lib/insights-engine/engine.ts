@@ -90,10 +90,46 @@ export function runInsightsEngine(subscriptions: Subscription[], isPremium: bool
   const today = todayIso();
   const ctx: EngineContext = { subscriptions, active, todayIso: today, isPremium };
 
+  // HEALTH_RULES are also evaluated independently by computeHealthScore()
+  // below (for its own score/breakdown) — evaluating them a second time
+  // here, rather than threading their results through, keeps this a pure
+  // additive change with zero risk to computeHealthScore's existing
+  // behavior/tests. Both evaluations are cheap, pure functions over a
+  // handful of rule objects; the duplication costs nothing measurable.
+  //
+  // Before this, HEALTH_RULES' own findings (e.g. "3 renewals land the
+  // same week", "No duplicate subscriptions") only ever fed the health
+  // score's numeric breakdown — the individual title/description/
+  // subscriptionIds were computed and then discarded, never reaching
+  // `results` at all. That meant `positive` and the warning half of
+  // `quickWins` below were provably always empty: FREE_RULES only ever
+  // returns severity "info", and PREMIUM_RULES results are all
+  // `premium: true` (filtered out by quickWins' `!r.premium`), so neither
+  // QuickWinsCard nor PositiveHabitsCard could ever render, for any user,
+  // under any data — confirmed by the fact that no existing test asserted
+  // either array was ever non-empty. health.duplicates' *warning* branch is
+  // excluded here specifically: it's already given a fuller, more
+  // actionable treatment by Savings opportunities (savingsForecast below),
+  // and including it here too would reproduce the exact "same finding
+  // rendered twice on one page" bug dashboard/page.tsx's own comment
+  // already documents fixing once for possible_overlap. Its *positive*
+  // branch ("No duplicate subscriptions") stays in, deliberately — Savings
+  // opportunities only ever renders when there's something to flag
+  // (savingsForecast.recommendations.length > 0), so it's silent in
+  // exactly the case that branch fires, meaning there was never a
+  // collision to avoid for it. Filtering out the whole rule by ruleId
+  // alone would silently drop that positive finding too, leaving a real
+  // gap: computeHealthScore (health-score.ts) still credits it in the
+  // score breakdown, but no card would ever say why.
+  const healthResults = HEALTH_RULES.map((rule) => rule.evaluate(ctx)).filter(
+    (r): r is InsightResult => r !== null && !(r.ruleId === "health.duplicates" && r.severity === "warning"),
+  );
+
   const nonHealthRules = [...FREE_RULES, ...(isPremium ? PREMIUM_RULES : [])];
-  const results = nonHealthRules
-    .map((rule) => rule.evaluate(ctx))
-    .filter((r): r is InsightResult => r !== null);
+  const results = [
+    ...nonHealthRules.map((rule) => rule.evaluate(ctx)).filter((r): r is InsightResult => r !== null),
+    ...healthResults,
+  ];
 
   const positive = results.filter((r) => r.severity === "positive");
   const warnings = results.filter((r) => r.severity === "warning" || r.severity === "critical");

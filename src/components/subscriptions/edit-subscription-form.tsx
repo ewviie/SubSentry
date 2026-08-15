@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { Loader2, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -23,6 +23,22 @@ import {
 } from "@/components/subscriptions/subscription-form";
 import { amountStringToCents, formatCents, monthlyCents } from "@/lib/subscriptions/money";
 import type { Subscription } from "@/lib/db/schema";
+
+// A real, always-working search link — never a claimed direct cancellation
+// URL. This app has no maintained per-merchant cancel-page database (see
+// lib/imports/merchant-normalizer.ts's own KNOWN_MERCHANTS table: display
+// name + category only, no URLs), and fabricating one — a guessed
+// netflix.com/cancel-style link per subscription — would risk sending a
+// user to a wrong or dead page for something as consequential as "am I
+// still being charged." A search query is honest about what SubSentry
+// actually knows (the subscription's name, nothing more) and always
+// resolves to something useful regardless of how the merchant's real
+// cancellation flow is shaped today.
+function cancelSearchUrl(name: string): string {
+  const url = new URL("https://www.google.com/search");
+  url.searchParams.set("q", `how to cancel ${name} subscription`);
+  return url.toString();
+}
 
 export function EditSubscriptionForm({ subscription }: { subscription: Subscription }) {
   const router = useRouter();
@@ -94,6 +110,35 @@ export function EditSubscriptionForm({ subscription }: { subscription: Subscript
         submitLabel="Save changes"
         onSubmit={handleSubmit}
       />
+      {/* Only while still active — once status is already paused/canceled
+          here, the user has presumably already dealt with the real-world
+          side of it (or never needs to; this is the moment that decision
+          is actually being made). Every "review this subscription" path in
+          the app (Savings, Quick wins, the renewal-reminder email) lands
+          here, and until now none of them offered anything beyond editing
+          this app's own record of it — SubSentry has no cancellation
+          integration with any merchant, so a real, honest search link is
+          the most useful thing this screen can offer instead of nothing. */}
+      {subscription.status === "active" ? (
+        <div className="rounded-lg border border-border bg-muted/30 p-4">
+          <p className="text-sm font-medium">Canceling {subscription.name}?</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            SubSentry only tracks what you tell it — it can&apos;t cancel this for you. Changing the status field
+            above just updates your own record here; you&apos;ll still need to cancel with {subscription.name}{" "}
+            directly to actually stop being charged.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-3"
+            render={<a href={cancelSearchUrl(subscription.name)} target="_blank" rel="noopener noreferrer" />}
+            nativeButton={false}
+          >
+            <ExternalLink className="size-3.5" aria-hidden="true" />
+            Search how to cancel {subscription.name}
+          </Button>
+        </div>
+      ) : null}
       <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4">
         <p className="text-sm font-medium">Danger zone</p>
         <p className="mt-1 text-sm text-muted-foreground">

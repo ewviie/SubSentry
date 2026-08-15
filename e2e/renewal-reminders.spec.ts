@@ -118,7 +118,11 @@ test.describe("renewal reminders", () => {
     // already on this page; Cancel = the Status field (settable to
     // Canceled) plus the danger-zone delete control.
     await expect(user.page.getByRole("button", { name: "Save changes" })).toBeVisible();
-    await expect(user.page.getByText("Status")).toBeVisible();
+    // exact: true — a loose substring match against "Status" also matches
+    // the Phase 6 cancellation-guidance paragraph's own "...status field
+    // above..." wording (getByText is case-insensitive by default), which
+    // isn't the Status *field* this assertion means to check for.
+    await expect(user.page.getByText("Status", { exact: true })).toBeVisible();
     await expect(user.page.getByRole("button", { name: "Delete subscription" })).toBeVisible();
 
     await user.page.context().close();
