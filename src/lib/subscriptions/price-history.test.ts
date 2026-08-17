@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { computeLatestPriceChange } from "./price-history";
-import type { SubscriptionPriceHistory } from "@/lib/db/schema";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
+import { computeLatestPriceChange, estimatePaidCents } from "./price-history";
+import type { Subscription, SubscriptionPriceHistory } from "@/lib/db/schema";
 
 function row(overrides: Partial<SubscriptionPriceHistory>): SubscriptionPriceHistory {
   return {
@@ -12,6 +12,25 @@ function row(overrides: Partial<SubscriptionPriceHistory>): SubscriptionPriceHis
     currency: "usd",
     observedAt: new Date("2026-01-01T00:00:00Z"),
     source: "initial",
+    ...overrides,
+  };
+}
+
+function sub(overrides: Partial<Subscription> = {}): Subscription {
+  return {
+    id: "sub-id",
+    userId: "user-id",
+    name: "Test Sub",
+    amountCents: 1000,
+    currency: "usd",
+    billingCycle: "monthly",
+    category: "other",
+    nextRenewalDate: "2099-01-01",
+    status: "active",
+    notes: null,
+    source: "manual",
+    createdAt: new Date("2026-01-01T00:00:00Z"),
+    updatedAt: new Date("2026-01-01T00:00:00Z"),
     ...overrides,
   };
 }
@@ -114,5 +133,60 @@ describe("computeLatestPriceChange", () => {
       row({ id: "b", amountCents: 14400, billingCycle: "yearly", observedAt: new Date("2026-02-01T00:00:00Z") }),
     ];
     expect(computeLatestPriceChange(history)).toBeNull();
+  });
+});
+
+describe("estimatePaidCents", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-01T00:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("with < 2 history rows, matches the original single-price formula exactly (no behavior change for the common case)", () => {
+    // Tracked 45 days (Jan 15 -> Mar 1), $10/mo, 30-day cycle:
+    // floor(45/30)+1 = 2 periods -> $20.00.
+    const subscription = sub({ amountCents: 1000, billingCycle: "monthly", createdAt: new Date("2026-01-15T00:00:00Z") });
+    expect(estimatePaidCents(subscription, [])).toBe(2000);
+    expect(estimatePaidCents(subscription, [row({ amountCents: 1000, observedAt: new Date("2026-01-15T00:00:00Z") })])).toBe(
+      2000,
+    );
+  });
+
+  it("sums each closed price segment at its own rate, plus the current segment's in-progress period", () => {
+    // $10/mo Jan 1 -> Feb 1 (31 days, closed): floor(31/30) = 1 period -> $10.00
+    // $15/mo Feb 1 -> Mar 1 "now" (28 days, current): floor(28/30)+1 = 1 period -> $15.00
+    // Total: $25.00
+    const subscription = sub({ amountCents: 1500, billingCycle: "monthly", createdAt: new Date("2026-01-01T00:00:00Z") });
+    const history = [
+      row({ id: "a", amountCents: 1000, billingCycle: "monthly", observedAt: new Date("2026-01-01T00:00:00Z"), source: "initial" }),
+      row({ id: "b", amountCents: 1500, billingCycle: "monthly", observedAt: new Date("2026-02-01T00:00:00Z"), source: "user_edit" }),
+    ];
+    expect(estimatePaidCents(subscription, history)).toBe(2500);
+  });
+
+  it("accounts for a billing-cycle change between segments (not just amount)", () => {
+    // $10/mo Jan 1 -> Feb 1 (31 days, closed, monthly cycle=30): floor(31/30) = 1 period -> $10.00
+    // $100/yr Feb 1 -> Mar 1 "now" (28 days, current, yearly cycle=365): floor(28/365)+1 = 1 period -> $100.00
+    const subscription = sub({ amountCents: 10000, billingCycle: "yearly", createdAt: new Date("2026-01-01T00:00:00Z") });
+    const history = [
+      row({ id: "a", amountCents: 1000, billingCycle: "monthly", observedAt: new Date("2026-01-01T00:00:00Z") }),
+      row({ id: "b", amountCents: 10000, billingCycle: "yearly", observedAt: new Date("2026-02-01T00:00:00Z") }),
+    ];
+    expect(estimatePaidCents(subscription, history)).toBe(11000);
+  });
+
+  it("never returns a negative or NaN figure for a same-day multi-row history", () => {
+    const subscription = sub({ amountCents: 1000, createdAt: new Date("2026-03-01T00:00:00Z") });
+    const history = [
+      row({ id: "a", amountCents: 800, observedAt: new Date("2026-03-01T00:00:00Z") }),
+      row({ id: "b", amountCents: 1000, observedAt: new Date("2026-03-01T00:00:00Z") }),
+    ];
+    const result = estimatePaidCents(subscription, history);
+    expect(Number.isFinite(result)).toBe(true);
+    expect(result).toBeGreaterThanOrEqual(0);
   });
 });

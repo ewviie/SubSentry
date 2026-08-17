@@ -4,7 +4,7 @@ import { requireUser } from "@/lib/auth/session";
 import { getSubscription, listSubscriptions, getPriceHistory } from "@/lib/subscriptions/queries";
 import { subscriptionIdSchema } from "@/lib/subscriptions/validation";
 import { computeInsights, computeFunctionalOverlapGroups } from "@/lib/subscriptions/insights";
-import { monthlyCents } from "@/lib/subscriptions/money";
+import { monthlyCents, formatCents } from "@/lib/subscriptions/money";
 import { runInsightsEngine, RULE_RECOMMENDED_ACTION } from "@/lib/insights-engine";
 import { hasPaidAccess } from "@/lib/billing/plan";
 import { EditSubscriptionForm } from "@/components/subscriptions/edit-subscription-form";
@@ -27,7 +27,15 @@ export default async function SubscriptionDetailPage({
   // routing straight to the same not-found page a genuinely missing id
   // already renders below, instead of an uncaught error boundary.
   if (!subscriptionIdSchema.safeParse(id).success) notFound();
-  const subscription = await getSubscription(user.id, id);
+  // Neither read depends on the other's result — sequential awaits here
+  // paid one full DB round-trip of latency on every single page load for
+  // no reason (raised in local-council review, Performance lens).
+  // getPriceHistory below still awaits separately: it genuinely needs
+  // subscription.id, which only exists once this resolves.
+  const [subscription, allSubscriptions] = await Promise.all([
+    getSubscription(user.id, id),
+    listSubscriptions(user.id),
+  ]);
   if (!subscription) notFound();
 
   // Same possible_overlap insight the subscriptions list already badges
@@ -38,7 +46,6 @@ export default async function SubscriptionDetailPage({
   // as "duplicate" here, same as the list — the broader "N subscriptions in
   // this category" insight is a different, weaker signal and never shown
   // as a duplicate.
-  const allSubscriptions = await listSubscriptions(user.id);
   const duplicateInsight = computeInsights(allSubscriptions).find(
     (insight) =>
       insight.type === "possible_overlap" &&
@@ -72,15 +79,20 @@ export default async function SubscriptionDetailPage({
 
   const isPremium = hasPaidAccess(user.plan);
   const engineOutput = runInsightsEngine(allSubscriptions, isPremium);
-  // positive + warnings only — these are exactly the health-rule findings
-  // that already reach the dashboard's Positive habits/Quick wins/Risk
-  // alerts cards without a premium gate, so reusing them here needs no new
-  // upgrade-messaging logic. premiumInsights/optimization are deliberately
-  // left out: showing a premium-only finding's real content on a free
-  // user's own subscription page, unlabeled, would leak what "Pro" gates
-  // are meant to withhold.
-  const relevantSignals = [...engineOutput.positive, ...engineOutput.warnings].filter((r) =>
-    r.subscriptionIds.includes(subscription.id),
+  // positive + warnings + premiumInsights — not `optimization` separately,
+  // since every optimization-category finding today is also premium (see
+  // premium.ts's annual_switch_savings), so premiumInsights already covers
+  // it without double-including the same finding twice. premiumInsights
+  // needs no separate isPremium check here: runInsightsEngine only ever
+  // evaluates PREMIUM_RULES when isPremium is true (see engine.ts), so
+  // this array is already guaranteed empty for a free user — nothing here
+  // can leak a Pro-gated finding's real content onto a free user's page.
+  // (Raised in local-council review, Devil's Advocate lens: a paying
+  // premium user used to see strictly *less* on their own subscription's
+  // detail page than the dashboard's Risk alerts card already told them
+  // about the same subscription — fixed by including this array.)
+  const relevantSignals = [...engineOutput.positive, ...engineOutput.warnings, ...engineOutput.premiumInsights].filter(
+    (r) => r.subscriptionIds.includes(subscription.id),
   );
   // The first (title/description already sorted by relevance where they're
   // computed) relevant finding that has a real recommended action — never
@@ -109,24 +121,40 @@ export default async function SubscriptionDetailPage({
         </CardHeader>
         <CardContent className="space-y-4">
           {duplicateMatch ? <DuplicateNotice match={duplicateMatch} /> : null}
-          <SubscriptionSummary subscription={subscription} sharePercent={sharePercent} />
+          <SubscriptionSummary subscription={subscription} history={priceHistory} sharePercent={sharePercent} />
           <PriceHistoryNote history={priceHistory} trackedSinceLabel={trackedSinceLabel} />
 
-          {/* "Why SubSentry flagged it" — only the pre-existing duplicate
+          {/* "What SubSentry noticed" — only the pre-existing duplicate
               notice above skips this (it already gets its own, fuller
               treatment); everything else this subscription is involved in
               (concentration, expensive-outlier, renewal risk, overdue,
-              uncategorized, ...) shows here as plain evidence, same title/
-              description text the dashboard already uses for the identical
-              finding. Silent — no section at all — when there's genuinely
-              nothing to say, rather than a manufactured "all clear" card. */}
+              uncategorized, long-running, ...) shows here as plain
+              evidence, same title/description text the dashboard already
+              uses for the identical finding. Silent — no section at all —
+              when there's genuinely nothing to say, rather than a
+              manufactured "all clear" card.
+
+              Deliberately NOT titled "Why SubSentry flagged it" (its
+              original wording) — health.long_running is a real,
+              intentional exception with `severity: "positive"` and real
+              subscriptionIds (see rules/health.ts), so a subscription
+              whose *only* relevant finding is "kept over a year, stable
+              spend" used to be introduced under an accusatory heading for
+              good news (raised in local-council review, Compliance
+              lens). Each line's own color now carries the same positive/
+              negative distinction the dashboard's health-dimension dots
+              already use elsewhere, on top of text that's unambiguous on
+              its own either way. */}
           {relevantSignals.length > 0 ? (
             <div className="space-y-2 border-b border-border pb-4 text-sm">
-              <p className="font-medium">Why SubSentry flagged it</p>
+              <p className="font-medium">What SubSentry noticed</p>
               <ul className="space-y-1.5 text-muted-foreground">
                 {relevantSignals.map((signal) => (
                   <li key={signal.ruleId}>
-                    <span className="text-foreground">{signal.title}.</span> {signal.description}
+                    <span className={signal.severity === "positive" ? "text-emerald" : "text-foreground"}>
+                      {signal.title}.
+                    </span>{" "}
+                    {signal.description}
                   </li>
                 ))}
               </ul>
@@ -145,19 +173,34 @@ export default async function SubscriptionDetailPage({
               recommendation is built from. Never a category-only match
               (e.g. "also software") — that's too broad a redundancy signal
               to call "related" with a straight face, same reasoning
-              signals.ts's own categoryConcentration comment gives. */}
-          {relatedSubscriptions.length > 0 ? (
+              signals.ts's own categoryConcentration comment gives.
+              Combined monthly cost and each member's own cost shown
+              alongside the name — a bare list of names with no dollar
+              figure was a strictly worse account of the same grouping than
+              Savings opportunities already gives it (raised in
+              local-council review, Devil's Advocate lens): a user clicking
+              in because they suspect redundancy deserves the same "here's
+              what it's actually costing" framing here, not just there. */}
+          {relatedSubscriptions.length > 0 && overlapGroup ? (
             <div className="space-y-2 border-b border-border pb-4 text-sm">
-              <p className="font-medium">Related subscriptions</p>
+              <p className="font-medium">
+                Related subscriptions{" "}
+                <span className="font-normal text-muted-foreground">
+                  — {overlapGroup.label.toLowerCase()}, {formatCents(overlapGroup.combinedMonthlyCents)}/mo combined
+                </span>
+              </p>
               <ul className="space-y-1">
                 {relatedSubscriptions.map((related) => (
-                  <li key={related.id}>
+                  <li key={related.id} className="flex items-baseline justify-between gap-2">
                     <Link
                       href={`/subscriptions/${related.id}`}
                       className="font-medium text-foreground underline underline-offset-4 hover:text-muted-foreground"
                     >
                       {related.name}
                     </Link>
+                    <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                      {formatCents(monthlyCents(related.amountCents, related.billingCycle), related.currency)}/mo
+                    </span>
                   </li>
                 ))}
               </ul>

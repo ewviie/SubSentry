@@ -72,3 +72,63 @@ export function computeLatestPriceChange(history: SubscriptionPriceHistory[]): P
   }
   return null;
 }
+
+const CYCLE_DAYS: Record<Subscription["billingCycle"], number> = {
+  weekly: 7,
+  monthly: 30,
+  quarterly: 91,
+  yearly: 365,
+};
+
+// "Est. paid since tracking" (subscription-summary.tsx's detail-page
+// stat). Estimated, not invented: there's no real charge history to read
+// (no bank connection, no stored transaction log for manually-added
+// subscriptions), so this is openly derived from billing cycle × time
+// tracked, labeled as such rather than presented as a fact this app
+// doesn't actually have.
+//
+// `history.length < 2` (no genuine price change ever recorded — the
+// overwhelming common case today, since this table only started capturing
+// real history this phase) takes the exact original single-price
+// calculation, byte-for-byte unchanged: this must never produce a
+// different number for a subscription whose price has never changed.
+// Only once real multi-row history exists does this sum each price
+// *segment* (the span between one recorded price and the next, or "now"
+// for the current one) at that segment's own rate — applying today's
+// price across the whole tracked window used to silently overstate or
+// understate real spend the moment a subscription's price ever changed
+// (raised in local-council review, Compliance + Maintainability lenses:
+// the price-history note could say "price increased 20% on [date]" right
+// next to an "Est. paid" figure computed as if the price had always been
+// the new one).
+//
+// Each closed (non-current) segment counts only whole elapsed periods —
+// it definitely completed at least that many, since a new price starting
+// is exactly what closed it. The current (last) segment keeps the
+// original "+1" convention: the in-progress period counts as paid too,
+// same approximation the single-price case already made.
+export function estimatePaidCents(subscription: Subscription, history: SubscriptionPriceHistory[]): number {
+  if (history.length < 2) {
+    const daysSinceTracked = Math.max(0, Math.floor((Date.now() - subscription.createdAt.getTime()) / 86_400_000));
+    const cycleDays = CYCLE_DAYS[subscription.billingCycle];
+    const periodsElapsed = Math.max(1, Math.floor(daysSinceTracked / cycleDays) + 1);
+    return periodsElapsed * subscription.amountCents;
+  }
+
+  const sorted = [...history].sort((a, b) => a.observedAt.getTime() - b.observedAt.getTime());
+  const now = Date.now();
+  let total = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    const row = sorted[i];
+    const segmentStart = row.observedAt.getTime();
+    const segmentEnd = i + 1 < sorted.length ? sorted[i + 1].observedAt.getTime() : now;
+    const segmentDays = Math.max(0, Math.floor((segmentEnd - segmentStart) / 86_400_000));
+    const cycleDays = CYCLE_DAYS[row.billingCycle];
+    const isCurrentSegment = i === sorted.length - 1;
+    const periods = isCurrentSegment
+      ? Math.max(1, Math.floor(segmentDays / cycleDays) + 1)
+      : Math.floor(segmentDays / cycleDays);
+    total += periods * row.amountCents;
+  }
+  return total;
+}

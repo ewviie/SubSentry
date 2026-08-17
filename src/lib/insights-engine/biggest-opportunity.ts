@@ -28,6 +28,17 @@ import { getSavingsPriority } from "@/lib/subscriptions/savings";
 //      exactly this mission's own worked example (Adobe, 34% of spend).
 // Never fabricates a number: every amountCents here is a field the engine
 // already computed for a different card, not a new calculation.
+//
+// This is a *fixed tier order*, not a cross-tier dollar-magnitude sort — a
+// genuine renewal spike (tier 2) always outranks a medium-priority saving
+// (tier 3) even when the saving is worth more money. Deliberate: timing
+// risk (a cash-flow spike due soon) and reviewable-but-unproven savings are
+// different kinds of "worth knowing," not two numbers on the same scale,
+// so ranking them by raw dollar amount would silently trade a real,
+// near-term risk for a speculative, further-off saving. Flagged in
+// local-council review (Maintainability lens) as an undocumented judgment
+// call — documenting it here rather than changing it, same disposition
+// savings.ts's own priority tie-break documents for its analogous choice.
 export interface BiggestOpportunity {
   kind: "savings" | "renewal_risk" | "expensive_subscription";
   title: string;

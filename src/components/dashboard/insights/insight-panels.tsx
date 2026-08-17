@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { RenewalsList } from "@/components/dashboard/renewals-list";
 import { formatCents } from "@/lib/subscriptions/money";
 import { getSavingsPriority, PRIORITY_LABEL, PRIORITY_BADGE_VARIANT } from "@/lib/subscriptions/savings";
-import { computeBiggestOpportunity } from "@/lib/insights-engine/biggest-opportunity";
+import { computeBiggestOpportunity, type BiggestOpportunity } from "@/lib/insights-engine/biggest-opportunity";
 import { cn } from "@/lib/utils";
 import type { EngineOutput } from "@/lib/insights-engine";
 import type { Subscription } from "@/lib/db/schema";
@@ -151,22 +151,37 @@ export function RenewalForecastCard({ output, renewals }: { output: EngineOutput
 // North Star Part 9: a single, committed answer to "what's my biggest
 // opportunity," distinct from Savings opportunities/Quick wins' ranked
 // lists just below it — this is the one thing to look at if a user reads
-// nothing else on the page. Same emerald "this matters" treatment
-// SavingsCard's hasSavings state uses, deliberately: it's the same register
-// of "real money, worth your attention," just for a single spotlighted
-// finding instead of a running total. See computeBiggestOpportunity's own
-// header comment for the exact ranking (confirmed saving > cash-flow risk >
+// nothing else on the page. See computeBiggestOpportunity's own header
+// comment for the exact ranking (confirmed saving > cash-flow risk >
 // reviewable saving > highest-cost subscription) — every candidate there is
 // read from `output`, not recomputed, so this can never disagree with what
 // the rest of the dashboard already says about the same fact.
+//
+// The card's own chrome (border/glow/ring), not just the dollar figure, is
+// tone-aware — the emerald "this matters, and it's a win" glow SavingsCard's
+// hasSavings state uses is only earned by amountTone: "positive" (a
+// confirmed saving). Raised in local-council review (Maintainability lens):
+// the first version of this fix only recolored the number, leaving the
+// glowing emerald frame around a cash-flow warning or a plain "here's your
+// biggest expense" fact — exactly the "real money read as a win" conflation
+// this whole card exists to avoid, just moved from the number to the frame
+// around it.
+const OPPORTUNITY_CHROME: Record<BiggestOpportunity["amountTone"], string> = {
+  positive: "relative overflow-hidden border-emerald/30 shadow-elevation-glow ring-1 ring-emerald/20",
+  neutral: "relative overflow-hidden shadow-elevation-low",
+};
+
 export function BiggestOpportunityCard({ output }: { output: EngineOutput }) {
   const opportunity = computeBiggestOpportunity(output);
   if (!opportunity) return null;
   return (
-    <Card className="relative overflow-hidden border-emerald/30 shadow-elevation-glow ring-1 ring-emerald/20">
+    <Card className={OPPORTUNITY_CHROME[opportunity.amountTone]}>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-          <Target className="size-4 text-emerald" aria-hidden="true" />
+          <Target
+            className={cn("size-4", opportunity.amountTone === "positive" ? "text-emerald" : "text-muted-foreground")}
+            aria-hidden="true"
+          />
           Your biggest opportunity
         </CardTitle>
       </CardHeader>

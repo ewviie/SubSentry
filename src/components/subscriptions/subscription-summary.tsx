@@ -1,33 +1,17 @@
 import { formatCents, monthlyCents } from "@/lib/subscriptions/money";
+import { estimatePaidCents } from "@/lib/subscriptions/price-history";
 import { cn } from "@/lib/utils";
-import type { Subscription } from "@/lib/db/schema";
-
-const CYCLE_DAYS: Record<Subscription["billingCycle"], number> = {
-  weekly: 7,
-  monthly: 30,
-  quarterly: 91,
-  yearly: 365,
-};
+import type { Subscription, SubscriptionPriceHistory } from "@/lib/db/schema";
 
 // This page used to be pure edit form — click into any one subscription and
 // the "detail" page told you nothing you didn't already know from the list
 // it came from. This is the actual detail: what tracking it has cost so
-// far, what it costs annually, when it renews next. Estimated, not
-// invented: there's no real charge history to read (no bank connection,
-// no stored transaction log for manually-added subscriptions), so this is
-// openly an estimate derived from billing cycle × time tracked, labeled as
-// such rather than presented as a fact this app doesn't actually have.
-// Date.now() pulled out of the component body on purpose — this project's
-// lint config (react-hooks/purity) flags an impure call directly inside a
-// component's render, the same reason insights.ts's todayISO() lives in a
-// plain helper rather than inline in a page component.
-function estimatePaidCents(subscription: Subscription): number {
-  const daysSinceTracked = Math.max(0, Math.floor((Date.now() - subscription.createdAt.getTime()) / 86_400_000));
-  const cycleDays = CYCLE_DAYS[subscription.billingCycle];
-  const periodsElapsed = Math.max(1, Math.floor(daysSinceTracked / cycleDays) + 1);
-  return periodsElapsed * subscription.amountCents;
-}
-
+// far, what it costs annually, when it renews next. estimatePaidCents lives
+// in price-history.ts (not here) — it's genuinely price-history-aware logic
+// now, not a one-line formula, and that's where it can actually be unit
+// tested (this file has no test infrastructure of its own; nothing in this
+// codebase unit-tests a .tsx component directly).
+//
 // sharePercent: this subscription's annual cost as a share of the user's
 // total active annual spend — null (not 0) whenever that comparison
 // wouldn't mean anything: a paused/canceled subscription isn't part of
@@ -38,12 +22,14 @@ function estimatePaidCents(subscription: Subscription): number {
 // needs every other active subscription, not just this one.
 export function SubscriptionSummary({
   subscription,
+  history,
   sharePercent = null,
 }: {
   subscription: Subscription;
+  history: SubscriptionPriceHistory[];
   sharePercent?: number | null;
 }) {
-  const estimatedPaidCents = estimatePaidCents(subscription);
+  const estimatedPaidCents = estimatePaidCents(subscription, history);
   const annualCents = monthlyCents(subscription.amountCents, subscription.billingCycle) * 12;
 
   const trackedSinceLabel = subscription.createdAt.toLocaleDateString("en-US", {

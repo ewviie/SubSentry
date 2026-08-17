@@ -154,16 +154,24 @@ duplicates, overlap, or spending-outlier detection:
 - **Price history** (`subscription_price_history` table, `src/lib/db/schema.ts`):
   the #1 limitation this doc used to list below is now partially closed.
   One row is written at creation (`source: "initial"`) and again only when
-  `amountCents`/`currency` genuinely change via an edit (`source:
-  "user_edit"`, see `queries.ts`'s `updateSubscription`) — no fabricated
-  backfill for pre-existing subscriptions. `src/lib/subscriptions/
-  price-history.ts`'s `computeLatestPriceChange` reads this honestly:
-  null until a subscription has 2+ distinct-amount rows, so a subscription
-  edited for the first time after this shipped is the first to ever show a
-  real "Price increased X%" note (`subscription-summary.tsx`'s detail
-  page). **Not** wired into the health score or Smart Savings yet —
-  scoped to the subscription detail page only, on purpose, until real
-  price-change history actually accumulates across the user base.
+  `amountCents`, `billingCycle`, or `currency` genuinely change via an edit
+  (`source: "user_edit"`, see `queries.ts`'s `updateSubscription`) — no
+  fabricated backfill for pre-existing subscriptions. `billingCycle` is
+  stored per row, not assumed constant: `src/lib/subscriptions/
+  price-history.ts`'s `computeLatestPriceChange` normalizes every
+  comparison through `monthlyCents` (each row's own cycle), so a
+  cycle-only change (e.g. monthly → yearly at an equivalent price) is
+  correctly read as "no real change," not a raw-amount false positive —
+  see that file's own comment for the exact reasoning (caught in
+  CodeRabbit review; the first version of this table compared raw
+  `amountCents` and would have annualized a cycle change by up to 12x).
+  Reads honestly: null until a subscription has 2+ distinct
+  monthly-equivalent rows, so a subscription edited for the first time
+  after this shipped is the first to ever show a real "Price increased X%"
+  note (`price-history-note.tsx`'s detail page). **Not** wired into the
+  health score or Smart Savings yet — scoped to the subscription detail
+  page only, on purpose, until real price-change history actually
+  accumulates across the user base.
 - **Biggest opportunity** (`src/lib/insights-engine/biggest-opportunity.ts`):
   a single, ranked pick — confirmed high-impact saving > genuine renewal
   cash-flow spike > medium-impact saving > highest-cost subscription
