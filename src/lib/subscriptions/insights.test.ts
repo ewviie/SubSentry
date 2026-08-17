@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { computeInsights, computePotentialSavingsMonthlyCents, findSmallSubscriptionsCluster, smallSubscriptionsClusterTitle } from "./insights";
+import {
+  computeInsights,
+  computePotentialSavingsMonthlyCents,
+  computeFunctionalOverlapGroups,
+  findSmallSubscriptionsCluster,
+  smallSubscriptionsClusterTitle,
+} from "./insights";
 import type { Subscription } from "@/lib/db/schema";
 
 let nextId = 1;
@@ -278,6 +284,53 @@ describe("findSmallSubscriptionsCluster", () => {
     for (const s of result.subscriptions) {
       expect(s.amountCents).toBeLessThanOrEqual(mean * 2); // never an outlier-magnitude cost
     }
+  });
+
+  // CodeRabbit review regression: currency is unvalidated free text on this
+  // schema — a mixed-currency active list must never sum raw cents across
+  // currencies (the exact rule computeRealizedSavings already enforces
+  // elsewhere). Bails out entirely rather than silently compute a
+  // meaningless mean/total.
+  it("null when active subscriptions span more than one currency", () => {
+    const subs = [
+      sub({ name: "Dominant", amountCents: 3000, currency: "usd" }),
+      sub({ name: "Tiny1", amountCents: 300, currency: "usd" }),
+      sub({ name: "Tiny2", amountCents: 300, currency: "usd" }),
+      sub({ name: "Tiny3", amountCents: 300, currency: "gbp" }),
+    ];
+    expect(findSmallSubscriptionsCluster(subs)).toBeNull();
+  });
+});
+
+describe("computeFunctionalOverlapGroups", () => {
+  it("returns the group's currency, matching every member's own currency", () => {
+    const subs = [sub({ name: "Netflix", currency: "usd" }), sub({ name: "Disney+", currency: "usd" })];
+    const groups = computeFunctionalOverlapGroups(subs);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].currency).toBe("usd");
+    expect(groups[0].combinedMonthlyCents).toBe(1998);
+  });
+
+  // CodeRabbit review regression: a currency-mismatched subscription must
+  // not corrupt the group's combinedMonthlyCents — it simply doesn't join.
+  it("excludes a currency-mismatched subscription from an otherwise-matching group", () => {
+    const subs = [
+      sub({ name: "Netflix", currency: "usd", amountCents: 1000 }),
+      sub({ name: "Disney+", currency: "usd", amountCents: 1000 }),
+      sub({ name: "Hulu", currency: "gbp", amountCents: 999 }),
+    ];
+    const groups = computeFunctionalOverlapGroups(subs);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].subscriptions.map((s) => s.name).sort()).toEqual(["Disney+", "Netflix"]);
+    expect(groups[0].combinedMonthlyCents).toBe(2000);
+  });
+
+  // A currency-mismatched pair with no other same-currency member to join
+  // never forms a group at all — honest silence, not a fabricated
+  // single-currency group out of a mismatched pair.
+  it("never forms a 2-member group across two different currencies", () => {
+    const subs = [sub({ name: "Netflix", currency: "usd" }), sub({ name: "Disney+", currency: "gbp" })];
+    expect(computeFunctionalOverlapGroups(subs)).toEqual([]);
   });
 });
 

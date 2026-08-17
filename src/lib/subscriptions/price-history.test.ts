@@ -189,4 +189,36 @@ describe("estimatePaidCents", () => {
     expect(Number.isFinite(result)).toBe(true);
     expect(result).toBeGreaterThanOrEqual(0);
   });
+
+  // CodeRabbit review regression: a subscription created before this table
+  // existed (no "initial" row) has its earliest history row dated well
+  // after its real createdAt. That gap must count too, at the earliest
+  // known rate — not be silently dropped.
+  it("covers the gap between a pre-existing subscription's createdAt and its earliest history row", () => {
+    // createdAt Jan 1; earliest known price ($10/mo) only recorded Feb 1
+    // (31 days pre-history gap, closed: floor(31/30) = 1 period -> $10.00).
+    // Then $10/mo Feb 1 -> Mar 1 "now" (28 days, current): floor(28/30)+1 = 1 -> $10.00.
+    // Total: $20.00.
+    const subscription = sub({ amountCents: 1000, billingCycle: "monthly", createdAt: new Date("2026-01-01T00:00:00Z") });
+    const history = [
+      row({ id: "a", amountCents: 1000, billingCycle: "monthly", observedAt: new Date("2026-02-01T00:00:00Z") }),
+      row({ id: "b", amountCents: 1000, billingCycle: "monthly", observedAt: new Date("2026-02-15T00:00:00Z") }),
+    ];
+    expect(estimatePaidCents(subscription, history)).toBe(2000);
+  });
+
+  // CodeRabbit review regression: a currency change partway through history
+  // must not sum raw cents across currencies — only segments matching the
+  // subscription's *current* currency are counted.
+  it("excludes a currency-mismatched segment rather than summing across currencies", () => {
+    // Jan 1 -> Feb 1: 1000 GBP/mo (excluded — subscription's current
+    // currency is usd). Feb 1 -> Mar 1 "now": 1500 USD/mo, current segment,
+    // floor(28/30)+1 = 1 period -> $15.00. Total: $15.00, not a mixed sum.
+    const subscription = sub({ amountCents: 1500, currency: "usd", createdAt: new Date("2026-01-01T00:00:00Z") });
+    const history = [
+      row({ id: "a", amountCents: 1000, currency: "gbp", observedAt: new Date("2026-01-01T00:00:00Z") }),
+      row({ id: "b", amountCents: 1500, currency: "usd", observedAt: new Date("2026-02-01T00:00:00Z") }),
+    ];
+    expect(estimatePaidCents(subscription, history)).toBe(1500);
+  });
 });

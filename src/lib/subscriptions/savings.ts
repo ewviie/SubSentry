@@ -150,7 +150,7 @@ export function computeSavingsRecommendations(
   // this recommends reviewing the group's priciest subscription rather than
   // crediting a dollar figure no real signal supports — same convention the
   // type it replaces used.
-  for (const { label, subscriptions: subs, combinedMonthlyCents } of computeFunctionalOverlapGroups(active)) {
+  for (const { label, subscriptions: subs, combinedMonthlyCents, currency } of computeFunctionalOverlapGroups(active)) {
     const priciest = [...subs].sort(
       (a, b) => monthlyCents(b.amountCents, b.billingCycle) - monthlyCents(a.amountCents, a.billingCycle),
     )[0];
@@ -160,7 +160,7 @@ export function computeSavingsRecommendations(
       id: `overlap-${subs.map((s) => s.id).sort().join("-")}`,
       type: "functional_overlap",
       title: subs.map((s) => s.name).join(" + "),
-      description: `${verb} ${label.toLowerCase()} functionality. ${formatCents(combinedMonthlyCents)}/mo combined. If you primarily use one, review whether you need ${needAllOf}.`,
+      description: `${verb} ${label.toLowerCase()} functionality. ${formatCents(combinedMonthlyCents, currency)}/mo combined. If you primarily use one, review whether you need ${needAllOf}.`,
       actionLabel: `Review ${priciest.name}`,
       monthlySavingsCents: 0,
       impactCents: combinedMonthlyCents,

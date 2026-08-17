@@ -107,6 +107,24 @@ const CYCLE_DAYS: Record<Subscription["billingCycle"], number> = {
 // is exactly what closed it. The current (last) segment keeps the
 // original "+1" convention: the in-progress period counts as paid too,
 // same approximation the single-price case already made.
+//
+// Two things caught in CodeRabbit review, both fixed here:
+// - A subscription that predates this table (created before Phase 9
+//   shipped, so it never got an "initial" row) can have its earliest
+//   history row dated well after its real `createdAt` — the gap between
+//   the two was being silently dropped, undercounting real elapsed spend.
+//   A synthetic leading segment covers exactly that gap, at the earliest
+//   known row's own rate (the same "best honest estimate from what's
+//   actually known" the original single-price formula already made for
+//   every subscription before this table existed) — closed, not current,
+//   since a real recorded row is what ends it.
+// - A segment whose currency differs from the subscription's *current*
+//   currency is skipped rather than summed in — currency is unvalidated
+//   free text on this schema, and adding cents across currencies would
+//   produce a number wearing a real one's formatting (the same rule
+//   computeRealizedSavings/computeFunctionalOverlapGroups enforce
+//   elsewhere). The result is an honest partial total, consistent with
+//   this whole figure already being labeled "Est."
 export function estimatePaidCents(subscription: Subscription, history: SubscriptionPriceHistory[]): number {
   if (history.length < 2) {
     const daysSinceTracked = Math.max(0, Math.floor((Date.now() - subscription.createdAt.getTime()) / 86_400_000));
@@ -118,8 +136,16 @@ export function estimatePaidCents(subscription: Subscription, history: Subscript
   const sorted = [...history].sort((a, b) => a.observedAt.getTime() - b.observedAt.getTime());
   const now = Date.now();
   let total = 0;
+
+  const preHistoryDays = Math.max(0, Math.floor((sorted[0].observedAt.getTime() - subscription.createdAt.getTime()) / 86_400_000));
+  if (preHistoryDays > 0 && sorted[0].currency === subscription.currency) {
+    const periods = Math.floor(preHistoryDays / CYCLE_DAYS[sorted[0].billingCycle]);
+    total += periods * sorted[0].amountCents;
+  }
+
   for (let i = 0; i < sorted.length; i++) {
     const row = sorted[i];
+    if (row.currency !== subscription.currency) continue;
     const segmentStart = row.observedAt.getTime();
     const segmentEnd = i + 1 < sorted.length ? sorted[i + 1].observedAt.getTime() : now;
     const segmentDays = Math.max(0, Math.floor((segmentEnd - segmentStart) / 86_400_000));

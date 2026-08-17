@@ -63,10 +63,18 @@ export default async function SubscriptionDetailPage({
   // subscription. That keeps this page unable to disagree with the
   // dashboard/savings page about the same underlying fact.
   const active = allSubscriptions.filter((s) => s.status === "active");
-  const totalActiveAnnualCents = active.reduce((sum, s) => sum + monthlyCents(s.amountCents, s.billingCycle), 0) * 12;
+  // Same-currency-as-this-subscription only — summing raw cents across
+  // currencies would produce a meaningless denominator (the exact rule
+  // computeRealizedSavings/computeFunctionalOverlapGroups already enforce
+  // elsewhere; caught in CodeRabbit review, this call site had been
+  // missed). A user whose active spend genuinely spans currencies gets a
+  // share of *this subscription's own currency's* spend, not a fabricated
+  // cross-currency percentage.
+  const sameCurrencyActive = active.filter((s) => s.currency === subscription.currency);
+  const totalActiveAnnualCents = sameCurrencyActive.reduce((sum, s) => sum + monthlyCents(s.amountCents, s.billingCycle), 0) * 12;
   // null (not 0) for a paused/canceled subscription, or a portfolio with no
-  // active spend at all — see SubscriptionSummary's own comment on why
-  // sharePercent is nullable, not just "0%" in that case.
+  // same-currency active spend at all — see SubscriptionSummary's own
+  // comment on why sharePercent is nullable, not just "0%" in that case.
   const sharePercent =
     subscription.status === "active" && totalActiveAnnualCents > 0
       ? Math.round((monthlyCents(subscription.amountCents, subscription.billingCycle) * 12 * 100) / totalActiveAnnualCents)
@@ -186,7 +194,7 @@ export default async function SubscriptionDetailPage({
               <p className="font-medium">
                 Related subscriptions{" "}
                 <span className="font-normal text-muted-foreground">
-                  — {overlapGroup.label.toLowerCase()}, {formatCents(overlapGroup.combinedMonthlyCents)}/mo combined
+                  — {overlapGroup.label.toLowerCase()}, {formatCents(overlapGroup.combinedMonthlyCents, overlapGroup.currency)}/mo combined
                 </span>
               </p>
               <ul className="space-y-1">

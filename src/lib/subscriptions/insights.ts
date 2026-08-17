@@ -202,11 +202,11 @@ export function computeInsights(allSubscriptions: Subscription[]): ComputedInsig
   // subscriptions resolve to the SAME curated functional-overlap group (see
   // computeFunctionalOverlapGroups below) — evidence that they actually
   // solve the same problem, not just belong to the same broad bucket.
-  for (const { label, subscriptions: subs, combinedMonthlyCents } of computeFunctionalOverlapGroups(active)) {
+  for (const { label, subscriptions: subs, combinedMonthlyCents, currency } of computeFunctionalOverlapGroups(active)) {
     insights.push({
       type: "possible_overlap",
       title: subs.map((s) => s.name).join(" + "),
-      description: `${subs.map((s) => s.name).join(", ")} all provide ${label.toLowerCase()} functionality: ${formatCents(combinedMonthlyCents)}/mo combined. Worth checking whether you need all of them.`,
+      description: `${subs.map((s) => s.name).join(", ")} all provide ${label.toLowerCase()} functionality: ${formatCents(combinedMonthlyCents, currency)}/mo combined. Worth checking whether you need all of them.`,
       severity: "info",
       subscriptionIds: subs.map((s) => s.id),
     });
@@ -220,6 +220,11 @@ export interface FunctionalOverlapGroupResult {
   label: string;
   subscriptions: Subscription[];
   combinedMonthlyCents: number;
+  // The currency combinedMonthlyCents is denominated in — every member of
+  // `subscriptions` shares this currency by construction (see the
+  // same-currency join below), so callers can format the total correctly
+  // instead of defaulting to formatCents' own "usd" fallback.
+  currency: string;
 }
 
 // Groups active subscriptions by genuine functional-overlap group — see
@@ -257,14 +262,30 @@ export function computeFunctionalOverlapGroups(active: Subscription[]): Function
     }
   }
 
+  // currency is unvalidated free text on this schema (see money.ts's own
+  // comment on formatCents) — two subscriptions in the same functional
+  // group can genuinely be in different currencies. Summing raw cents
+  // across currencies would produce a number wearing a real one's
+  // formatting (the exact rule computeRealizedSavings/
+  // sumMonthlyCentsIfSingleCurrency already enforce elsewhere) — caught in
+  // CodeRabbit review; this file was the one place that pattern had been
+  // missed. A subscription joins a group only if its currency matches the
+  // group's first (reference) member; a currency-mismatched subscription
+  // simply doesn't participate in that group's total, rather than
+  // corrupting it. If that leaves the group below the 2-subscription floor,
+  // it honestly doesn't form at all — no fabricated cross-currency group.
   const byGroup = new Map<OverlapGroup, { label: string; subscriptions: Subscription[] }>();
   for (const s of active) {
     if (alreadyDuplicateFlagged.has(s.id)) continue;
     const resolved = resolveOverlapGroup(s.name);
     if (!resolved) continue;
-    const entry = byGroup.get(resolved.group) ?? { label: resolved.label, subscriptions: [] };
-    entry.subscriptions.push(s);
-    byGroup.set(resolved.group, entry);
+    const entry = byGroup.get(resolved.group);
+    if (entry) {
+      if (entry.subscriptions[0].currency !== s.currency) continue;
+      entry.subscriptions.push(s);
+    } else {
+      byGroup.set(resolved.group, { label: resolved.label, subscriptions: [s] });
+    }
   }
   return Array.from(byGroup.entries())
     .filter(([, entry]) => entry.subscriptions.length >= 2)
@@ -273,6 +294,7 @@ export function computeFunctionalOverlapGroups(active: Subscription[]): Function
       label: entry.label,
       subscriptions: entry.subscriptions,
       combinedMonthlyCents: entry.subscriptions.reduce((sum, s) => sum + monthlyCents(s.amountCents, s.billingCycle), 0),
+      currency: entry.subscriptions[0].currency,
     }));
 }
 
@@ -280,6 +302,7 @@ export interface SmallSubscriptionsCluster {
   subscriptions: Subscription[];
   combinedMonthlyCents: number;
   shareOfTotal: number;
+  currency: string;
 }
 
 // "Death by a thousand cuts": no single subscription here is expensive
@@ -301,8 +324,21 @@ const SMALL_RELATIVE_TO_MEAN = 0.5;
 const SMALL_CLUSTER_MIN_COUNT = 3;
 const SMALL_CLUSTER_MIN_SHARE = 0.2;
 
+// The portfolio "mean" this whole detector is built on has one denominator
+// currency by construction — the same "never sum across currencies" rule
+// computeRealizedSavings/sumMonthlyCentsIfSingleCurrency already enforce
+// elsewhere (caught in CodeRabbit review; this function was the one place
+// it had been missed, since a mixed-currency portfolio is rare but the
+// schema's free-text currency column genuinely allows it). A currency-mixed
+// active list bails out entirely — a per-currency partition would be
+// possible, but "several small subscriptions add up" is a whole-portfolio
+// pattern; a partial, single-currency-subset version of it isn't the same
+// finding, and this rule already stays silent on plenty of real portfolios
+// (< 4 active, no lopsided mix) rather than force an answer.
 export function findSmallSubscriptionsCluster(active: Subscription[]): SmallSubscriptionsCluster | null {
   if (active.length < 4) return null; // need enough subscriptions for "small vs. typical" to mean anything
+  const currency = active[0].currency;
+  if (!active.every((s) => s.currency === currency)) return null;
   const withCosts = active.map((s) => ({ sub: s, monthly: monthlyCents(s.amountCents, s.billingCycle) }));
   const total = withCosts.reduce((sum, c) => sum + c.monthly, 0);
   if (total === 0) return null;
@@ -316,6 +352,7 @@ export function findSmallSubscriptionsCluster(active: Subscription[]): SmallSubs
     subscriptions: small.map((c) => c.sub).sort((a, b) => monthlyCents(a.amountCents, a.billingCycle) - monthlyCents(b.amountCents, b.billingCycle)),
     combinedMonthlyCents,
     shareOfTotal,
+    currency,
   };
 }
 
@@ -334,7 +371,7 @@ export function findSmallSubscriptionsCluster(active: Subscription[]): SmallSubs
 // codebase (e.g. health.duplicates vs. savings.ts's duplicate block)
 // already writes distinct descriptions for the same underlying fact.
 export function smallSubscriptionsClusterTitle(cluster: SmallSubscriptionsCluster): string {
-  return `${cluster.subscriptions.length} smaller subscriptions add up to ${formatCents(cluster.combinedMonthlyCents)}/mo`;
+  return `${cluster.subscriptions.length} smaller subscriptions add up to ${formatCents(cluster.combinedMonthlyCents, cluster.currency)}/mo`;
 }
 
 // Sums each *distinct* subscription's cost at most once, even if it turns
