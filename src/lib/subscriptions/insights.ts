@@ -1,6 +1,7 @@
 import type { Subscription } from "@/lib/db/schema";
 import { monthlyCents, formatCents } from "./money";
 import { CATEGORY_LABELS } from "./labels";
+import { resolveOverlapGroup, type OverlapGroup } from "@/lib/imports/merchant-normalizer";
 
 export type InsightType =
   | "expensive_category"
@@ -195,24 +196,145 @@ export function computeInsights(allSubscriptions: Subscription[]): ComputedInsig
       }
     }
   }
-  const byCategoryCount = new Map<Subscription["category"], Subscription[]>();
-  for (const s of active) {
-    byCategoryCount.set(s.category, [...(byCategoryCount.get(s.category) ?? []), s]);
-  }
-  for (const [category, subs] of byCategoryCount) {
-    if (subs.length >= 2) {
-      const combined = subs.reduce((sum, s) => sum + monthlyCents(s.amountCents, s.billingCycle), 0);
-      insights.push({
-        type: "possible_overlap",
-        title: `${subs.length} active ${CATEGORY_LABELS[category].toLowerCase()} subscriptions`,
-        description: `${subs.map((s) => s.name).join(", ")}: ${formatCents(combined)}/mo combined. Worth checking for overlap.`,
-        severity: "info",
-        subscriptionIds: subs.map((s) => s.id),
-      });
-    }
+  // Category alone is too broad a redundancy signal — Adobe and Dropbox are
+  // both "software" but solve nothing similar; this used to flag any 2+
+  // subscriptions sharing a raw category. Now only fires when 2+ active
+  // subscriptions resolve to the SAME curated functional-overlap group (see
+  // computeFunctionalOverlapGroups below) — evidence that they actually
+  // solve the same problem, not just belong to the same broad bucket.
+  for (const { label, subscriptions: subs, combinedMonthlyCents } of computeFunctionalOverlapGroups(active)) {
+    insights.push({
+      type: "possible_overlap",
+      title: subs.map((s) => s.name).join(" + "),
+      description: `${subs.map((s) => s.name).join(", ")} all provide ${label.toLowerCase()} functionality: ${formatCents(combinedMonthlyCents)}/mo combined. Worth checking whether you need all of them.`,
+      severity: "info",
+      subscriptionIds: subs.map((s) => s.id),
+    });
   }
 
   return insights;
+}
+
+export interface FunctionalOverlapGroupResult {
+  group: OverlapGroup;
+  label: string;
+  subscriptions: Subscription[];
+  combinedMonthlyCents: number;
+}
+
+// Groups active subscriptions by genuine functional-overlap group — see
+// merchant-normalizer.ts's resolveOverlapGroup/OVERLAP_GROUP_LABELS for the
+// curated group definitions and the evidence bar for including a merchant in
+// one. Category answers "what kind of service"; this answers "does this
+// solve the same problem as another subscription I'm paying for" — a
+// materially stricter question. A subscription whose name doesn't resolve
+// to a known merchant with an assigned group contributes nothing here — no
+// group is the honest default, never a guess.
+//
+// Lives here (not savings.ts, the more obvious "savings-adjacent logic"
+// home) specifically so savings.ts can import it — savings.ts already
+// depends on this file for normalizeName/namesLikelyMatch, and the reverse
+// import would be circular.
+//
+// Excludes the redundant half of any confirmed-duplicate pair (same
+// identity rule as this file's own possible_overlap duplicate check just
+// above): two near-identical names resolving to the same merchant — e.g.
+// "Netflix" and "Netflix Premium" — would otherwise ALSO satisfy "2+
+// subscriptions in the video_streaming group" and get flagged a second
+// time as a functional_overlap, a confusing double-signal for one piece of
+// evidence (and, in health.ts, a double penalty to the same redundancy
+// dimension for the same underlying finding). The kept half stays eligible,
+// so a genuinely distinct third service (e.g. Disney+ alongside a Netflix/
+// Netflix Premium duplicate pair) still surfaces as a real overlap.
+export function computeFunctionalOverlapGroups(active: Subscription[]): FunctionalOverlapGroupResult[] {
+  const normalizedNames = active.map((s) => normalizeName(s.name));
+  const alreadyDuplicateFlagged = new Set<string>();
+  for (let i = 0; i < active.length; i++) {
+    for (let j = i + 1; j < active.length; j++) {
+      if (namesLikelyMatch(normalizedNames[i], normalizedNames[j])) {
+        alreadyDuplicateFlagged.add(active[j].id);
+      }
+    }
+  }
+
+  const byGroup = new Map<OverlapGroup, { label: string; subscriptions: Subscription[] }>();
+  for (const s of active) {
+    if (alreadyDuplicateFlagged.has(s.id)) continue;
+    const resolved = resolveOverlapGroup(s.name);
+    if (!resolved) continue;
+    const entry = byGroup.get(resolved.group) ?? { label: resolved.label, subscriptions: [] };
+    entry.subscriptions.push(s);
+    byGroup.set(resolved.group, entry);
+  }
+  return Array.from(byGroup.entries())
+    .filter(([, entry]) => entry.subscriptions.length >= 2)
+    .map(([group, entry]) => ({
+      group,
+      label: entry.label,
+      subscriptions: entry.subscriptions,
+      combinedMonthlyCents: entry.subscriptions.reduce((sum, s) => sum + monthlyCents(s.amountCents, s.billingCycle), 0),
+    }));
+}
+
+export interface SmallSubscriptionsCluster {
+  subscriptions: Subscription[];
+  combinedMonthlyCents: number;
+  shareOfTotal: number;
+}
+
+// "Death by a thousand cuts": no single subscription here is expensive
+// enough to trip health.expensive_outliers, but several individually-cheap
+// ones can still add up to a real, easy-to-miss chunk of monthly spend.
+// Deliberately relative, not a fixed dollar bar (Phase 8's own instruction:
+// prefer comparisons to the user's own portfolio over an arbitrary
+// universal threshold): "small" means at or below half this account's own
+// mean monthly cost, so an evenly-priced portfolio (nothing meaningfully
+// cheaper than anything else) can never trigger this by construction — it
+// only fires when the data actually shows a lopsided mix of a few pricier
+// subscriptions and several notably cheaper ones whose sum is still
+// material (>=20% of total spend). Both the "small" bar and the 20% floor
+// are needed: without the first, this would just re-describe "the cheaper
+// half of any portfolio" (mathematically ~50% by construction for any
+// distribution); without the second, 3 tiny subscriptions summing to 2% of
+// spend would count as "adding up," which they don't.
+const SMALL_RELATIVE_TO_MEAN = 0.5;
+const SMALL_CLUSTER_MIN_COUNT = 3;
+const SMALL_CLUSTER_MIN_SHARE = 0.2;
+
+export function findSmallSubscriptionsCluster(active: Subscription[]): SmallSubscriptionsCluster | null {
+  if (active.length < 4) return null; // need enough subscriptions for "small vs. typical" to mean anything
+  const withCosts = active.map((s) => ({ sub: s, monthly: monthlyCents(s.amountCents, s.billingCycle) }));
+  const total = withCosts.reduce((sum, c) => sum + c.monthly, 0);
+  if (total === 0) return null;
+  const mean = total / withCosts.length;
+  const small = withCosts.filter((c) => c.monthly > 0 && c.monthly <= mean * SMALL_RELATIVE_TO_MEAN);
+  if (small.length < SMALL_CLUSTER_MIN_COUNT) return null;
+  const combinedMonthlyCents = small.reduce((sum, c) => sum + c.monthly, 0);
+  const shareOfTotal = combinedMonthlyCents / total;
+  if (shareOfTotal < SMALL_CLUSTER_MIN_SHARE) return null;
+  return {
+    subscriptions: small.map((c) => c.sub).sort((a, b) => monthlyCents(a.amountCents, a.billingCycle) - monthlyCents(b.amountCents, b.billingCycle)),
+    combinedMonthlyCents,
+    shareOfTotal,
+  };
+}
+
+// Shared title formatting for the two independent callers that both
+// surface a SmallSubscriptionsCluster as a user-facing finding — health.ts
+// (the health-score dimension) and savings.ts (the Smart Savings
+// opportunity card). Extracted after local-council review (Simplicity
+// lens) found the exact same title template copy-pasted in both files,
+// with the *description* directly below it already unintentionally
+// drifted apart between the two (savings.ts had gained an extra sentence
+// health.ts never got). The title has no reason to ever differ between the
+// two surfaces, so it's a shared fact now, not two copies to keep in sync
+// by hand; the descriptions stay separately authored on purpose — the
+// health-score summary is deliberately terser than the savings card's
+// fuller, action-oriented copy, matching how every other rule pair in this
+// codebase (e.g. health.duplicates vs. savings.ts's duplicate block)
+// already writes distinct descriptions for the same underlying fact.
+export function smallSubscriptionsClusterTitle(cluster: SmallSubscriptionsCluster): string {
+  return `${cluster.subscriptions.length} smaller subscriptions add up to ${formatCents(cluster.combinedMonthlyCents)}/mo`;
 }
 
 // Sums each *distinct* subscription's cost at most once, even if it turns

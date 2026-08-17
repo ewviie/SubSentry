@@ -148,7 +148,7 @@ export function runInsightsEngine(subscriptions: Subscription[], isPremium: bool
     )
     .slice(0, 3);
 
-  const savingsRecommendations = computeSavingsRecommendations(subscriptions);
+  const savingsRecommendations = computeSavingsRecommendations(subscriptions, today);
   const monthlySavingsCents = computeTotalPotentialSavingsMonthlyCents(savingsRecommendations);
 
   // The score's own job is "unrealized savings as a share of spend" — that's

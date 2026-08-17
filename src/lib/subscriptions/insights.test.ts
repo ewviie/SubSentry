@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeInsights, computePotentialSavingsMonthlyCents } from "./insights";
+import { computeInsights, computePotentialSavingsMonthlyCents, findSmallSubscriptionsCluster, smallSubscriptionsClusterTitle } from "./insights";
 import type { Subscription } from "@/lib/db/schema";
 
 let nextId = 1;
@@ -101,13 +101,54 @@ describe("computeInsights", () => {
     expect(insights.some((i) => i.type === "possible_overlap" && i.title.includes("duplicate"))).toBe(false);
   });
 
-  it("flags multiple active subscriptions in the same category as possible overlap", () => {
+  it("flags a genuine functional-overlap group (not just shared category) as possible overlap", () => {
     const subs = [
       sub({ name: "Netflix", category: "streaming" }),
       sub({ name: "Disney+", category: "streaming" }),
     ];
     const insights = computeInsights(subs);
-    expect(insights.some((i) => i.type === "possible_overlap" && i.title.includes("streaming"))).toBe(true);
+    expect(
+      insights.some((i) => i.type === "possible_overlap" && i.description.toLowerCase().includes("video streaming")),
+    ).toBe(true);
+  });
+
+  // Regression: raw category equality used to be sufficient to flag
+  // "possible overlap" ("N active software subscriptions") even when the
+  // subscriptions share nothing but a broad category — GitHub (code
+  // hosting) and Zoom (video calls) are both "software" but solve
+  // completely different problems.
+  it("does not flag two subscriptions sharing only a broad category with no genuine functional overlap", () => {
+    const subs = [sub({ name: "GitHub", category: "software" }), sub({ name: "Zoom", category: "software" })];
+    const insights = computeInsights(subs);
+    expect(insights.some((i) => i.type === "possible_overlap")).toBe(false);
+  });
+
+  // Regression (CodeRabbit finding): "Netflix" and "Netflix Premium" match
+  // as a confirmed duplicate (near-identical name) AND both resolve to the
+  // same video_streaming merchant group — without the exclusion, this used
+  // to produce TWO possible_overlap insights for the exact same pair (one
+  // "duplicate", one "functional overlap"), a confusing double-signal for
+  // one piece of evidence.
+  it("does not double-flag a confirmed duplicate pair as a separate functional overlap", () => {
+    const subs = [sub({ name: "Netflix", category: "streaming" }), sub({ name: "Netflix Premium", category: "streaming" })];
+    const insights = computeInsights(subs);
+    const overlapInsights = insights.filter((i) => i.type === "possible_overlap");
+    expect(overlapInsights).toHaveLength(1);
+    expect(overlapInsights[0].description.toLowerCase()).toContain("same service");
+  });
+
+  it("still surfaces a genuine third-service overlap alongside a duplicate pair", () => {
+    const subs = [
+      sub({ name: "Netflix", category: "streaming" }),
+      sub({ name: "Netflix Premium", category: "streaming" }),
+      sub({ name: "Disney+", category: "streaming" }),
+    ];
+    const insights = computeInsights(subs);
+    const overlapInsights = insights.filter((i) => i.type === "possible_overlap");
+    // One for the Netflix/Netflix Premium duplicate, one for Netflix +
+    // Disney+ genuinely being distinct competing services.
+    expect(overlapInsights).toHaveLength(2);
+    expect(overlapInsights.some((i) => i.description.toLowerCase().includes("video streaming"))).toBe(true);
   });
 });
 
@@ -151,3 +192,108 @@ describe("computePotentialSavingsMonthlyCents", () => {
 
 // computeHealthScore moved to src/lib/insights-engine/health-score.test.ts,
 // covering the new weighted rule-based scorer.
+
+describe("findSmallSubscriptionsCluster", () => {
+  it("null with fewer than 4 active subscriptions", () => {
+    const subs = [
+      sub({ name: "A", amountCents: 5000 }),
+      sub({ name: "B", amountCents: 100 }),
+      sub({ name: "C", amountCents: 100 }),
+    ];
+    expect(findSmallSubscriptionsCluster(subs)).toBeNull();
+  });
+
+  // Regression: an evenly-priced portfolio must never trigger this — the
+  // "small" bar is relative to the account's own mean, so nothing here can
+  // even qualify as small in the first place.
+  it("null when every subscription costs about the same (nothing is 'small' relative to the mean)", () => {
+    const subs = [
+      sub({ name: "A", amountCents: 1000 }),
+      sub({ name: "B", amountCents: 1000 }),
+      sub({ name: "C", amountCents: 1000 }),
+      sub({ name: "D", amountCents: 1000 }),
+    ];
+    expect(findSmallSubscriptionsCluster(subs)).toBeNull();
+  });
+
+  it("null when fewer than 3 subscriptions qualify as small", () => {
+    const subs = [
+      sub({ name: "Big1", amountCents: 5000 }),
+      sub({ name: "Big2", amountCents: 5000 }),
+      sub({ name: "Big3", amountCents: 5000 }),
+      sub({ name: "Small", amountCents: 100 }),
+    ];
+    // total = 15100, mean = 3775, half-mean = 1887.5 -> Small (100)
+    // qualifies as "small", but it's alone — the 3-subscription count
+    // floor isn't met, regardless of what its share would have been.
+    expect(findSmallSubscriptionsCluster(subs)).toBeNull();
+  });
+
+  // A weaker version of this fixture (Dominant=8000 instead of 3000) drops
+  // the small trio's share to ~10%, below the 20% floor, and correctly
+  // returns null — the amount below is deliberately tuned to clear it.
+  it("flags 3+ small subscriptions whose combined cost is a material share of spend", () => {
+    const subs = [
+      sub({ name: "Dominant", amountCents: 3000 }),
+      sub({ name: "Tiny1", amountCents: 300 }),
+      sub({ name: "Tiny2", amountCents: 300 }),
+      sub({ name: "Tiny3", amountCents: 300 }),
+    ];
+    // total=3900, mean=975, half-mean=487.5 -> all 3 Tiny ones qualify.
+    // combined=900, share=900/3900≈23% — clears the 20% floor.
+    const result = findSmallSubscriptionsCluster(subs);
+    expect(result).not.toBeNull();
+    expect(result!.subscriptions).toHaveLength(3);
+    expect(result!.subscriptions.every((s) => s.name.startsWith("Tiny"))).toBe(true);
+    expect(result!.combinedMonthlyCents).toBe(900);
+    expect(result!.shareOfTotal).toBeCloseTo(900 / 3900, 5);
+  });
+
+  it("null when small subscriptions add up to too small a share of total spend", () => {
+    const subs = [
+      sub({ name: "Dominant", amountCents: 8000 }),
+      sub({ name: "Tiny1", amountCents: 300 }),
+      sub({ name: "Tiny2", amountCents: 300 }),
+      sub({ name: "Tiny3", amountCents: 300 }),
+    ];
+    // total=8900, share=900/8900≈10.1% — below the 20% floor.
+    expect(findSmallSubscriptionsCluster(subs)).toBeNull();
+  });
+
+  // Double-counting guard: a subscription flagged here must never also be
+  // eligible for health.expensive_outliers — "small" (<=50% of mean) and
+  // "outlier" (>=200% of mean) can never overlap for the same subscription
+  // by construction, but this proves it holds for the actual boundary math
+  // rather than just asserting it in a comment.
+  it("never includes a subscription that could also qualify as an expensive outlier", () => {
+    const subs2 = [
+      sub({ name: "Dominant", amountCents: 3000 }),
+      sub({ name: "Tiny1", amountCents: 300 }),
+      sub({ name: "Tiny2", amountCents: 300 }),
+      sub({ name: "Tiny3", amountCents: 300 }),
+    ];
+    const total = 3000 + 300 * 3;
+    const mean = total / 4;
+    const result = findSmallSubscriptionsCluster(subs2)!;
+    for (const s of result.subscriptions) {
+      expect(s.amountCents).toBeLessThanOrEqual(mean * 2); // never an outlier-magnitude cost
+    }
+  });
+});
+
+// Regression (local-council review, Simplicity lens): health.ts and
+// savings.ts used to each carry their own byte-for-byte-identical copy of
+// this title string, and the description one line below had already
+// silently drifted between the two. A shared formatter makes that specific
+// drift impossible — both callers render the exact same title.
+describe("smallSubscriptionsClusterTitle", () => {
+  it("formats the count and combined monthly cost", () => {
+    const cluster = findSmallSubscriptionsCluster([
+      sub({ name: "Dominant", amountCents: 3000 }),
+      sub({ name: "Tiny1", amountCents: 300 }),
+      sub({ name: "Tiny2", amountCents: 300 }),
+      sub({ name: "Tiny3", amountCents: 300 }),
+    ])!;
+    expect(smallSubscriptionsClusterTitle(cluster)).toBe("3 smaller subscriptions add up to $9.00/mo");
+  });
+});

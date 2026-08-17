@@ -1,8 +1,7 @@
 import type { AIProvider, ParsedSubscriptionResult } from "./provider";
 import type { ComputedInsight } from "@/lib/subscriptions/insights";
-import { normalizeName } from "@/lib/subscriptions/insights";
 import { CATEGORIES } from "@/lib/subscriptions/validation";
-import { KNOWN_MERCHANTS } from "@/lib/imports/merchant-normalizer";
+import { matchKnownMerchantInText } from "@/lib/imports/merchant-normalizer";
 
 const CURRENCY_SYMBOLS: Record<string, string> = { "£": "gbp", "€": "eur", "$": "usd", "¥": "jpy" };
 const CYCLE_KEYWORDS: Record<string, ParsedSubscriptionResult["billingCycle"]> = {
@@ -13,23 +12,6 @@ const CYCLE_KEYWORDS: Record<string, ParsedSubscriptionResult["billingCycle"]> =
   week: "weekly",
   quarter: "quarterly",
 };
-
-// Longest alias first: KNOWN_MERCHANTS has both a generic "apple" (bank
-// descriptors like "APL*ITUNES.COM/BILL" can't tell Apple Music from
-// iCloud+, so that entry is deliberately generic — see
-// merchant-normalizer.ts) and a specific "applemusic" — checking longest
-// first means typing "Apple Music" in quick-add matches the specific
-// streaming entry, not the shorter, less-precise "apple" one.
-//
-// >= 4 chars only — same gate merchant-normalizer.ts's own substring
-// matcher uses (see its FUZZY_MIN_KEY_LENGTH/length-4 comment): a short
-// alias like "max" (HBO's rebrand) is a real merchant but too short to
-// safely substring-match against a whole free-typed sentence rather than
-// a terse bank descriptor — "my max budget this month" would otherwise
-// false-positive as HBO Max.
-const KNOWN_MERCHANT_ALIASES = Object.keys(KNOWN_MERCHANTS)
-  .filter((alias) => alias.length >= 4)
-  .sort((a, b) => b.length - a.length);
 
 // Categories/services genuinely absent from KNOWN_MERCHANTS (which is
 // curated for bank-descriptor matching — brand names, not generic word
@@ -73,10 +55,9 @@ export class DemoProvider implements AIProvider {
     // (KNOWN_MERCHANTS, shared with the CSV/bank-import path) wasn't
     // checked. Real curated data first, generic keyword fallback second.
     let category: (typeof CATEGORIES)[number] = "other";
-    const normalizedText = normalizeName(text);
-    const matchedAlias = KNOWN_MERCHANT_ALIASES.find((alias) => normalizedText.includes(alias));
-    if (matchedAlias) {
-      category = KNOWN_MERCHANTS[matchedAlias].category;
+    const knownMerchant = matchKnownMerchantInText(text);
+    if (knownMerchant) {
+      category = knownMerchant.category;
     } else {
       for (const [cat, keywords] of Object.entries(FALLBACK_CATEGORY_KEYWORDS)) {
         if (keywords?.some((k) => lower.includes(k))) {

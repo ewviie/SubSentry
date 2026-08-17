@@ -2,7 +2,7 @@
 
 import { motion, useReducedMotion } from "framer-motion";
 import { cn } from "@/lib/utils";
-import type { HealthScoreResult } from "@/lib/insights-engine";
+import type { HealthScoreResult, HealthRating } from "@/lib/insights-engine";
 import { springSmooth } from "@/lib/motion";
 import { CountUp } from "@/components/ui/count-up";
 
@@ -12,10 +12,16 @@ import { CountUp } from "@/components/ui/count-up";
 // success case (matches how it's used for savings/premium everywhere
 // else), destructive matches how overdue renewals are already flagged,
 // and the middle ground stays neutral rather than an arbitrary amber.
-function tierColor(score: number): { stroke: string; text: string } {
-  if (score >= 90) return { stroke: "stroke-emerald", text: "text-emerald" };
-  if (score >= 50) return { stroke: "stroke-foreground/70", text: "text-foreground" };
-  return { stroke: "stroke-destructive", text: "text-destructive" };
+//
+// Derived from `rating`, not a second copy of health-score.ts's own score
+// thresholds — this component used to re-derive its own 90/50 cutoffs
+// independently, which drifted out of sync the moment health-score.ts's
+// bands were recalibrated (Phase 7.2). One source of truth for "what score
+// counts as which tier" now lives only in health-score.ts.
+function tierColor(rating: HealthRating): { stroke: string; text: string } {
+  if (rating === "Excellent" || rating === "Very Good") return { stroke: "stroke-emerald", text: "text-emerald" };
+  if (rating === "Needs Attention") return { stroke: "stroke-destructive", text: "text-destructive" };
+  return { stroke: "stroke-foreground/70", text: "text-foreground" };
 }
 
 export function HealthScoreGauge({
@@ -30,7 +36,7 @@ export function HealthScoreGauge({
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference * (1 - result.score / 100);
-  const { stroke, text } = tierColor(result.score);
+  const { stroke, text } = tierColor(result.rating);
 
   return (
     <div className="relative inline-flex items-center justify-center" style={{ width: size, height: size }}>

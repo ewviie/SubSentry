@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizeMerchant } from "./merchant-normalizer";
+import { normalizeMerchant, matchKnownMerchantInText } from "./merchant-normalizer";
 
 describe("normalizeMerchant", () => {
   it.each([
@@ -140,5 +140,39 @@ describe("normalizeMerchant", () => {
     const result = normalizeMerchant("Wax");
     expect(result.isKnownSubscriptionMerchant).toBe(false);
     expect(result.displayName).toBe("Wax");
+  });
+});
+
+// Regression coverage for a Phase 7.2 classification bug: quick-add with a
+// real ANTHROPIC_API_KEY configured could return "Spotify Premium" ->
+// category "software" instead of "streaming" — the model had no grounding
+// in KNOWN_MERCHANTS (unlike CSV/bank import and the keyless demo parser),
+// so it guessed from the bare category enum alone. matchKnownMerchantInText
+// is the shared fix both quick-add code paths now consult first.
+describe("matchKnownMerchantInText", () => {
+  it.each([
+    ["Spotify Premium $9.99/mo", "streaming"],
+    ["Netflix $15.49 monthly", "streaming"],
+    ["Disney+ 7.99 a month", "streaming"],
+    ["Apple Music 10.99/mo", "streaming"],
+    ["YouTube Premium $13.99", "streaming"],
+    ["Amazon Prime 139/yr", "other"],
+    ["Adobe Creative Cloud $54.99/mo", "software"],
+    ["Canva Pro 12.99 monthly", "software"],
+    ["Dropbox Plus $11.99", "software"],
+    ["Google One 100gb $1.99/mo", "software"],
+    ["Microsoft 365 $6.99 a month", "software"],
+  ] as const)("classifies %s as %s, matching CSV import's classification for the same merchant", (text, expectedCategory) => {
+    expect(matchKnownMerchantInText(text)?.category).toBe(expectedCategory);
+  });
+
+  it("returns null for a genuinely unknown service, never a guessed category", () => {
+    expect(matchKnownMerchantInText("My Local Yoga Studio $40/mo")).toBeNull();
+  });
+
+  it("matches embedded inside a full free-typed sentence, not just a bare merchant name", () => {
+    const result = matchKnownMerchantInText("just signed up for spotify premium, renews the 5th at $10.99");
+    expect(result?.displayName).toBe("Spotify");
+    expect(result?.category).toBe("streaming");
   });
 });

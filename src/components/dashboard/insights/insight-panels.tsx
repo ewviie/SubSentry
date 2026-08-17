@@ -195,8 +195,21 @@ export function SavingsOpportunitiesCard({ output }: { output: EngineOutput }) {
   );
 }
 
+// Status dot color/label pairs — color alone never carries the meaning
+// (see InsightsSection's identical "text + color, never color alone"
+// convention elsewhere on this dashboard); the word is always visible too.
+const DIMENSION_STATUS_STYLE: Record<string, { dot: string; label: string }> = {
+  good: { dot: "bg-emerald", label: "Good" },
+  watch: { dot: "bg-chart-4", label: "Worth a look" },
+  attention: { dot: "bg-destructive", label: "Needs attention" },
+  // Zero rules in this dimension had enough evidence to form an opinion
+  // (e.g. one brand-new subscription) — a neutral gray, not a false "good".
+  unknown: { dot: "bg-muted-foreground/40", label: "Not enough data" },
+};
+
 export function ScoreBreakdownCard({ output }: { output: EngineOutput }) {
   if (!output.healthScore) return null;
+  const { dimensions, confidence } = output.healthScore;
   return (
     <Card size="sm" className="shadow-elevation-low">
       <CardHeader>
@@ -204,24 +217,39 @@ export function ScoreBreakdownCard({ output }: { output: EngineOutput }) {
           <Gauge className="size-4 text-muted-foreground" aria-hidden="true" />
           How your score was calculated
         </CardTitle>
+        {/* Only shown for medium/low — high confidence needs no caveat (see
+            health-score.ts's computeConfidence). Never invents a "we've
+            been watching for months" claim; just an honest read of how much
+            data actually backs this score. */}
+        {confidence.level !== "high" ? (
+          <CardDescription>
+            Confidence: {confidence.level === "medium" ? "Medium" : "Low"} — {confidence.reason}
+          </CardDescription>
+        ) : null}
       </CardHeader>
-      <CardContent className="space-y-1.5">
-        {output.healthScore.breakdown.map((entry) => (
-          <div key={entry.label} className="flex items-baseline gap-2 text-sm">
-            <span
-              className={
-                entry.delta > 0
-                  ? "w-10 shrink-0 font-mono font-medium text-emerald"
-                  : entry.delta < 0
-                    ? "w-10 shrink-0 font-mono font-medium text-destructive"
-                    : "w-10 shrink-0 font-mono font-medium text-muted-foreground"
-              }
-            >
-              {entry.delta > 0 ? `+${entry.delta}` : entry.delta}
-            </span>
-            <span className="text-muted-foreground">{entry.label}</span>
-          </div>
-        ))}
+      <CardContent className="space-y-3">
+        {dimensions.map((dimension) => {
+          const style = DIMENSION_STATUS_STYLE[dimension.status];
+          return (
+            <div key={dimension.key} className="flex items-start gap-2.5 text-sm">
+              <span className={`mt-1.5 size-2 shrink-0 rounded-full ${style.dot}`} aria-hidden="true" />
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-baseline gap-x-1.5">
+                  <span className="font-medium">{dimension.label}</span>
+                  <span className="text-xs text-muted-foreground">({style.label})</span>
+                </div>
+                <p className="text-muted-foreground">{dimension.summary}</p>
+                {/* Only a dimension with real negative evidence ever has
+                    one (see health-score.ts's recommendedActionFor) — a
+                    clean dimension shows just the summary above, never a
+                    manufactured task. */}
+                {dimension.recommendedAction ? (
+                  <p className="mt-0.5 font-medium text-foreground">{dimension.recommendedAction}</p>
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
       </CardContent>
     </Card>
   );

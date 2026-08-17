@@ -10,23 +10,37 @@ test.afterAll(async () => {
 // Phase 6 fix: the dashboard's "Quick wins" card could never render for any
 // user, under any data — its source array was always empty (see engine.ts's
 // own comment on the fix). This proves the fix end-to-end through the real
-// dashboard, not just the unit-level engine output: 3 subscriptions renewing
-// within the same 7-day window trip health.renewal_clustering's warning
-// branch, which should now surface as an actionable Quick win with a link to
-// one of the actual subscriptions.
+// dashboard, not just the unit-level engine output.
+//
+// Phase 7.2 update: 3 renewals landing the same week used to be sufficient
+// on its own to trip health.renewal_clustering's warning branch. That rule
+// no longer exists — clustering by count alone is neutral, zero-impact
+// context now (health.renewal_risk; see that rule's own comment on why
+// "several renewals land the same week" isn't automatically unhealthy).
+// Only a genuine cash-flow spike — the amount due well above typical
+// monthly spend — still warrants a warning, so this fixture now clusters a
+// large yearly charge alongside the normal monthly baseline instead of 3
+// equally-cheap renewals, to keep proving Quick wins renders a real warning
+// end-to-end.
 test.describe("dashboard — Quick wins", () => {
-  test("a real renewal-clustering finding renders with a working Review link", async ({ browser }) => {
+  test("a real renewal-spike finding renders with a working Review link", async ({ browser }) => {
     const user = await createVerifiedUser(browser, "e2e-quick-wins");
 
+    // health.renewal_risk's spike check looks at what's actually due within
+    // the next 30 days of *today* (not just clustered relative to each
+    // other) — unlike the old clustering-only rule, these need to be real
+    // near-term dates, not an arbitrary future placeholder.
+    const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+
     const clusteredIds: string[] = [];
-    for (const [name, date] of [
-      ["Netflix", "2099-03-01"],
-      ["Spotify", "2099-03-02"],
-      ["Hulu", "2099-03-03"],
+    for (const [name, date, amount, billingCycle] of [
+      ["Netflix", day(2), "9.99", "monthly"],
+      ["Spotify", day(3), "9.99", "monthly"],
+      ["Big Annual Plan", day(4), "300.00", "yearly"],
     ] as const) {
       const created = await apiFetch(user.page, "/api/subscriptions", {
         method: "POST",
-        body: { name, amount: "9.99", billingCycle: "monthly", nextRenewalDate: date },
+        body: { name, amount, billingCycle, nextRenewalDate: date },
       });
       expect(created.status).toBe(201);
       clusteredIds.push((created.body as { subscription: { id: string } }).subscription.id);
@@ -34,19 +48,20 @@ test.describe("dashboard — Quick wins", () => {
 
     await user.page.goto("/dashboard");
     await expect(user.page.getByText("Quick wins")).toBeVisible();
-    // The same finding text is also the health-score breakdown's label
-    // (ScoreBreakdownCard renders it in a <span>) — scope to the <p> tag
-    // QuickWinsCard actually uses so this doesn't hit a strict-mode
-    // multiple-match error against that unrelated card.
-    await expect(user.page.locator("p", { hasText: "3 renewals land the same week" })).toBeVisible();
+    // The same finding text renders twice on this dashboard — once as
+    // QuickWinsCard's own title (<p class="font-medium">) and once as a
+    // warnings list's description elsewhere — so this scopes to the first
+    // match (QuickWinsCard's, first in DOM order) rather than hitting a
+    // Playwright strict-mode multiple-match error.
+    await expect(user.page.locator("p", { hasText: "More than usual is due in the next 30 days" }).first()).toBeVisible();
 
     // Rendered as a Button (role=button), same polymorphic render-prop
     // pattern documented in renewal-reminders.spec.ts — not a link role.
-    // exact: true matters here too — Savings opportunities' own "Review
-    // {name}" buttons (e.g. "Review Netflix") would otherwise also match a
-    // substring search for "Review", and this dashboard state (3
-    // subscriptions in the same default "other" category) triggers that
-    // card too.
+    // exact: true guards against Savings opportunities' own "Review {name}"
+    // buttons (e.g. "Review Netflix") also matching a substring search for
+    // "Review" — this fixture's 3 distinct, non-duplicate, non-overlapping
+    // names shouldn't trigger that card, but exact matching keeps this
+    // assertion correct even if that changes.
     const reviewButton = user.page.getByRole("button", { name: "Review", exact: true });
     await expect(reviewButton).toBeVisible();
     await reviewButton.click();

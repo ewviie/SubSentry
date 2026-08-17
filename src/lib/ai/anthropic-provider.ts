@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { AIProvider, ParsedSubscriptionResult } from "./provider";
 import type { ComputedInsight } from "@/lib/subscriptions/insights";
 import { BILLING_CYCLES, CATEGORIES } from "@/lib/subscriptions/validation";
+import { matchKnownMerchantInText } from "@/lib/imports/merchant-normalizer";
 
 const MODEL = process.env.AI_MODEL || "claude-opus-4-8";
 
@@ -102,12 +103,27 @@ export class AnthropicProvider implements AIProvider {
     }
 
     const input = toolUse.input as Record<string, unknown>;
+    const name = String(input.name ?? "");
+
+    // The model has no grounding beyond the bare category enum (no
+    // description, no merchant examples — see parseTool above) and can
+    // genuinely guess wrong for a real, curated merchant (observed: "Spotify
+    // Premium" -> "software" instead of "streaming", the exact input the
+    // keyless DemoProvider and CSV/bank import both already classify
+    // correctly via KNOWN_MERCHANTS). Matching against the *original* typed
+    // text, not just the model's extracted name, catches cases where the
+    // model's own name extraction already dropped/altered the merchant
+    // token. A known-merchant match always overrides the model's guess —
+    // same "real curated data first" rule demo-provider.ts already follows
+    // — so quick-add classifies identically regardless of whether AI is
+    // configured.
+    const knownMerchant = matchKnownMerchantInText(text) ?? matchKnownMerchantInText(name);
     return {
-      name: String(input.name ?? ""),
+      name,
       amount: String(input.amount ?? "0"),
       currency: String(input.currency ?? "usd").toLowerCase(),
       billingCycle: input.billingCycle as ParsedSubscriptionResult["billingCycle"],
-      category: input.category as ParsedSubscriptionResult["category"],
+      category: knownMerchant?.category ?? (input.category as ParsedSubscriptionResult["category"]),
       nextRenewalDate: typeof input.nextRenewalDate === "string" ? input.nextRenewalDate : null,
       confidence: (input.confidence as ParsedSubscriptionResult["confidence"]) ?? "low",
     };

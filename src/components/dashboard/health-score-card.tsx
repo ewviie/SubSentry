@@ -34,6 +34,15 @@ export function HealthScoreCard({ result }: { result: HealthScoreResult }) {
           <div className="min-w-0 shrink-0">
             <p className="text-sm font-medium text-muted-foreground">Subscription health</p>
             <p className="mt-0.5 font-heading text-lg font-semibold">{result.rating}</p>
+            {/* Honest data-availability caveat, not false precision — see
+                health-score.ts's computeConfidence. Only shown when it's
+                not "high," same threshold ScoreBreakdownCard's fuller
+                explanation uses further down the dashboard. */}
+            {result.confidence.level !== "high" ? (
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {result.confidence.level === "medium" ? "Medium" : "Low"} confidence — {result.confidence.reason}
+              </p>
+            ) : null}
             <ul className="mt-2 space-y-1">
               {result.breakdown.slice(0, 3).map((entry) => (
                 <li className="flex items-baseline gap-1.5 text-xs" key={entry.label}>

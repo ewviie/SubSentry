@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import { Copy, Layers, X } from "lucide-react";
+import { Copy, Layers, Coins, X } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,7 @@ import {
 } from "@/lib/subscriptions/savings";
 import { fadeQuick } from "@/lib/motion";
 
-const TYPE_ICON = { duplicate: Copy, category_concentration: Layers } as const;
+const TYPE_ICON = { duplicate: Copy, functional_overlap: Layers, small_subscriptions: Coins } as const;
 
 export function SavingsRecommendationCard({ recommendation }: { recommendation: SavingsRecommendation }) {
   const [dismissed, setDismissed] = useState(false);

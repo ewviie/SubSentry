@@ -154,4 +154,26 @@ export function canceledCount(all: Subscription[]): number {
   return all.filter((s) => s.status === "canceled").length;
 }
 
+// An active subscription whose renewal date has already passed — real
+// bookkeeping neglect (the date was never updated after a renewal, or the
+// service was actually canceled elsewhere and SubSentry was never told),
+// not a guess about usage this app has no data to support.
+export function overdueRenewals(active: Subscription[], todayIso: string): Subscription[] {
+  return active.filter((s) => s.nextRenewalDate < todayIso);
+}
+
+// category="other" is the schema's default (see schema.ts) and, for a
+// *manually* entered subscription, can be a genuine, deliberate choice —
+// not every subscription fits streaming/software/fitness/etc., and a user
+// picking "Other" themselves isn't a data-quality problem. For an
+// *imported* row (csv_import, ai_parsed, apple_import, ...), "other" means
+// something different: the classifier that ran over it (merchant-
+// normalizer.ts's KNOWN_MERCHANTS table) didn't recognize the merchant at
+// all, so the category is really "unknown," not "deliberately other." This
+// only counts that second, honest-gap case — see health.ts's
+// uncategorizedImports rule for why that distinction matters.
+export function uncategorizedImports(active: Subscription[]): Subscription[] {
+  return active.filter((s) => s.category === "other" && s.source !== "manual");
+}
+
 export const ctxTotal = (ctx: EngineContext) => monthlyTotalCents(ctx.active);

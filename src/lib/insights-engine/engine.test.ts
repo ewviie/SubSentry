@@ -33,11 +33,11 @@ describe("runInsightsEngine", () => {
   });
 
   it("quick wins are capped at 3", () => {
-    // 5 subscriptions all renewing the same day (default nextRenewalDate)
-    // trips health.renewal_clustering's warning branch every time — a
-    // single always-firing source is enough to prove the cap on its own,
-    // without needing 3 independently-tuned warning conditions.
-    const subs = Array.from({ length: 5 }, () => sub({}));
+    // 5 overdue active subscriptions trips health.overdue_renewals' warning
+    // branch every time — a single always-firing source is enough to prove
+    // the cap on its own, without needing 3 independently-tuned warning
+    // conditions.
+    const subs = Array.from({ length: 5 }, () => sub({ nextRenewalDate: "2020-01-01" }));
     const output = runInsightsEngine(subs, false);
     expect(output.quickWins.length).toBeLessThanOrEqual(3);
   });
@@ -50,15 +50,18 @@ describe("runInsightsEngine", () => {
   // threaded into the general `results` pool. See engine.ts's own comment
   // on the fix.
   it("quick wins surfaces a real health-rule finding, not just duplicates", () => {
-    // 3 subscriptions all renewing on the same default date trips
-    // health.renewal_clustering's warning branch (findRenewalCluster
-    // requires 3+ renewals within a 7-day window — identical dates satisfy
-    // that trivially). None of these are near-duplicate names, so this
-    // exercises a genuinely different signal than the duplicate-detection
-    // tests elsewhere in this file.
-    const subs = [sub({ name: "Netflix" }), sub({ name: "Spotify" }), sub({ name: "Hulu" })];
+    // 3 subscriptions with a renewal date already in the past trips
+    // health.overdue_renewals' warning branch — real bookkeeping-neglect
+    // evidence, not a guess. None of these are near-duplicate names, so
+    // this exercises a genuinely different signal than the
+    // duplicate-detection tests elsewhere in this file.
+    const subs = [
+      sub({ name: "Netflix", nextRenewalDate: "2020-01-01" }),
+      sub({ name: "Spotify", nextRenewalDate: "2020-01-01" }),
+      sub({ name: "Hulu", nextRenewalDate: "2020-01-01" }),
+    ];
     const output = runInsightsEngine(subs, false);
-    expect(output.quickWins.some((w) => w.ruleId === "health.renewal_clustering")).toBe(true);
+    expect(output.quickWins.some((w) => w.ruleId === "health.overdue_renewals")).toBe(true);
   });
 
   it("quick wins never includes health.duplicates' warning branch — Savings opportunities already covers it", () => {

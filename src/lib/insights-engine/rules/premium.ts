@@ -1,8 +1,14 @@
 import { CATEGORY_LABELS } from "@/lib/subscriptions/labels";
 import { formatCents } from "@/lib/subscriptions/money";
-import type { Subscription } from "@/lib/db/schema";
 import type { EngineContext, InsightRule } from "../types";
-import { monthlyTotalCents, findDuplicates, categoryConcentration, findRenewalCluster, findExpensiveOutliers, recentGrowthCount } from "../signals";
+import {
+  monthlyTotalCents,
+  findDuplicates,
+  categoryConcentration,
+  findRenewalCluster,
+  findExpensiveOutliers,
+  recentGrowthCount,
+} from "../signals";
 
 // Conservative, clearly-labeled assumption (not a real per-provider
 // discount, which this app has no way to know) — every string this
@@ -50,29 +56,19 @@ const annualSwitchSavings: InsightRule = {
   },
 };
 
-const functionalOverlap: InsightRule = {
-  id: "premium.functional_overlap",
-  name: "AI Spending Coach: functional overlap",
-  description: "3+ active subscriptions in the same category — a stricter, count-based signal than the free concentration check.",
-  severity: "info",
-  category: "optimization",
-  premium: true,
-  evaluate(ctx: EngineContext) {
-    const byCategory = new Map<Subscription["category"], Subscription[]>();
-    for (const s of ctx.active) byCategory.set(s.category, [...(byCategory.get(s.category) ?? []), s]);
-    const [category, subs] = Array.from(byCategory.entries()).sort((a, b) => b[1].length - a[1].length)[0] ?? [];
-    if (!category || subs.length < 3) return null;
-    return {
-      ruleId: this.id,
-      title: `${subs.length} subscriptions overlap in ${CATEGORY_LABELS[category].toLowerCase()}`,
-      description: `${subs.map((s) => s.name).join(", ")} all serve a similar purpose — worth checking if you need all of them.`,
-      severity: "info",
-      category: "optimization",
-      premium: true,
-      subscriptionIds: subs.map((s) => s.id),
-    };
-  },
-};
+// A premium.functional_overlap rule used to live here, independently
+// deriving "3+ subscriptions share a category" as a stricter, count-gated
+// version of the free-tier concentration check. Removed rather than fixed
+// in place: once category-equality-as-overlap was replaced (see
+// lib/subscriptions/savings.ts's computeFunctionalOverlapGroups) with real
+// functional-group evidence, the free-tier SavingsOpportunitiesCard already
+// surfaces every genuine 2+ overlap accurately — a premium-only rule
+// re-deriving the same evidence at an arbitrary "3+" threshold would either
+// (a) silently duplicate a finding SavingsOpportunitiesCard already shows,
+// reproducing the exact double-render problem an earlier phase already
+// fixed for a different pair of cards, or (b) keep an arbitrary count gate
+// with no evidence behind the specific number "3" — the kind of threshold
+// this phase's audit was asked to remove, not relocate.
 
 function riskResult(rule: InsightRule, title: string, description: string, severity: "warning" | "critical", subscriptionIds: string[]) {
   return {
@@ -109,41 +105,60 @@ const riskHighConcentration: InsightRule = {
   },
 };
 
+// Count alone ("4+ renewals the same week") used to be sufficient to claim
+// "a real cash-flow crunch risk" — a manufactured alarm with no relation to
+// whether the actual dollar amount is unusual. 4 renewals of $2 each is not
+// a cash-flow risk; 2 renewals totaling $2,000 against a normal $200/mo
+// baseline is. This now requires the same genuine-spike evidence as
+// health.ts's renewal_risk rule (the clustered amount well above typical
+// monthly spend) before using "critical"/risk language at all — clustering
+// with no such evidence isn't surfaced by this rule (it's still visible,
+// proportionally, via the free-tier renewal_risk health rule).
 const riskRenewalCluster: InsightRule = {
   id: "premium.risk_renewal_cluster",
-  name: "Risk: many renewals in a short period",
-  description: "4+ renewals landing within the same 7-day window.",
+  name: "Risk: renewal cluster with an unusually large amount due",
+  description: "A renewal cluster whose total is well above typical monthly spend — not clustering by count alone.",
   severity: "critical",
   category: "usage",
   premium: true,
   evaluate(ctx: EngineContext) {
     const cluster = findRenewalCluster(ctx.active, ctx.todayIso);
     if (!cluster || cluster.subscriptionIds.length < 4) return null;
+    const monthly = monthlyTotalCents(ctx.active);
+    if (monthly === 0 || cluster.totalCents <= monthly * 1.5) return null;
     return riskResult(
       riskRenewalCluster,
-      `${cluster.subscriptionIds.length} renewals due the same week`,
-      `Starting ${cluster.windowStartIso}, ${formatCents(cluster.totalCents)} is due within 7 days — a real cash-flow crunch risk.`,
+      `${cluster.subscriptionIds.length} renewals due the same week, well above typical spend`,
+      `Starting ${cluster.windowStartIso}, ${formatCents(cluster.totalCents)} is due within 7 days — notably more than your typical month.`,
       "critical",
       cluster.subscriptionIds,
     );
   },
 };
 
+// This app only knows when a subscription row was *added to SubSentry*
+// (createdAt), not when it actually started — a bulk CSV import of years of
+// bank history adds all of them "in the last 30 days" by this measure. The
+// old copy ("Subscription count is growing rapidly... before recurring
+// cost compounds further") claimed a real spending-growth trend this data
+// can't prove. Reworded to state only what's actually known, and dropped
+// from "critical" to "warning" — a big batch of adds is worth a look, not
+// alarm, especially since it's very plausibly just an import.
 const riskRapidGrowth: InsightRule = {
   id: "premium.risk_rapid_growth",
-  name: "Risk: rapidly increasing subscription count",
-  description: "5+ new subscriptions added in the last 30 days.",
-  severity: "critical",
+  name: "A large batch of subscriptions added recently",
+  description: "10+ subscriptions added to SubSentry in the last 30 days — reflects import/entry activity, not proven spending growth.",
+  severity: "warning",
   category: "usage",
   premium: true,
   evaluate(ctx: EngineContext) {
     const added = recentGrowthCount(ctx.active, ctx.todayIso);
-    if (added < 5) return null;
+    if (added < 10) return null;
     return riskResult(
       riskRapidGrowth,
-      "Subscription count is growing rapidly",
-      `${added} subscriptions added in the last 30 days — review before recurring cost compounds further.`,
-      "critical",
+      `${added} subscriptions were added to SubSentry in the last 30 days`,
+      "This reflects when they were added here, not necessarily when they actually started — worth a skim if that many are genuinely new.",
+      "warning",
       [],
     );
   },
@@ -193,7 +208,6 @@ const riskExpensiveDuplicate: InsightRule = {
 
 export const PREMIUM_RULES: InsightRule[] = [
   annualSwitchSavings,
-  functionalOverlap,
   riskHighConcentration,
   riskRenewalCluster,
   riskRapidGrowth,
