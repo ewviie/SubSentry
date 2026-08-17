@@ -1,6 +1,6 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { subscriptions, type Subscription, type User } from "@/lib/db/schema";
+import { subscriptions, subscriptionPriceHistory, type Subscription, type SubscriptionPriceHistory, type User } from "@/lib/db/schema";
 import { MAX_ACTIVE_SUBSCRIPTIONS, hasReachedSubscriptionLimit } from "@/lib/billing/plan";
 import { amountStringToCents, monthlyCents } from "./money";
 import type { SubscriptionInput, SubscriptionUpdate } from "./validation";
@@ -41,6 +41,27 @@ export async function getSubscription(
   return row;
 }
 
+// One "initial" price-history row per newly-created subscription, however
+// it was created (manual, quick-add, import) — the starting point every
+// later `source: "user_edit"` row (see updateSubscription) is compared
+// against. A plain values-builder (not a query itself) so every create path
+// below can `.insert(subscriptionPriceHistory).values(...)` with whichever
+// executor it's already using (bare `db`, or an open `tx` for the
+// limit-checked paths) — a subscription must never exist with zero
+// price-history rows once these paths return, so the limit-checked paths
+// write this inside the same advisory-locked transaction as the row it
+// describes, not as a separate follow-up query that could fail
+// independently.
+function initialPriceHistoryValues(userId: string, rows: Subscription[]) {
+  return rows.map((row) => ({
+    subscriptionId: row.id,
+    userId,
+    amountCents: row.amountCents,
+    currency: row.currency,
+    source: "initial" as const,
+  }));
+}
+
 // No limit check, no lock — a plain single-row insert. Used directly only
 // by test setup (queries.idor.test.ts), which needs a row to exist without
 // caring about plan/ceiling rules. Production write paths go through
@@ -54,6 +75,7 @@ export async function createSubscription(
     .insert(subscriptions)
     .values(subscriptionInsertValues(userId, input, source))
     .returning();
+  await db.insert(subscriptionPriceHistory).values(initialPriceHistoryValues(userId, [row]));
   return row;
 }
 
@@ -108,6 +130,7 @@ export async function createSubscriptionWithLimitCheck(
       .insert(subscriptions)
       .values(subscriptionInsertValues(userId, input, source))
       .returning();
+    await tx.insert(subscriptionPriceHistory).values(initialPriceHistoryValues(userId, [row]));
     return { kind: "created", subscription: row };
   });
 }
@@ -138,6 +161,9 @@ export async function createSubscriptionsBulkWithLimitCheck(
       .insert(subscriptions)
       .values(rows.map((input) => subscriptionInsertValues(userId, input, source)))
       .returning();
+    if (created.length > 0) {
+      await tx.insert(subscriptionPriceHistory).values(initialPriceHistoryValues(userId, created));
+    }
     return { kind: "created", subscriptions: created };
   });
 }
@@ -158,12 +184,50 @@ export async function updateSubscription(
   if (input.status !== undefined) values.status = input.status;
   if (input.notes !== undefined) values.notes = input.notes || null;
 
+  // Only read the pre-edit row when this edit could possibly touch price —
+  // the common edits (rename, recategorize, change renewal date, bulk
+  // status change) never do, and shouldn't pay for an extra lookup they
+  // have no use for. `before` is what a new price-history row gets compared
+  // against below, not what gets written — a request that resubmits the
+  // same amount (the edit form always sends the full current value, even
+  // for fields the user didn't touch) must not manufacture a "price
+  // changed" row for a price that didn't.
+  const touchesPrice = input.amount !== undefined || input.currency !== undefined;
+  const before = touchesPrice ? await getSubscription(userId, id) : undefined;
+
   const [row] = await db
     .update(subscriptions)
     .set(values)
     .where(and(eq(subscriptions.userId, userId), eq(subscriptions.id, id)))
     .returning();
+
+  if (row && before && (row.amountCents !== before.amountCents || row.currency !== before.currency)) {
+    await db.insert(subscriptionPriceHistory).values({
+      subscriptionId: row.id,
+      userId,
+      amountCents: row.amountCents,
+      currency: row.currency,
+      source: "user_edit",
+    });
+  }
+
   return row;
+}
+
+// Ascending by observedAt — callers read this as a timeline (see
+// subscription-summary.tsx's price-change section), oldest first, same
+// order a chart or "here's what changed, in order" list would want. Scoped
+// by both userId and subscriptionId directly on this table's own columns
+// (see schema.ts's comment on why userId is denormalized here) rather than
+// via a join through `subscriptions` — one indexed lookup, no way to leak
+// another user's price history even if the subscriptionId argument were
+// somehow wrong.
+export async function getPriceHistory(userId: string, subscriptionId: string): Promise<SubscriptionPriceHistory[]> {
+  return db
+    .select()
+    .from(subscriptionPriceHistory)
+    .where(and(eq(subscriptionPriceHistory.userId, userId), eq(subscriptionPriceHistory.subscriptionId, subscriptionId)))
+    .orderBy(asc(subscriptionPriceHistory.observedAt));
 }
 
 export async function deleteSubscription(userId: string, id: string): Promise<boolean> {

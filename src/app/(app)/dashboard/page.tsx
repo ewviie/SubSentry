@@ -18,6 +18,7 @@ import { computeInsights, computePotentialSavingsMonthlyCents } from "@/lib/subs
 import { getUpgradeUrl, hasPaidAccess } from "@/lib/billing/plan";
 import { runInsightsEngine } from "@/lib/insights-engine";
 import {
+  BiggestOpportunityCard,
   QuickWinsCard,
   PositiveHabitsCard,
   RenewalForecastCard,
@@ -116,6 +117,12 @@ export default async function DashboardPage() {
             healthScore={healthScore}
           />
         ) : null}
+        {/* North Star Part 3 ("what's my biggest opportunity?") gets a
+            direct, single-answer spot right under the hero row — before
+            this, the closest thing was scrolling all the way to Savings
+            opportunities/Quick wins further down and inferring it yourself
+            from two separate ranked lists. */}
+        {hasActive ? <BiggestOpportunityCard output={engineOutput} /> : null}
         {/* Was 4 stat cards; down to 2. "Annual spend" was Monthly × 12 with
             no information Monthly didn't already imply — folded into
             Monthly's own caption instead of a whole separate box. "Next

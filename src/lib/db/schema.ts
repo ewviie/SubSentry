@@ -369,6 +369,59 @@ export const stripeEvents = pgTable("stripe_events", {
   receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Phase 9: price-history capture. Phase 7.2/8's own DETECTION_MATRIX.md
+// documented this as the #1 known limitation — `subscriptions.amountCents`
+// only ever stores the current price, so "did this go up?" was previously
+// unanswerable from stored data. This table starts real, incremental
+// capture from the moment this ships: one row per price this subscription
+// has actually had, written at creation ("initial") and again only when an
+// edit genuinely changes amountCents or currency ("user_edit") — see
+// queries.ts's updateSubscription for the exact change-detection. It does
+// NOT backfill fabricated history for existing subscriptions (there is no
+// real prior price to record — only what's in front of us right now), so a
+// subscription created before this migration starts with a single
+// "initial" row the first time it's read after deploy, same as a brand-new
+// one. Detection built on top of this (e.g. subscription-summary.tsx's
+// price-change section) is honestly gated on having 2+ distinct-amount
+// rows for real, not on this table merely existing.
+//
+// userId is denormalized here rather than reached via subscriptionId ->
+// subscriptions.userId, same tradeoff renewalReminders documents on itself
+// above: this table exists to answer "this user's price history for this
+// subscription," so storing the owner directly keeps every read trivially
+// scoped (no join needed to enforce ownership) at the cost of one extra
+// column kept in sync by construction (set once, at insert, never updated
+// — a subscription's owner never changes after creation).
+export const subscriptionPriceHistory = pgTable(
+  "subscription_price_history",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    subscriptionId: uuid("subscription_id")
+      .notNull()
+      .references(() => subscriptions.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    amountCents: integer("amount_cents").notNull(),
+    currency: text("currency").notNull(),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull().defaultNow(),
+    // "initial": the row written the moment a subscription is created (by
+    // any source — manual, import, quick-add). "user_edit": amountCents or
+    // currency genuinely changed via the edit form/API. Deliberately no
+    // "import_update" — no current import path ever updates an existing
+    // subscription's price (imports only ever create new rows; see
+    // api/imports/confirm/route.ts), so that source would never be
+    // producible and would be exactly the kind of unused, misleading enum
+    // value the rest of this schema avoids. Add it when a real write path
+    // needs it, not before.
+    source: text("source", { enum: ["initial", "user_edit"] }).notNull(),
+  },
+  (table) => [
+    index("subscription_price_history_subscription_idx").on(table.subscriptionId, table.observedAt),
+    index("subscription_price_history_user_idx").on(table.userId),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
@@ -385,3 +438,5 @@ export type CheckoutSession = typeof checkoutSessions.$inferSelect;
 export type LoginAttempt = typeof loginAttempts.$inferSelect;
 export type EmailVerificationToken = typeof emailVerificationTokens.$inferSelect;
 export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
+export type SubscriptionPriceHistory = typeof subscriptionPriceHistory.$inferSelect;
+export type NewSubscriptionPriceHistory = typeof subscriptionPriceHistory.$inferInsert;

@@ -1,4 +1,5 @@
 import { formatCents, monthlyCents } from "@/lib/subscriptions/money";
+import { cn } from "@/lib/utils";
 import type { Subscription } from "@/lib/db/schema";
 
 const CYCLE_DAYS: Record<Subscription["billingCycle"], number> = {
@@ -27,7 +28,21 @@ function estimatePaidCents(subscription: Subscription): number {
   return periodsElapsed * subscription.amountCents;
 }
 
-export function SubscriptionSummary({ subscription }: { subscription: Subscription }) {
+// sharePercent: this subscription's annual cost as a share of the user's
+// total active annual spend — null (not 0) whenever that comparison
+// wouldn't mean anything: a paused/canceled subscription isn't part of
+// current spend to take a share of, and a portfolio with $0 active spend
+// has no denominator. Computed by the caller (subscriptions/[id]/page.tsx),
+// not here — this component already doesn't fetch or aggregate anything
+// beyond the one subscription it's given, and computing "total spend"
+// needs every other active subscription, not just this one.
+export function SubscriptionSummary({
+  subscription,
+  sharePercent = null,
+}: {
+  subscription: Subscription;
+  sharePercent?: number | null;
+}) {
   const estimatedPaidCents = estimatePaidCents(subscription);
   const annualCents = monthlyCents(subscription.amountCents, subscription.billingCycle) * 12;
 
@@ -38,7 +53,12 @@ export function SubscriptionSummary({ subscription }: { subscription: Subscripti
   });
 
   return (
-    <div className="grid grid-cols-1 gap-3 border-b border-border pb-4 text-sm sm:grid-cols-3">
+    <div
+      className={cn(
+        "grid grid-cols-1 gap-3 border-b border-border pb-4 text-sm sm:grid-cols-3",
+        sharePercent !== null && "sm:grid-cols-4",
+      )}
+    >
       <div>
         <p className="text-muted-foreground">Est. paid since tracking</p>
         <p className="font-mono font-medium tabular-nums">{formatCents(estimatedPaidCents, subscription.currency)}</p>
@@ -52,6 +72,13 @@ export function SubscriptionSummary({ subscription }: { subscription: Subscripti
         <p className="text-muted-foreground">Next renewal</p>
         <p className="font-medium">{subscription.nextRenewalDate}</p>
       </div>
+      {sharePercent !== null ? (
+        <div>
+          <p className="text-muted-foreground">Share of your spend</p>
+          <p className="font-mono font-medium tabular-nums">{sharePercent}%</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">of total annual spend</p>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -1,0 +1,135 @@
+import { describe, it, expect } from "vitest";
+import { computeBiggestOpportunity } from "./biggest-opportunity";
+import type { EngineOutput } from "./engine";
+import type { SavingsRecommendation } from "@/lib/subscriptions/savings";
+import type { InsightResult } from "./types";
+
+// Every candidate computeBiggestOpportunity considers is read straight off
+// EngineOutput (see that file's own header comment) — these fixtures build
+// only the slices each test actually needs, with the rest at honest,
+// inert defaults (0 subscriptions, no findings), so a test failure always
+// traces back to the one field it deliberately set.
+function baseOutput(): EngineOutput {
+  return {
+    healthScore: null,
+    optimizationScore: null,
+    stats: {
+      totalMonthlyCents: 0,
+      totalYearlyCents: 0,
+      activeCount: 0,
+      newSubscriptionsThisMonth: 0,
+      longestRunning: null,
+      spendBySource: [],
+      billingCycles: [],
+      topMerchants: [],
+    },
+    renewalForecast: {
+      nextRenewal: null,
+      totalDueNext30DaysCents: 0,
+      busiestPeriod: null,
+      largestUpcomingPayment: null,
+    },
+    positive: [],
+    warnings: [],
+    optimization: [],
+    quickWins: [],
+    premiumInsights: [],
+    savingsForecast: { recommendations: [], monthlySavingsCents: 0, yearlySavingsCents: 0 },
+    estimatedYearlySavingsCents: 0,
+  };
+}
+
+function savingsRec(overrides: Partial<SavingsRecommendation>): SavingsRecommendation {
+  return {
+    id: "rec-1",
+    type: "duplicate",
+    title: "Netflix and Netflix Premium look like duplicates",
+    description: "These look like the same service.",
+    actionLabel: "Review Netflix Premium",
+    monthlySavingsCents: 0,
+    impactCents: 0,
+    evidenceTier: "confirmed",
+    urgencyDays: 10,
+    targetSubscriptionId: "sub-target",
+    involvedSubscriptionIds: ["sub-a", "sub-target"],
+    ...overrides,
+  };
+}
+
+function renewalRiskWarning(): InsightResult {
+  return {
+    ruleId: "health.renewal_risk",
+    title: "More than usual is due in the next 30 days",
+    description: "$300.00 is due in the next 30 days, above your typical monthly spend.",
+    severity: "warning",
+    category: "health",
+    premium: false,
+    subscriptionIds: [],
+    dimension: "renewal",
+    scoreImpact: -11,
+  };
+}
+
+describe("computeBiggestOpportunity", () => {
+  it("returns null when there's nothing to show (no savings, no risk, no spend)", () => {
+    expect(computeBiggestOpportunity(baseOutput())).toBeNull();
+  });
+
+  it("picks a 'high' priority confirmed saving over a renewal-risk spike", () => {
+    const output = baseOutput();
+    output.savingsForecast.recommendations = [savingsRec({ evidenceTier: "confirmed", impactCents: 2000 })];
+    output.warnings = [renewalRiskWarning()];
+
+    const result = computeBiggestOpportunity(output);
+    expect(result?.kind).toBe("savings");
+    expect(result?.subscriptionId).toBe("sub-target");
+  });
+
+  it("picks the renewal-risk spike when no 'high' priority saving exists", () => {
+    const output = baseOutput();
+    output.warnings = [renewalRiskWarning()];
+    output.renewalForecast.totalDueNext30DaysCents = 30000;
+
+    const result = computeBiggestOpportunity(output);
+    expect(result?.kind).toBe("renewal_risk");
+    expect(result?.amountCents).toBe(30000);
+    expect(result?.amountLabel).toBe("due in 30 days");
+  });
+
+  it("picks a 'medium' priority saving when no spike and no 'high' saving exist", () => {
+    const output = baseOutput();
+    // review-tier, below the $15 high-impact threshold gate on evidenceTier
+    // "confirmed" but above it on impact -> medium (see savings.ts's
+    // getSavingsPriority for the exact rule this exercises).
+    output.savingsForecast.recommendations = [
+      savingsRec({ type: "functional_overlap", evidenceTier: "review", impactCents: 2000, monthlySavingsCents: 0 }),
+    ];
+
+    const result = computeBiggestOpportunity(output);
+    expect(result?.kind).toBe("savings");
+  });
+
+  it("falls back to the highest-cost active subscription when no savings or risk exist", () => {
+    const output = baseOutput();
+    output.stats.topMerchants = [{ id: "sub-adobe", name: "Adobe Creative Cloud", category: "software", annualCents: 71988 }];
+    output.stats.totalYearlyCents = 211729;
+
+    const result = computeBiggestOpportunity(output);
+    expect(result).toMatchObject({
+      kind: "expensive_subscription",
+      title: "Adobe Creative Cloud",
+      subscriptionId: "sub-adobe",
+      amountCents: 71988,
+      amountLabel: "/yr",
+    });
+    expect(result?.description).toContain("34%");
+  });
+
+  it("returns null when there's spend data but it sums to zero", () => {
+    const output = baseOutput();
+    output.stats.topMerchants = [{ id: "sub-free", name: "Free Tier Thing", category: "other", annualCents: 0 }];
+    output.stats.totalYearlyCents = 0;
+
+    expect(computeBiggestOpportunity(output)).toBeNull();
+  });
+});

@@ -71,6 +71,13 @@
       "when": 1786479704924,
       "tag": "0009_yielding_skin",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786929959388,
+      "tag": "0010_low_annihilus",
+      "breakpoints": true
     }
   ]
 }

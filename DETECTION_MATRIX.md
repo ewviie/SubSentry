@@ -149,11 +149,43 @@ duplicates, overlap, or spending-outlier detection:
 
 ---
 
+## Phase 9 additions
+
+- **Price history** (`subscription_price_history` table, `src/lib/db/schema.ts`):
+  the #1 limitation this doc used to list below is now partially closed.
+  One row is written at creation (`source: "initial"`) and again only when
+  `amountCents`/`currency` genuinely change via an edit (`source:
+  "user_edit"`, see `queries.ts`'s `updateSubscription`) — no fabricated
+  backfill for pre-existing subscriptions. `src/lib/subscriptions/
+  price-history.ts`'s `computeLatestPriceChange` reads this honestly:
+  null until a subscription has 2+ distinct-amount rows, so a subscription
+  edited for the first time after this shipped is the first to ever show a
+  real "Price increased X%" note (`subscription-summary.tsx`'s detail
+  page). **Not** wired into the health score or Smart Savings yet —
+  scoped to the subscription detail page only, on purpose, until real
+  price-change history actually accumulates across the user base.
+- **Biggest opportunity** (`src/lib/insights-engine/biggest-opportunity.ts`):
+  a single, ranked pick — confirmed high-impact saving > genuine renewal
+  cash-flow spike > medium-impact saving > highest-cost subscription
+  fallback — surfaced on the dashboard right under the hero row. Reads
+  every candidate from `EngineOutput` fields other cards already compute;
+  adds no new detection.
+- **Subscription detail page** (`subscriptions/[id]/page.tsx`): now also
+  shows share of total annual spend, the same health-rule findings that
+  reference this subscription elsewhere on the dashboard ("why SubSentry
+  flagged it"), a recommended action where one exists, related
+  subscriptions from the same functional-overlap group, and the price
+  history note above.
+
 ## Known limitations (not built this phase — see Phase 7.2 and Phase 8 final reports for full reasoning)
 
-- **Price-change detection**: infeasible — `subscriptions` stores only the
-  current `amountCents`, no history table. Would require new persistence,
-  explicitly out of scope.
+- **Price-change detection in the health score / Smart Savings**: the
+  underlying history now exists (see "Phase 9 additions" above), but
+  scoring/savings integration is deliberately deferred until there's
+  enough real multi-row history across users to weight it responsibly —
+  building that on day-one-empty history would be exactly the
+  "manufacture a signal before the evidence exists" failure mode this doc
+  exists to prevent.
 - **"What changed since I last checked"**: infeasible to build honestly
   without persisted snapshots (health score history, opportunity
   appeared/disappeared tracking). `createdAt`/`updatedAt` alone can't

@@ -1,11 +1,13 @@
 import Link from "next/link";
-import { Lock, Sparkles, ShieldCheck, TrendingUp, CalendarClock, AlertTriangle, Gauge } from "lucide-react";
+import type { Route } from "next";
+import { Lock, Sparkles, ShieldCheck, TrendingUp, CalendarClock, AlertTriangle, Gauge, Target } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RenewalsList } from "@/components/dashboard/renewals-list";
 import { formatCents } from "@/lib/subscriptions/money";
 import { getSavingsPriority, PRIORITY_LABEL, PRIORITY_BADGE_VARIANT } from "@/lib/subscriptions/savings";
+import { computeBiggestOpportunity } from "@/lib/insights-engine/biggest-opportunity";
 import type { EngineOutput } from "@/lib/insights-engine";
 import type { Subscription } from "@/lib/db/schema";
 
@@ -140,6 +142,62 @@ export function RenewalForecastCard({ output, renewals }: { output: EngineOutput
           </div>
         </div>
         <RenewalsList renewals={renewals} />
+      </CardContent>
+    </Card>
+  );
+}
+
+// North Star Part 9: a single, committed answer to "what's my biggest
+// opportunity," distinct from Savings opportunities/Quick wins' ranked
+// lists just below it — this is the one thing to look at if a user reads
+// nothing else on the page. Same emerald "this matters" treatment
+// SavingsCard's hasSavings state uses, deliberately: it's the same register
+// of "real money, worth your attention," just for a single spotlighted
+// finding instead of a running total. See computeBiggestOpportunity's own
+// header comment for the exact ranking (confirmed saving > cash-flow risk >
+// reviewable saving > highest-cost subscription) — every candidate there is
+// read from `output`, not recomputed, so this can never disagree with what
+// the rest of the dashboard already says about the same fact.
+export function BiggestOpportunityCard({ output }: { output: EngineOutput }) {
+  const opportunity = computeBiggestOpportunity(output);
+  if (!opportunity) return null;
+  return (
+    <Card className="relative overflow-hidden border-emerald/30 shadow-elevation-glow ring-1 ring-emerald/20">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+          <Target className="size-4 text-emerald" aria-hidden="true" />
+          Your biggest opportunity
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="break-words font-heading text-xl font-semibold">{opportunity.title}</p>
+            <p className="mt-1 text-sm text-muted-foreground">{opportunity.description}</p>
+          </div>
+          {/* 0 only for the (currently unreachable, since renewal_risk always
+              sets a real renewalForecast total) defensive case — guarded
+              anyway rather than ever rendering "$0.00" as if it meant
+              something. */}
+          {opportunity.amountCents > 0 ? (
+            <p className="shrink-0 font-mono text-2xl font-semibold tabular-nums text-emerald">
+              {formatCents(opportunity.amountCents)}
+              <span className="ml-1 text-sm font-normal text-muted-foreground">{opportunity.amountLabel}</span>
+            </p>
+          ) : null}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          <span className="font-medium">Why we&apos;re showing this:</span> {opportunity.whyShown}
+        </p>
+        <Button
+          size="sm"
+          variant="outline"
+          className="w-fit"
+          render={<Link href={opportunity.actionHref as Route} />}
+          nativeButton={false}
+        >
+          {opportunity.actionLabel} →
+        </Button>
       </CardContent>
     </Card>
   );
