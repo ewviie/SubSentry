@@ -83,6 +83,25 @@ describe.skipIf(!hasDb)("subscription price history", () => {
     expect(history[1]).toMatchObject({ amountCents: 1500, source: "user_edit" });
   });
 
+  it("updateSubscription with only a billing-cycle change writes a 'user_edit' row (amountCents unchanged)", async () => {
+    const sub = await queries.createSubscription(userA, {
+      name: "Cycle Change Test",
+      amount: "12.00",
+      currency: "usd",
+      billingCycle: "monthly",
+      category: "other",
+      nextRenewalDate: "2099-01-01",
+      status: "active",
+    });
+
+    await queries.updateSubscription(userA, sub.id, { billingCycle: "yearly" });
+
+    const history = await queries.getPriceHistory(userA, sub.id);
+    expect(history).toHaveLength(2);
+    expect(history[0]).toMatchObject({ billingCycle: "monthly", source: "initial" });
+    expect(history[1]).toMatchObject({ amountCents: 1200, billingCycle: "yearly", source: "user_edit" });
+  });
+
   it("updateSubscription resubmitting the same amount writes no new row", async () => {
     const sub = await queries.createSubscription(userA, {
       name: "No-Op Amount Test",

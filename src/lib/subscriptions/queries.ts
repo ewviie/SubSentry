@@ -57,6 +57,7 @@ function initialPriceHistoryValues(userId: string, rows: Subscription[]) {
     subscriptionId: row.id,
     userId,
     amountCents: row.amountCents,
+    billingCycle: row.billingCycle,
     currency: row.currency,
     source: "initial" as const,
   }));
@@ -184,34 +185,67 @@ export async function updateSubscription(
   if (input.status !== undefined) values.status = input.status;
   if (input.notes !== undefined) values.notes = input.notes || null;
 
-  // Only read the pre-edit row when this edit could possibly touch price —
-  // the common edits (rename, recategorize, change renewal date, bulk
-  // status change) never do, and shouldn't pay for an extra lookup they
-  // have no use for. `before` is what a new price-history row gets compared
-  // against below, not what gets written — a request that resubmits the
-  // same amount (the edit form always sends the full current value, even
-  // for fields the user didn't touch) must not manufacture a "price
-  // changed" row for a price that didn't.
-  const touchesPrice = input.amount !== undefined || input.currency !== undefined;
-  const before = touchesPrice ? await getSubscription(userId, id) : undefined;
-
-  const [row] = await db
-    .update(subscriptions)
-    .set(values)
-    .where(and(eq(subscriptions.userId, userId), eq(subscriptions.id, id)))
-    .returning();
-
-  if (row && before && (row.amountCents !== before.amountCents || row.currency !== before.currency)) {
-    await db.insert(subscriptionPriceHistory).values({
-      subscriptionId: row.id,
-      userId,
-      amountCents: row.amountCents,
-      currency: row.currency,
-      source: "user_edit",
-    });
+  // Only pay for the extra read/transaction when this edit could possibly
+  // touch price — the common edits (rename, recategorize, change renewal
+  // date, bulk status change) never do. billingCycle is included, not just
+  // amount/currency: amountCents is unit-less on its own ("$10" means
+  // something very different at monthly vs. yearly cadence), so a
+  // cycle-only change (same amountCents, different cadence) is just as
+  // real a price change as an amount edit — see schema.ts's
+  // subscriptionPriceHistory comment.
+  const touchesPrice = input.amount !== undefined || input.currency !== undefined || input.billingCycle !== undefined;
+  if (!touchesPrice) {
+    const [row] = await db
+      .update(subscriptions)
+      .set(values)
+      .where(and(eq(subscriptions.userId, userId), eq(subscriptions.id, id)))
+      .returning();
+    return row;
   }
 
-  return row;
+  // The pre-edit read, the update, and the price-history insert all run
+  // inside one advisory-locked transaction — same per-user lock
+  // createSubscriptionWithLimitCheck uses, for the same reason: without it,
+  // two concurrent price-touching edits for the same subscription could
+  // each read the same "before" row ahead of either update committing,
+  // letting one edit's price-history row compare against a value that was
+  // never actually current (a lost-update race on the *comparison*, not on
+  // the subscriptions row itself, which Postgres's own UPDATE already
+  // serializes correctly). Caught in CodeRabbit review.
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${userId}))`);
+
+    const [before] = await tx
+      .select()
+      .from(subscriptions)
+      .where(and(eq(subscriptions.userId, userId), eq(subscriptions.id, id)))
+      .limit(1);
+
+    const [row] = await tx
+      .update(subscriptions)
+      .set(values)
+      .where(and(eq(subscriptions.userId, userId), eq(subscriptions.id, id)))
+      .returning();
+
+    if (
+      row &&
+      before &&
+      (row.amountCents !== before.amountCents ||
+        row.currency !== before.currency ||
+        row.billingCycle !== before.billingCycle)
+    ) {
+      await tx.insert(subscriptionPriceHistory).values({
+        subscriptionId: row.id,
+        userId,
+        amountCents: row.amountCents,
+        billingCycle: row.billingCycle,
+        currency: row.currency,
+        source: "user_edit",
+      });
+    }
+
+    return row;
+  });
 }
 
 // Ascending by observedAt — callers read this as a timeline (see

@@ -114,6 +114,21 @@ const riskHighConcentration: InsightRule = {
 // monthly spend) before using "critical"/risk language at all — clustering
 // with no such evidence isn't surfaced by this rule (it's still visible,
 // proportionally, via the free-tier renewal_risk health rule).
+//
+// CodeRabbit review flagged that a premium user could see this same
+// underlying spike acknowledged twice — health.renewal_risk's warning
+// branch (surfaced via the free-tier "Renewals" health dimension/Quick
+// Wins) and this rule's own "critical" card (Risk alerts). Evaluated, not
+// suppressed: the two rules use different windows (health.renewal_risk's
+// is the next 30 days; this rule's is a 7-day cluster of 4+ renewals) and
+// different presentation registers on purpose — a milder, always-visible
+// health-dimension note for every user vs. a more strongly-worded,
+// premium-only alert for the specific case severe enough to name
+// "critical." That's the deliberate free/premium tiering this rule exists
+// for, not the identical-text-on-one-page duplication health.duplicates'
+// own exclusion (engine.ts) was built to avoid — suppressing this rule
+// whenever health.renewal_risk fires would make the premium tier strictly
+// quieter than free in exactly the case it's meant to add signal.
 const riskRenewalCluster: InsightRule = {
   id: "premium.risk_renewal_cluster",
   name: "Risk: renewal cluster with an unusually large amount due",

@@ -83,6 +83,23 @@ describe("computeBiggestOpportunity", () => {
     const result = computeBiggestOpportunity(output);
     expect(result?.kind).toBe("savings");
     expect(result?.subscriptionId).toBe("sub-target");
+    // A confirmed, deterministic saving is the only case styled as a real
+    // "money back" figure — see BiggestOpportunity's own amountTone comment.
+    expect(result?.amountTone).toBe("positive");
+  });
+
+  it("uses generic (not duplicate-specific) wording for a hypothetical non-duplicate confirmed saving", () => {
+    // No recommendation type other than "duplicate" sets evidenceTier
+    // "confirmed" today (see savings.ts), so this exercises the defensive
+    // fallback branch directly rather than relying on that invariant.
+    const output = baseOutput();
+    output.savingsForecast.recommendations = [
+      savingsRec({ type: "functional_overlap", evidenceTier: "confirmed", impactCents: 2000 }),
+    ];
+
+    const result = computeBiggestOpportunity(output);
+    expect(result?.whyShown).not.toContain("duplicate");
+    expect(result?.whyShown).toContain("confirmed");
   });
 
   it("picks the renewal-risk spike when no 'high' priority saving exists", () => {
@@ -94,9 +111,10 @@ describe("computeBiggestOpportunity", () => {
     expect(result?.kind).toBe("renewal_risk");
     expect(result?.amountCents).toBe(30000);
     expect(result?.amountLabel).toBe("due in 30 days");
+    expect(result?.amountTone).toBe("neutral");
   });
 
-  it("picks a 'medium' priority saving when no spike and no 'high' saving exist", () => {
+  it("picks a 'medium' priority saving when no spike and no 'high' saving exist, labeled as involved spend, not a saving", () => {
     const output = baseOutput();
     // review-tier, below the $15 high-impact threshold gate on evidenceTier
     // "confirmed" but above it on impact -> medium (see savings.ts's
@@ -107,6 +125,11 @@ describe("computeBiggestOpportunity", () => {
 
     const result = computeBiggestOpportunity(output);
     expect(result?.kind).toBe("savings");
+    // A review-tier finding's impactCents is real money *involved*, never a
+    // proven saving — must not render with the same "confirmed win"
+    // treatment as the high-priority branch (CodeRabbit review finding).
+    expect(result?.amountLabel).toBe("/mo combined");
+    expect(result?.amountTone).toBe("neutral");
   });
 
   it("falls back to the highest-cost active subscription when no savings or risk exist", () => {
@@ -121,6 +144,7 @@ describe("computeBiggestOpportunity", () => {
       subscriptionId: "sub-adobe",
       amountCents: 71988,
       amountLabel: "/yr",
+      amountTone: "neutral",
     });
     expect(result?.description).toContain("34%");
   });

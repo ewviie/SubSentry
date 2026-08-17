@@ -285,8 +285,15 @@ export function computeRealizedSavings(allSubscriptions: Subscription[]): Realiz
   const canceled = allSubscriptions.filter((s) => s.status === "canceled");
   if (canceled.length === 0) return { monthlyCents: null, yearlyCents: null, currency: null, canceledCount: 0 };
 
-  const currency = canceled[0].currency;
-  const singleCurrency = canceled.every((s) => s.currency === currency);
+  // Case-insensitive on purpose (CodeRabbit review) — validation.ts already
+  // lowercases currency for every subscription created/edited through the
+  // app's own form, so this is defense-in-depth rather than a reachable bug
+  // today, but this function's whole job is refusing to silently sum
+  // mismatched currencies; comparing "usd" and "USD" as different ones
+  // would produce exactly the false "mixed currency, no total" gap this
+  // function exists to avoid.
+  const currency = canceled[0].currency.toLowerCase();
+  const singleCurrency = canceled.every((s) => s.currency.toLowerCase() === currency);
   if (!singleCurrency) return { monthlyCents: null, yearlyCents: null, currency: null, canceledCount: canceled.length };
 
   const totalMonthlyCents = canceled.reduce((sum, s) => sum + monthlyCents(s.amountCents, s.billingCycle), 0);

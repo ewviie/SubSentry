@@ -1,5 +1,5 @@
 {
-  "id": "5d1a2489-26d8-4c9a-9140-0dfd360cb0b8",
+  "id": "299fef2a-c9ba-4e68-8371-7a0dc60116dd",
   "prevId": "955c6858-0d84-4af2-a720-df161f8b6a62",
   "version": "7",
   "dialect": "postgresql",
@@ -852,6 +852,12 @@
         "amount_cents": {
           "name": "amount_cents",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "billing_cycle": {
+          "name": "billing_cycle",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },

@@ -35,6 +35,19 @@ export interface BiggestOpportunity {
   whyShown: string;
   amountCents: number;
   amountLabel: string;
+  // "positive" (styled emerald — "this is money you'd get back") is
+  // reserved for a *confirmed* saving (savings.ts's evidenceTier ===
+  // "confirmed", i.e. a deterministic duplicate match). Everything else —
+  // a review-tier finding's combined cost, a cash-flow-due total, or the
+  // fallback's current top expense — is real money but not a proven
+  // saving, so it renders "neutral" (plain foreground). Caught in
+  // CodeRabbit review: the medium-priority branch used to show
+  // impactCents under a bare "/mo" label with the same emerald treatment
+  // as a confirmed saving, which reads as "you'll save this" for money
+  // that's merely *involved*, not saved — exactly the "current spend" vs.
+  // "confirmed savings" vs. "reviewable spend" conflation Part 6 of the
+  // product brief exists to prevent.
+  amountTone: "positive" | "neutral";
   subscriptionId: string | null;
   actionLabel: string;
   actionHref: string;
@@ -48,9 +61,22 @@ export function computeBiggestOpportunity(output: EngineOutput): BiggestOpportun
       kind: "savings",
       title: topSavings.title,
       description: topSavings.description,
-      whyShown: "A confirmed duplicate is the most certain saving available right now.",
+      // getSavingsPriority only ever returns "high" for evidenceTier
+      // "confirmed" above the impact threshold, and today only the
+      // "duplicate" recommendation type ever sets evidenceTier
+      // "confirmed" (see savings.ts) — so this branch, in practice, is
+      // always a duplicate. Branching on `type` explicitly rather than
+      // relying on that invariant staying true forever: a future
+      // "confirmed" evidence type added to savings.ts must not silently
+      // inherit duplicate-specific wording it hasn't earned (raised in
+      // CodeRabbit review).
+      whyShown:
+        topSavings.type === "duplicate"
+          ? "A confirmed duplicate is the most certain saving available right now."
+          : "A confirmed, high-impact saving is available right now.",
       amountCents: topSavings.impactCents,
       amountLabel: "/mo",
+      amountTone: "positive",
       subscriptionId: topSavings.targetSubscriptionId,
       actionLabel: topSavings.actionLabel,
       actionHref: `/subscriptions/${topSavings.targetSubscriptionId}`,
@@ -69,6 +95,7 @@ export function computeBiggestOpportunity(output: EngineOutput): BiggestOpportun
       // description text — one number, one source of truth, shown two ways.
       amountCents: output.renewalForecast.totalDueNext30DaysCents,
       amountLabel: "due in 30 days",
+      amountTone: "neutral", // real money, but due, not saved
       subscriptionId: null,
       actionLabel: "Review upcoming renewals",
       actionHref: "/subscriptions",
@@ -80,9 +107,19 @@ export function computeBiggestOpportunity(output: EngineOutput): BiggestOpportun
       kind: "savings",
       title: topSavings.title,
       description: topSavings.description,
-      whyShown: "The largest reviewable opportunity among your current subscriptions.",
+      whyShown: "The largest reviewable opportunity among your current subscriptions — not yet a confirmed saving.",
+      // impactCents is the real dollar amount *involved* (proven or not —
+      // see savings.ts's own field comment), never assumed equal to a
+      // proven saving here. A "medium" priority recommendation reaching
+      // this branch is either a below-threshold confirmed duplicate (where
+      // impactCents does equal a real saving) or a review-tier finding
+      // (functional overlap / small subscriptions, where it's the group's
+      // combined cost, not a saving) — "/mo combined" and the neutral tone
+      // below are accurate for both, whereas a bare "/mo" would overstate
+      // certainty for the review-tier case.
       amountCents: topSavings.impactCents,
-      amountLabel: "/mo",
+      amountLabel: "/mo combined",
+      amountTone: "neutral",
       subscriptionId: topSavings.targetSubscriptionId,
       actionLabel: topSavings.actionLabel,
       actionHref: `/subscriptions/${topSavings.targetSubscriptionId}`,
@@ -99,6 +136,7 @@ export function computeBiggestOpportunity(output: EngineOutput): BiggestOpportun
       whyShown: "Reviewing your largest subscription has the greatest potential financial impact.",
       amountCents: biggest.annualCents,
       amountLabel: "/yr",
+      amountTone: "neutral", // current spend, not a saving of any kind
       subscriptionId: biggest.id,
       actionLabel: "Review",
       actionHref: `/subscriptions/${biggest.id}`,

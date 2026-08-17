@@ -302,7 +302,18 @@ export function matchKnownMerchantInText(
 // caller can't distinguish those two cases from this alone, which is
 // intentional: either way, there's no group evidence to act on.
 export function resolveOverlapGroup(name: string): { group: OverlapGroup; label: string } | null {
-  const match = matchKnownMerchantInText(name);
+  // An exact match against KNOWN_MERCHANTS' own keys first, before the
+  // substring matcher — matchKnownMerchantInText's >= 4 char gate exists to
+  // stop a *short* key like "max" from false-positive-matching *inside* an
+  // unrelated longer string ("my max budget"), but that gate has no reason
+  // to apply when the subscription's name (not a free-text sentence) *is*
+  // exactly that key. Without this, a subscription literally named "Max"
+  // (HBO's real, deliberately-short alias — see KNOWN_MERCHANTS) normalized
+  // to "max" and got filtered out by the length gate, silently losing its
+  // overlap group even though it's a perfect match — caught in CodeRabbit
+  // review, confirmed against KNOWN_MERCHANTS' own "max" entry.
+  const exact = KNOWN_MERCHANTS[normalizeName(name)];
+  const match = exact ?? matchKnownMerchantInText(name);
   if (!match?.overlapGroup) return null;
   return { group: match.overlapGroup, label: OVERLAP_GROUP_LABELS[match.overlapGroup] };
 }

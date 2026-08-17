@@ -3,6 +3,7 @@ CREATE TABLE "subscription_price_history" (
 	"subscription_id" uuid NOT NULL,
 	"user_id" uuid NOT NULL,
 	"amount_cents" integer NOT NULL,
+	"billing_cycle" text NOT NULL,
 	"currency" text NOT NULL,
 	"observed_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"source" text NOT NULL

@@ -375,15 +375,26 @@ export const stripeEvents = pgTable("stripe_events", {
 // unanswerable from stored data. This table starts real, incremental
 // capture from the moment this ships: one row per price this subscription
 // has actually had, written at creation ("initial") and again only when an
-// edit genuinely changes amountCents or currency ("user_edit") — see
-// queries.ts's updateSubscription for the exact change-detection. It does
-// NOT backfill fabricated history for existing subscriptions (there is no
-// real prior price to record — only what's in front of us right now), so a
-// subscription created before this migration starts with a single
-// "initial" row the first time it's read after deploy, same as a brand-new
-// one. Detection built on top of this (e.g. subscription-summary.tsx's
-// price-change section) is honestly gated on having 2+ distinct-amount
-// rows for real, not on this table merely existing.
+// edit genuinely changes amountCents, billingCycle, or currency
+// ("user_edit") — see queries.ts's updateSubscription for the exact
+// change-detection. It does NOT backfill fabricated history for existing
+// subscriptions (there is no real prior price to record — only what's in
+// front of us right now), so a subscription created before this migration
+// starts with a single "initial" row the first time it's read after
+// deploy, same as a brand-new one. Detection built on top of this (e.g.
+// subscription-summary.tsx's price-change section) is honestly gated on
+// having 2+ distinct-monthly-equivalent rows for real, not on this table
+// merely existing.
+//
+// billingCycle is stored alongside amountCents, not assumed constant —
+// amountCents alone is unit-less without it ("$10" means something very
+// different at monthly vs. yearly cadence), and a user switching a
+// subscription from monthly to annual billing genuinely changes what
+// they're paying even when amountCents looks similar or even goes down.
+// Every comparison across rows normalizes through money.ts's monthlyCents
+// using each row's own billingCycle (see price-history.ts's
+// computeLatestPriceChange) rather than assuming the cycle never changes
+// between two rows.
 //
 // userId is denormalized here rather than reached via subscriptionId ->
 // subscriptions.userId, same tradeoff renewalReminders documents on itself
@@ -392,6 +403,21 @@ export const stripeEvents = pgTable("stripe_events", {
 // scoped (no join needed to enforce ownership) at the cost of one extra
 // column kept in sync by construction (set once, at insert, never updated
 // — a subscription's owner never changes after creation).
+//
+// CodeRabbit review raised that subscriptionId and userId are two
+// independent FKs, not a DB-enforced pairing — nothing at the schema level
+// stops a row claiming subscription A belongs to a different user than A's
+// real owner. Evaluated and kept as two independent FKs, matching
+// renewalReminders' own identical, already-shipped tradeoff above: every
+// write path in queries.ts derives userId from the exact same
+// already-`requireUser()`-scoped subscription row it's writing
+// amountCents/billingCycle from (never a caller-supplied, independently-
+// trusted value), so there is no live path that could actually write a
+// mismatched pair today. A DB-enforced composite FK would need a new
+// unique(subscriptions.id, subscriptions.userId) constraint on an
+// already-shipped, heavily-indexed table for a guarantee application code
+// already provides by construction — real defense-in-depth, but a bigger
+// change than this finding's actual risk justifies right now.
 export const subscriptionPriceHistory = pgTable(
   "subscription_price_history",
   {
@@ -403,17 +429,20 @@ export const subscriptionPriceHistory = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     amountCents: integer("amount_cents").notNull(),
+    billingCycle: text("billing_cycle", {
+      enum: ["monthly", "yearly", "weekly", "quarterly"],
+    }).notNull(),
     currency: text("currency").notNull(),
     observedAt: timestamp("observed_at", { withTimezone: true }).notNull().defaultNow(),
     // "initial": the row written the moment a subscription is created (by
-    // any source — manual, import, quick-add). "user_edit": amountCents or
-    // currency genuinely changed via the edit form/API. Deliberately no
-    // "import_update" — no current import path ever updates an existing
-    // subscription's price (imports only ever create new rows; see
-    // api/imports/confirm/route.ts), so that source would never be
-    // producible and would be exactly the kind of unused, misleading enum
-    // value the rest of this schema avoids. Add it when a real write path
-    // needs it, not before.
+    // any source — manual, import, quick-add). "user_edit": amountCents,
+    // billingCycle, or currency genuinely changed via the edit form/API.
+    // Deliberately no "import_update" — no current import path ever
+    // updates an existing subscription's price (imports only ever create
+    // new rows; see api/imports/confirm/route.ts), so that source would
+    // never be producible and would be exactly the kind of unused,
+    // misleading enum value the rest of this schema avoids. Add it when a
+    // real write path needs it, not before.
     source: text("source", { enum: ["initial", "user_edit"] }).notNull(),
   },
   (table) => [

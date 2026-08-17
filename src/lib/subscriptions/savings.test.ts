@@ -335,6 +335,18 @@ describe("computeRealizedSavings", () => {
     expect(result.currency).toBeNull();
     expect(result.canceledCount).toBe(2);
   });
+
+  // CodeRabbit review regression: "usd" and "USD" are the same currency —
+  // a case-sensitive comparison would wrongly treat this as mixed and
+  // return a null total for what's actually a single-currency case.
+  it("treats differently-cased currency codes as the same currency", () => {
+    const result = computeRealizedSavings([
+      sub({ status: "canceled", amountCents: 1000, currency: "usd" }),
+      sub({ status: "canceled", amountCents: 1000, currency: "USD" }),
+    ]);
+    expect(result.monthlyCents).toBe(2000);
+    expect(result.currency).toBe("usd");
+  });
 });
 
 describe("getSavingsPriority", () => {

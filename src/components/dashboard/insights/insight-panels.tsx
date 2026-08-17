@@ -8,6 +8,7 @@ import { RenewalsList } from "@/components/dashboard/renewals-list";
 import { formatCents } from "@/lib/subscriptions/money";
 import { getSavingsPriority, PRIORITY_LABEL, PRIORITY_BADGE_VARIANT } from "@/lib/subscriptions/savings";
 import { computeBiggestOpportunity } from "@/lib/insights-engine/biggest-opportunity";
+import { cn } from "@/lib/utils";
 import type { EngineOutput } from "@/lib/insights-engine";
 import type { Subscription } from "@/lib/db/schema";
 
@@ -180,7 +181,12 @@ export function BiggestOpportunityCard({ output }: { output: EngineOutput }) {
               anyway rather than ever rendering "$0.00" as if it meant
               something. */}
           {opportunity.amountCents > 0 ? (
-            <p className="shrink-0 font-mono text-2xl font-semibold tabular-nums text-emerald">
+            <p
+              className={cn(
+                "shrink-0 font-mono text-2xl font-semibold tabular-nums",
+                opportunity.amountTone === "positive" ? "text-emerald" : "text-foreground",
+              )}
+            >
               {formatCents(opportunity.amountCents)}
               <span className="ml-1 text-sm font-normal text-muted-foreground">{opportunity.amountLabel}</span>
             </p>

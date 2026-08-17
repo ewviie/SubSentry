@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizeMerchant, matchKnownMerchantInText } from "./merchant-normalizer";
+import { normalizeMerchant, matchKnownMerchantInText, resolveOverlapGroup } from "./merchant-normalizer";
 
 describe("normalizeMerchant", () => {
   it.each([
@@ -174,5 +174,29 @@ describe("matchKnownMerchantInText", () => {
     const result = matchKnownMerchantInText("just signed up for spotify premium, renews the 5th at $10.99");
     expect(result?.displayName).toBe("Spotify");
     expect(result?.category).toBe("streaming");
+  });
+});
+
+// CodeRabbit review regression: a subscription named exactly "Max" (HBO's
+// real, deliberately-short 3-char alias) used to silently lose its overlap
+// group — matchKnownMerchantInText's substring matcher gates keys < 4
+// chars specifically to avoid false-positive substring matches inside a
+// longer sentence, a safety net that has no reason to block an *exact*
+// match against a subscription's own (not free-typed) name.
+describe("resolveOverlapGroup", () => {
+  it("resolves an exact match against a short (< 4 char) alias like 'Max'", () => {
+    expect(resolveOverlapGroup("Max")).toEqual({ group: "video_streaming", label: "Video streaming" });
+  });
+
+  it("still resolves longer names via substring matching", () => {
+    expect(resolveOverlapGroup("Adobe Creative Cloud")?.group).toBe("creative_tools");
+  });
+
+  it("returns null for a merchant with no assigned overlap group", () => {
+    expect(resolveOverlapGroup("Amazon Prime")).toBeNull();
+  });
+
+  it("returns null for a genuinely unknown merchant", () => {
+    expect(resolveOverlapGroup("My Local Yoga Studio")).toBeNull();
   });
 });
