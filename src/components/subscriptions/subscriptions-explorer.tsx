@@ -298,7 +298,12 @@ export function SubscriptionsExplorer({
   }
 
   return (
-    <div>
+    // pb-24 — same fix review-table.tsx's root already has for the exact
+    // same fixed-bottom-pill pattern (BulkActionBar here, ReviewActionBar
+    // there): without it, selecting a row near the end of this list puts
+    // the floating pill directly over the last row(s) and their checkboxes,
+    // on any viewport short enough that the list runs to the bottom.
+    <div className="pb-24">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />

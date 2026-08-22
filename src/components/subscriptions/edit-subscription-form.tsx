@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Loader2, ExternalLink } from "lucide-react";
+import { Loader2, ExternalLink, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -43,6 +43,39 @@ function cancelSearchUrl(name: string): string {
 export function EditSubscriptionForm({ subscription }: { subscription: Subscription }) {
   const router = useRouter();
   const [deleting, setDeleting] = useState(false);
+  const [canceling, setCanceling] = useState(false);
+
+  // A status-only PATCH — the same partial update SubscriptionsExplorer's
+  // own bulk "Change status" already sends, and the same toast copy
+  // handleSubmit's active→canceled branch below gives. Before this, acting
+  // on this exact page's own "Recommended: cancel this" line meant opening
+  // the full edit form, finding the Status field among 7 others, and
+  // saving — real friction on the one action this page exists to drive.
+  async function handleQuickCancel() {
+    setCanceling(true);
+    try {
+      const res = await fetch(`/api/subscriptions/${subscription.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "canceled" }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        toast.error(data?.message ?? "Couldn't cancel that. Try again.");
+        return;
+      }
+      const monthly = monthlyCents(subscription.amountCents, subscription.billingCycle);
+      toast.success("Canceled", {
+        description: `You'll save ${formatCents(monthly, subscription.currency)}/mo.`,
+      });
+      router.push("/dashboard");
+      router.refresh();
+    } catch {
+      toast.error("Couldn't cancel that. Try again.");
+    } finally {
+      setCanceling(false);
+    }
+  }
 
   async function handleSubmit(values: SubscriptionFormValues) {
     const res = await fetch(`/api/subscriptions/${subscription.id}`, {
@@ -123,20 +156,29 @@ export function EditSubscriptionForm({ subscription }: { subscription: Subscript
         <div className="rounded-lg border border-border bg-muted/30 p-4">
           <p className="text-sm font-medium">Canceling {subscription.name}?</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            SubSentry only tracks what you tell it — it can&apos;t cancel this for you. Changing the status field
-            above just updates your own record here; you&apos;ll still need to cancel with {subscription.name}{" "}
-            directly to actually stop being charged.
+            SubSentry only tracks what you tell it — it can&apos;t cancel this for you. Marking it canceled here just
+            updates your own record; you&apos;ll still need to cancel with {subscription.name} directly to actually
+            stop being charged.
           </p>
-          <Button
-            variant="outline"
-            size="sm"
-            className="mt-3"
-            render={<a href={cancelSearchUrl(subscription.name)} target="_blank" rel="noopener noreferrer" />}
-            nativeButton={false}
-          >
-            <ExternalLink className="size-3.5" aria-hidden="true" />
-            Search how to cancel {subscription.name}
-          </Button>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button size="sm" onClick={handleQuickCancel} disabled={canceling}>
+              {canceling ? (
+                <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+              ) : (
+                <Check className="size-3.5" aria-hidden="true" />
+              )}
+              Mark as canceled
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              render={<a href={cancelSearchUrl(subscription.name)} target="_blank" rel="noopener noreferrer" />}
+              nativeButton={false}
+            >
+              <ExternalLink className="size-3.5" aria-hidden="true" />
+              Search how to cancel
+            </Button>
+          </div>
         </div>
       ) : null}
       <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4">

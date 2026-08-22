@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Inbox } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -40,24 +41,40 @@ export function AllSubscriptionsList({
 
   const duplicateIds = getDuplicateFlaggedIds(insights);
   const highCostIds = getHighCostFlaggedIds(insights);
+  const hiddenCount = subscriptions.length - 6;
 
   return (
-    <motion.ul
-      variants={staggerContainer(0.05)}
-      initial="hidden"
-      animate="visible"
-      className="mt-4 space-y-2"
-    >
-      <AnimatePresence initial={false}>
-        {subscriptions.slice(0, 6).map((s) => (
-          <SubscriptionRow
-            key={s.id}
-            subscription={s}
-            isDuplicate={duplicateIds.has(s.id)}
-            isHighCost={highCostIds.has(s.id)}
-          />
-        ))}
-      </AnimatePresence>
-    </motion.ul>
+    <>
+      <motion.ul
+        variants={staggerContainer(0.05)}
+        initial="hidden"
+        animate="visible"
+        className="mt-4 space-y-2"
+      >
+        <AnimatePresence initial={false}>
+          {subscriptions.slice(0, 6).map((s) => (
+            <SubscriptionRow
+              key={s.id}
+              subscription={s}
+              isDuplicate={duplicateIds.has(s.id)}
+              isHighCost={highCostIds.has(s.id)}
+            />
+          ))}
+        </AnimatePresence>
+      </motion.ul>
+      {/* This section's own heading already has a "View all" link, but
+          that's far enough above a 6-row list that it's easy to scroll past
+          without ever noticing there's more — this list used to just stop
+          at 6 with nothing telling you so. Same "+N more" framing
+          reveal-step.tsx's own merchant-pill truncation already uses. */}
+      {hiddenCount > 0 ? (
+        <Link
+          href="/subscriptions"
+          className="mt-2 block text-center text-sm text-muted-foreground hover:text-foreground hover:underline"
+        >
+          +{hiddenCount} more — View all
+        </Link>
+      ) : null}
+    </>
   );
 }
