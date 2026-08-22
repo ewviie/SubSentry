@@ -1,10 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { Inbox } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Button } from "@/components/ui/button";
 import { SubscriptionRow } from "@/components/subscriptions/subscription-row";
 import { getDuplicateFlaggedIds, getHighCostFlaggedIds } from "@/lib/subscriptions/filters";
 import { staggerContainer } from "@/lib/motion";
@@ -23,23 +21,19 @@ export function AllSubscriptionsList({
   subscriptions: Subscription[];
   insights: ComputedInsight[];
 }) {
+  // No action button here on purpose — this is the dashboard's only call
+  // site, and QuickAddBar (the actual recommended path) already renders
+  // directly above it. A second "Add your first one" button here used to
+  // compete with it on the exact screen a brand-new user sees first, right
+  // below copy that already pointed at the bar above — a competing CTA the
+  // empty state's own wording was quietly contradicting.
   if (subscriptions.length === 0) {
     return (
       <EmptyState
         className="mt-4"
         icon={Inbox}
         title="No subscriptions yet"
-        description="Add your first one to start tracking what you pay for, or try the quick-add bar above."
-        action={
-          <Button
-            variant="outline"
-            size="sm"
-            render={<Link href="/subscriptions/new" />}
-            nativeButton={false}
-          >
-            Add your first one
-          </Button>
-        }
+        description="Add your first one using the quick-add bar above."
       />
     );
   }

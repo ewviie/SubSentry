@@ -14,6 +14,30 @@ function SectionHeadingSkeleton() {
   );
 }
 
+// One shape, reused everywhere below a real card on this page is just a
+// title over a few lines (BiggestOpportunityCard, RenewalForecastCard, the
+// Savings opportunities and Analytics grids) — kept as one skeleton instead
+// of a bespoke one per card so this file stops silently drifting out of
+// sync with the real layout the way it did before (see git history: this
+// used to hardcode a 4-stat-card grid, a 2-card "Subscription Management"
+// row, and a single big chart where the real page now has 2 stats, one
+// wide card, and a small-card grid — every one of those was a real,
+// visible layout jump on load, not just a padding mismatch).
+function CardSkeleton({ lines = 2 }: { lines?: number }) {
+  return (
+    <Card>
+      <CardHeader>
+        <Skeleton className="h-5 w-32" />
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {Array.from({ length: lines }).map((_, i) => (
+          <Skeleton key={i} className={i === lines - 1 ? "h-4 w-3/4" : "h-4 w-full"} />
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function DashboardLoading() {
   return (
     <div className="space-y-12">
@@ -25,10 +49,12 @@ export default function DashboardLoading() {
         <Skeleton className="h-8 w-36" />
       </div>
 
-      {/* Financial overview */}
+      {/* Financial overview — DashboardHeroRow (Savings + Health score,
+          lg:grid-cols-2), BiggestOpportunityCard, the 2-stat row, then
+          Insights' own 2/3-col card grid. */}
       <div className="space-y-6">
         <SectionHeadingSkeleton />
-        <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
+        <div className="grid gap-4 lg:grid-cols-2">
           <Card>
             <CardContent className="space-y-4 pt-6">
               <div className="flex items-center gap-3">
@@ -52,24 +78,17 @@ export default function DashboardLoading() {
             </CardContent>
           </Card>
         </div>
+        <CardSkeleton lines={2} />
         <StatCardGridSkeleton />
-        <div className="grid gap-3 sm:grid-cols-2">
-          {Array.from({ length: 2 }).map((_, i) => (
-            <Card key={i}>
-              <CardContent className="flex gap-3 pt-6">
-                <Skeleton className="size-8 shrink-0 rounded-full" />
-                <div className="min-w-0 flex-1 space-y-2">
-                  <Skeleton className="h-4 w-3/4" />
-                  <Skeleton className="h-4 w-full" />
-                  <Skeleton className="h-3 w-16" />
-                </div>
-              </CardContent>
-            </Card>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <CardSkeleton key={i} />
           ))}
         </div>
       </div>
 
-      {/* Subscription management */}
+      {/* Subscription management — QuickAddBar, one merged RenewalForecastCard
+          (full width, not a 2-col pair), then the subscriptions list. */}
       <div className="space-y-6">
         <SectionHeadingSkeleton />
         <Card>
@@ -77,20 +96,7 @@ export default function DashboardLoading() {
             <Skeleton className="h-8 w-full" />
           </CardContent>
         </Card>
-        <div className="grid gap-6 lg:grid-cols-2">
-          {Array.from({ length: 2 }).map((_, i) => (
-            <Card key={i}>
-              <CardHeader>
-                <Skeleton className="h-5 w-32" />
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-3/4" />
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        <CardSkeleton lines={3} />
         <div className="divide-y divide-border rounded-lg border border-border">
           {Array.from({ length: 4 }).map((_, i) => (
             <div key={i} className="flex items-center justify-between px-4 py-3">
@@ -101,35 +107,26 @@ export default function DashboardLoading() {
         </div>
       </div>
 
-      {/* Savings opportunities */}
+      {/* Savings opportunities — 3-col grid (score sits alone rather than
+          stretching to match a list card's height; see the real section's
+          own comment), up to 4 cards. */}
       <div className="space-y-6">
         <SectionHeadingSkeleton />
-        <div className="grid gap-4 lg:grid-cols-2">
-          {Array.from({ length: 2 }).map((_, i) => (
-            <Card key={i}>
-              <CardHeader>
-                <Skeleton className="h-5 w-40" />
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-3/4" />
-              </CardContent>
-            </Card>
+        <div className="grid gap-4 lg:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <CardSkeleton key={i} />
           ))}
         </div>
       </div>
 
-      {/* Analytics */}
+      {/* Analytics — category breakdown + 3 insight-engine cards, 2-col. */}
       <div className="space-y-6">
         <SectionHeadingSkeleton />
-        <Card>
-          <CardHeader>
-            <Skeleton className="h-5 w-32" />
-          </CardHeader>
-          <CardContent>
-            <Skeleton className="h-40 w-full" />
-          </CardContent>
-        </Card>
+        <div className="grid gap-4 lg:grid-cols-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <CardSkeleton key={i} />
+          ))}
+        </div>
       </div>
     </div>
   );

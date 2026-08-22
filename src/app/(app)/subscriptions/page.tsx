@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { DollarSign, Layers, PiggyBank, TrendingUp } from "lucide-react";
+import { DollarSign, Layers } from "lucide-react";
 import { requireUser } from "@/lib/auth/session";
 import { getDashboardData } from "@/lib/subscriptions/queries";
 import { Button } from "@/components/ui/button";
@@ -7,13 +7,13 @@ import { CountUp } from "@/components/ui/count-up";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { StaggerSection } from "@/components/dashboard/stagger-section";
 import { SubscriptionsExplorer } from "@/components/subscriptions/subscriptions-explorer";
-import { computeInsights, computePotentialSavingsMonthlyCents } from "@/lib/subscriptions/insights";
+import { computeInsights } from "@/lib/subscriptions/insights";
+import { formatCents } from "@/lib/subscriptions/money";
 
 export default async function SubscriptionsPage() {
   const user = await requireUser();
   const data = await getDashboardData(user.id);
   const insights = computeInsights(data.subscriptions);
-  const potentialSavingsMonthlyCents = computePotentialSavingsMonthlyCents(insights);
 
   return (
     <div>
@@ -30,24 +30,16 @@ export default async function SubscriptionsPage() {
       </div>
 
       {data.subscriptions.length > 0 ? (
-        <StaggerSection className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard icon={DollarSign} label="Monthly spend">
+        <StaggerSection className="mt-6 grid gap-4 sm:grid-cols-2">
+          <StatCard
+            icon={DollarSign}
+            label="Monthly spend"
+            caption={`${formatCents(data.annualTotalCents)}/yr`}
+          >
             <CountUp value={data.monthlyTotalCents} format="currency" />
-          </StatCard>
-          <StatCard icon={TrendingUp} label="Yearly spend">
-            <CountUp value={data.annualTotalCents} format="currency" />
           </StatCard>
           <StatCard icon={Layers} label="Active subscriptions">
             <CountUp value={data.activeCount} format="integer" />
-          </StatCard>
-          <StatCard
-            icon={PiggyBank}
-            label="Potential savings"
-            accentClassName={potentialSavingsMonthlyCents > 0 ? "bg-emerald-muted text-emerald" : undefined}
-          >
-            <span className={potentialSavingsMonthlyCents > 0 ? "text-emerald" : undefined}>
-              <CountUp value={potentialSavingsMonthlyCents * 12} format="currency" />
-            </span>
           </StatCard>
         </StaggerSection>
       ) : null}

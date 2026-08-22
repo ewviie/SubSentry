@@ -21,7 +21,7 @@ import { SubscriptionRow } from "@/components/subscriptions/subscription-row";
 import { BulkActionBar } from "@/components/subscriptions/bulk-action-bar";
 import { CATEGORY_LABELS, STATUS_LABELS } from "@/lib/subscriptions/labels";
 import { CATEGORIES, STATUSES } from "@/lib/subscriptions/validation";
-import { monthlyCents } from "@/lib/subscriptions/money";
+import { formatCents, monthlyCents } from "@/lib/subscriptions/money";
 import {
   daysUntilRenewal,
   getDuplicateFlaggedIds,
@@ -215,6 +215,10 @@ export function SubscriptionsExplorer({
   async function bulkChangeStatus(status: Subscription["status"]) {
     setBusy(true);
     const ids = [...selectedIds];
+    // Snapshotted before the PATCH calls land, so the savings figure below
+    // reflects what was actually active at the moment of this action, not
+    // whatever visibleSubscriptions has become by the time the toast reads it.
+    const targeted = visibleSubscriptions.filter((s) => selectedIds.has(s.id));
     const results = await Promise.allSettled(
       ids.map((id) =>
         fetch(`/api/subscriptions/${id}`, {
@@ -229,6 +233,21 @@ export function SubscriptionsExplorer({
     const failedIds = ids.filter((_, i) => results[i].status === "rejected");
     if (failedIds.length > 0) {
       toast.error(`Updated ${ids.length - failedIds.length} of ${ids.length}. ${failedIds.length} failed. Try again.`);
+    } else if (status === "canceled") {
+      // Same financial-consequence framing (and the same active-only,
+      // single-currency-or-null honesty rule) EditSubscriptionForm's own
+      // active→canceled toast already uses — this is the bulk path that
+      // skipped it, landing users on a generic "N updated" for the one
+      // action in this app that's actually supposed to feel like progress.
+      const canceledNow = targeted.filter((s) => s.status === "active");
+      const currency = canceledNow[0]?.currency.toLowerCase();
+      const singleCurrency = canceledNow.length > 0 && canceledNow.every((s) => s.currency.toLowerCase() === currency);
+      const savingsMonthlyCents = singleCurrency
+        ? canceledNow.reduce((sum, s) => sum + monthlyCents(s.amountCents, s.billingCycle), 0)
+        : 0;
+      toast.success(`${ids.length} subscription${ids.length === 1 ? "" : "s"} canceled`, {
+        description: savingsMonthlyCents > 0 ? `You'll save ${formatCents(savingsMonthlyCents, currency)}/mo.` : undefined,
+      });
     } else {
       toast.success(`${ids.length} subscription${ids.length === 1 ? "" : "s"} updated`);
     }
