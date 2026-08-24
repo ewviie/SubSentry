@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import { AlertTriangle, Copy, TrendingUp } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { formatCents, monthlyCents } from "@/lib/subscriptions/money";
+import { formatCents, monthlyCents, annualCents } from "@/lib/subscriptions/money";
 import { CATEGORY_LABELS, STATUS_LABELS } from "@/lib/subscriptions/labels";
 import { CATEGORY_BADGE_CLASSES, CATEGORY_ICONS } from "@/lib/subscriptions/category-colors";
 import { daysUntilRenewal } from "@/lib/subscriptions/filters";
@@ -157,7 +157,15 @@ export function SubscriptionRow({
 
         <div className="text-right font-mono text-sm tabular-nums sm:w-32">
           <p className="font-medium">{formatCents(monthly, subscription.currency)}/mo</p>
-          <p className="text-xs text-muted-foreground">{formatCents(monthly * 12, subscription.currency)}/yr</p>
+          {/* Not monthly * 12 — that double-rounds a yearly/quarterly/weekly
+              subscription's annual figure away from its own stored price
+              (e.g. a $99.99/yr subscription's monthly-equivalent rounds to
+              $8.33, and $8.33 * 12 = $99.96 — 3 cents off the real price).
+              annualCents converts directly from the stored amount using
+              each cycle's own exact multiplier. See money.ts's own comment. */}
+          <p className="text-xs text-muted-foreground">
+            {formatCents(annualCents(subscription.amountCents, subscription.billingCycle), subscription.currency)}/yr
+          </p>
         </div>
 
         <Badge

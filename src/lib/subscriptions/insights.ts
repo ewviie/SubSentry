@@ -1,5 +1,5 @@
 import type { Subscription } from "@/lib/db/schema";
-import { monthlyCents, formatCents } from "./money";
+import { monthlyCents, annualCents, formatCents, splitByPrimaryCurrency } from "./money";
 import { CATEGORY_LABELS } from "./labels";
 import { resolveOverlapGroup, type OverlapGroup } from "@/lib/imports/merchant-normalizer";
 
@@ -98,12 +98,19 @@ export function computeInsights(allSubscriptions: Subscription[]): ComputedInsig
   const active = allSubscriptions.filter((s) => s.status === "active");
   if (active.length === 0) return insights;
 
-  const monthlyTotal = active.reduce((sum, s) => sum + monthlyCents(s.amountCents, s.billingCycle), 0);
+  // Restricted to active's primary currency (splitByPrimaryCurrency) —
+  // summing raw cents across currencies into one "% of monthly spend"
+  // figure would be fabricated math (currency is unvalidated free text on
+  // this schema). A subscription in a non-primary currency simply doesn't
+  // participate in this signal, same disposition as
+  // computeFunctionalOverlapGroups/findSmallSubscriptionsCluster below.
+  const { currency: primaryCurrency, included: primaryActive } = splitByPrimaryCurrency(active);
+  const monthlyTotal = primaryActive.reduce((sum, s) => sum + monthlyCents(s.amountCents, s.billingCycle), 0);
 
   // 1. Expensive category — one category eating an outsized share of spend.
-  if (monthlyTotal > 0) {
+  if (monthlyTotal > 0 && primaryCurrency) {
     const byCategory = new Map<Subscription["category"], { cents: number; ids: string[] }>();
-    for (const s of active) {
+    for (const s of primaryActive) {
       const entry = byCategory.get(s.category) ?? { cents: 0, ids: [] };
       entry.cents += monthlyCents(s.amountCents, s.billingCycle);
       entry.ids.push(s.id);
@@ -117,7 +124,7 @@ export function computeInsights(allSubscriptions: Subscription[]): ComputedInsig
       insights.push({
         type: "expensive_category",
         title: `${CATEGORY_LABELS[topCategory]} is your biggest expense`,
-        description: `${CATEGORY_LABELS[topCategory]} makes up ${Math.round(share * 100)}% of your monthly spend (${formatCents(topEntry.cents)}/mo). Worth a look if that's higher than expected.`,
+        description: `${CATEGORY_LABELS[topCategory]} makes up ${Math.round(share * 100)}% of your monthly spend (${formatCents(topEntry.cents, primaryCurrency)}/mo). Worth a look if that's higher than expected.`,
         severity: "info",
         subscriptionIds: topEntry.ids,
       });
@@ -158,10 +165,14 @@ export function computeInsights(allSubscriptions: Subscription[]): ComputedInsig
   // 3. High yearly spend — subscriptions costing meaningfully more than a
   // typical subscription for this user (relative outlier, not a fixed
   // dollar threshold, so it scales with each user's own spending level).
-  if (active.length >= 2) {
-    const annualCosts = active.map((s) => ({
+  // Restricted to primaryActive — "2x the mean" only means something when
+  // every figure compared is the same currency (same rationale as
+  // signals.ts's findExpensiveOutliers, which this insight independently
+  // duplicates for the free-tier /insights surface).
+  if (primaryActive.length >= 2) {
+    const annualCosts = primaryActive.map((s) => ({
       sub: s,
-      annual: monthlyCents(s.amountCents, s.billingCycle) * 12,
+      annual: annualCents(s.amountCents, s.billingCycle),
     }));
     const meanAnnual = annualCosts.reduce((sum, c) => sum + c.annual, 0) / annualCosts.length;
     const outliers = annualCosts
@@ -171,7 +182,7 @@ export function computeInsights(allSubscriptions: Subscription[]): ComputedInsig
       insights.push({
         type: "high_yearly_spend",
         title: `${sub.name} adds up fast`,
-        description: `${sub.name} costs ${formatCents(annual)}/year, more than double what you spend on a typical subscription here.`,
+        description: `${sub.name} costs ${formatCents(annual, sub.currency)}/year, more than double what you spend on a typical subscription here.`,
         severity: "info",
         subscriptionIds: [sub.id],
       });
@@ -188,7 +199,7 @@ export function computeInsights(allSubscriptions: Subscription[]): ComputedInsig
         insights.push({
           type: "possible_overlap",
           title: `Possible duplicate: ${active[i].name} and ${active[j].name}`,
-          description: `These look like the same service. If one is stale, canceling it saves ${formatCents(savings)}/mo.`,
+          description: `These look like the same service. If one is stale, canceling it saves ${formatCents(savings, active[j].currency)}/mo.`,
           severity: "warning",
           subscriptionIds: [active[i].id, active[j].id],
           potentialSavingsMonthlyCents: savings,

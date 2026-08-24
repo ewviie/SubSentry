@@ -18,7 +18,7 @@ import {
   type SubscriptionFormValues,
 } from "@/components/subscriptions/subscription-form";
 import { QuickAddSummary } from "@/components/subscriptions/quick-add-summary";
-import { amountStringToCents, formatCents, monthlyCents } from "@/lib/subscriptions/money";
+import { amountStringToCents, formatCents, monthlyCents, annualCents } from "@/lib/subscriptions/money";
 import type { SubscriptionInput } from "@/lib/subscriptions/validation";
 
 type Confidence = "high" | "medium" | "low";
@@ -105,19 +105,21 @@ export function QuickAddBar({ isFirstSubscription = false }: { isFirstSubscripti
     // repeated noise on every later add.
     if (isFirstSubscription && !hasShownFirstAddToast) {
       setHasShownFirstAddToast(true);
-      // monthlyCents() * 12, not the original amount re-annualized —
-      // deliberately matching every other "annual" figure this codebase
-      // already computes this same way (dashboard's annualTotalCents,
-      // signals.ts's findExpensiveOutliers, reveal-step.tsx's
-      // totalYearlyCents): a yearly subscription's monthly-then-back-to-
-      // yearly round trip can be off by a few cents from the original
-      // entered amount, but computing it differently here would make this
-      // toast disagree with the dashboard the user is about to land on for
-      // the exact same subscription, which is worse than the existing,
-      // consistent, cents-scale rounding characteristic.
-      const monthly = monthlyCents(amountStringToCents(values.amount), values.billingCycle);
+      // annualCents(...), not monthlyCents(...) * 12: this toast's own
+      // yearly figure used to be computed the second way, "matching" the
+      // dashboard's old (buggy) annualTotalCents — that reasoning no longer
+      // holds now that every other "annual" figure in this codebase
+      // (dashboard's annualTotalCents, signals.ts's findExpensiveOutliers,
+      // reveal-step.tsx's totalYearlyCents) has been fixed to compute
+      // directly from the stored amount instead of double-rounding through
+      // a monthly-equivalent. Using annualCents here is what actually keeps
+      // this toast agreeing with the dashboard the user is about to land on
+      // for the exact same subscription.
+      const amountCents = amountStringToCents(values.amount);
+      const monthly = monthlyCents(amountCents, values.billingCycle);
+      const yearly = annualCents(amountCents, values.billingCycle);
       toast.success(`${values.name} added`, {
-        description: `That's ${formatCents(monthly, values.currency)}/mo — ${formatCents(monthly * 12, values.currency)}/yr.`,
+        description: `That's ${formatCents(monthly, values.currency)}/mo — ${formatCents(yearly, values.currency)}/yr.`,
       });
     } else {
       toast.success("Subscription added");

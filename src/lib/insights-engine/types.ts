@@ -39,6 +39,10 @@ export interface InsightResult {
   // finding's scoreImpact applies to.
   dimension?: HealthDimensionKey;
   monthlySavingsCents?: number;
+  // Currency monthlySavingsCents is denominated in — only set alongside
+  // monthlySavingsCents. Consumers rendering that figure (Quick Wins'
+  // badge) must format it with this rather than assuming USD.
+  currency?: string;
 }
 
 export interface InsightRule {

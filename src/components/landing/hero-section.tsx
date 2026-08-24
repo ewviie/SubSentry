@@ -171,7 +171,7 @@ export function HeroSection() {
             </StatCard>
             <div className="rounded-xl border border-border bg-card p-4">
               <p className="mb-3 text-sm font-medium">Spend by category</p>
-              <CategorySpendBar entries={sampleCategoryEntries} />
+              <CategorySpendBar entries={sampleCategoryEntries} currency="usd" />
             </div>
           </div>
         </motion.div>

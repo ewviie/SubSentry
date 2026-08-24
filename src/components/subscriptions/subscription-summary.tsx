@@ -1,4 +1,4 @@
-import { formatCents, monthlyCents } from "@/lib/subscriptions/money";
+import { formatCents, monthlyCents, annualCents as computeAnnualCents } from "@/lib/subscriptions/money";
 import { estimatePaidCents } from "@/lib/subscriptions/price-history";
 import { cn } from "@/lib/utils";
 import type { Subscription, SubscriptionPriceHistory } from "@/lib/db/schema";
@@ -30,7 +30,10 @@ export function SubscriptionSummary({
   sharePercent?: number | null;
 }) {
   const estimatedPaidCents = estimatePaidCents(subscription, history);
-  const annualCents = monthlyCents(subscription.amountCents, subscription.billingCycle) * 12;
+  // Not monthlyCents(...) * 12 — see money.ts's own annualCents comment for
+  // why that double-rounds a yearly/quarterly/weekly subscription's annual
+  // figure away from its own stored price.
+  const annualCents = computeAnnualCents(subscription.amountCents, subscription.billingCycle);
 
   const trackedSinceLabel = subscription.createdAt.toLocaleDateString("en-US", {
     month: "short",

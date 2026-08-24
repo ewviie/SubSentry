@@ -7,6 +7,7 @@ import {
   computeRenewalsTimeline,
   computeTopMerchantsBySpend,
 } from "@/lib/subscriptions/analytics";
+import { splitByPrimaryCurrency } from "@/lib/subscriptions/money";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SpendBySourceBars } from "@/components/analytics/spend-by-source-bars";
@@ -40,6 +41,13 @@ export default async function AnalyticsPage() {
   const growth = computeGrowthOverTime(subscriptions);
   const renewals = computeRenewalsTimeline(subscriptions);
   const topMerchants = computeTopMerchantsBySpend(subscriptions);
+  // Each compute* above already restricts its own sums to this same primary
+  // currency internally (see analytics.ts) — this is just the label for the
+  // charts below, computed the same way (majority-by-count active
+  // subscription currency) so it always agrees with what was actually
+  // summed. topMerchants is a per-row list, not a sum, and correctly still
+  // shows every currency's merchants — it doesn't need this.
+  const { currency } = splitByPrimaryCurrency(subscriptions.filter((s) => s.status === "active"));
 
   return (
     <div className="max-w-5xl space-y-6">
@@ -54,7 +62,7 @@ export default async function AnalyticsPage() {
           <CardDescription>Cumulative monthly spend, by the month each subscription was added.</CardDescription>
         </CardHeader>
         <CardContent>
-          <GrowthChart points={growth} />
+          <GrowthChart points={growth} currency={currency ?? undefined} />
         </CardContent>
       </Card>
 
@@ -65,7 +73,7 @@ export default async function AnalyticsPage() {
             <CardDescription>Projected renewal charges over the next 12 months.</CardDescription>
           </CardHeader>
           <CardContent>
-            <RenewalsTimelineChart months={renewals} />
+            <RenewalsTimelineChart months={renewals} currency={currency ?? undefined} />
           </CardContent>
         </Card>
 
@@ -87,7 +95,7 @@ export default async function AnalyticsPage() {
             <CardDescription>Where each active subscription came from.</CardDescription>
           </CardHeader>
           <CardContent>
-            <SpendBySourceBars entries={spendBySource} />
+            <SpendBySourceBars entries={spendBySource} currency={currency ?? undefined} />
           </CardContent>
         </Card>
 
@@ -97,7 +105,7 @@ export default async function AnalyticsPage() {
             <CardDescription>How your spend splits across billing frequencies.</CardDescription>
           </CardHeader>
           <CardContent>
-            <BillingCycleCards entries={billingCycles} />
+            <BillingCycleCards entries={billingCycles} currency={currency ?? undefined} />
           </CardContent>
         </Card>
       </div>

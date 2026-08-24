@@ -52,6 +52,19 @@ describe("computeSavingsRecommendations", () => {
     expect(duplicate.involvedSubscriptionIds).toEqual([first.id, second.id]);
   });
 
+  // Regression: SavingsRecommendation used to carry no currency field at
+  // all, so every card rendering monthlySavingsCents/impactCents
+  // (savings-recommendation-card.tsx, biggest-opportunity.ts) fell back to
+  // formatCents' USD default regardless of the subscription's real
+  // currency.
+  it("carries the target (redundant) subscription's own currency for a duplicate", () => {
+    const first = sub({ name: "UK Gym", amountCents: 2000, currency: "gbp" });
+    const second = sub({ name: "UK Gym Plus", amountCents: 2500, currency: "gbp" });
+    const result = computeSavingsRecommendations([first, second]);
+    const duplicate = result.find((r) => r.type === "duplicate")!;
+    expect(duplicate.currency).toBe("gbp");
+  });
+
   it("uses natural phrasing for two identically-named duplicates instead of 'Netflix and Netflix'", () => {
     const first = sub({ name: "Netflix", amountCents: 1599, nextRenewalDate: "2099-01-01" });
     const second = sub({ name: "Netflix", amountCents: 1599, nextRenewalDate: "2099-02-01" });
@@ -313,6 +326,19 @@ describe("computeRealizedSavings", () => {
     expect(result.canceledCount).toBe(2);
   });
 
+  // Regression: yearlyCents used to be computed as totalMonthlyCents * 12,
+  // double-rounding away from a canceled yearly subscription's own stored
+  // price. Two canceled $99.99/yr subscriptions must report an exact
+  // $199.98/yr realized saving (19998 cents), not $199.92 (19992 cents,
+  // what monthlyCents(9999,"yearly")=833 summed twice then *12 would give).
+  it("reports the exact annual total for canceled yearly subscriptions, not a double-rounded one", () => {
+    const result = computeRealizedSavings([
+      sub({ status: "canceled", amountCents: 9999, billingCycle: "yearly", currency: "usd" }),
+      sub({ status: "canceled", amountCents: 9999, billingCycle: "yearly", currency: "usd" }),
+    ]);
+    expect(result.yearlyCents).toBe(19998);
+  });
+
   it("counts every canceled subscription toward canceledCount, including a $0 one", () => {
     const result = computeRealizedSavings([sub({ status: "canceled", amountCents: 0, currency: "usd" })]);
     expect(result.canceledCount).toBe(1);
@@ -363,6 +389,7 @@ describe("getSavingsPriority", () => {
       urgencyDays: 30,
       targetSubscriptionId: "sub-1",
       involvedSubscriptionIds: ["sub-1"],
+      currency: "usd",
     };
   }
 

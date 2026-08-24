@@ -1,5 +1,5 @@
 import { CATEGORY_LABELS } from "@/lib/subscriptions/labels";
-import { formatCents } from "@/lib/subscriptions/money";
+import { formatCents, splitByPrimaryCurrency } from "@/lib/subscriptions/money";
 import type { EngineContext, InsightRule } from "../types";
 import {
   monthlyTotalCents,
@@ -31,8 +31,13 @@ const annualSwitchSavings: InsightRule = {
   category: "optimization",
   premium: true,
   evaluate(ctx: EngineContext) {
-    const monthlySubs = ctx.active.filter((s) => s.billingCycle === "monthly");
-    if (monthlySubs.length === 0) return null;
+    // Restricted to active's primary currency: summing amountCents * 12
+    // across monthly subscriptions billed in different currencies would
+    // fabricate one "estimated savings" figure out of two unrelated
+    // currencies' worth of spend.
+    const { currency, included: primaryActive } = splitByPrimaryCurrency(ctx.active);
+    const monthlySubs = primaryActive.filter((s) => s.billingCycle === "monthly");
+    if (monthlySubs.length === 0 || !currency) return null;
     const totalAnnualCents = monthlySubs.reduce((sum, s) => sum + s.amountCents * 12, 0);
     const estimatedSavingsCents = Math.round(totalAnnualCents * ASSUMED_ANNUAL_PLAN_DISCOUNT);
     if (estimatedSavingsCents < 500) return null;
@@ -46,12 +51,13 @@ const annualSwitchSavings: InsightRule = {
     return {
       ruleId: this.id,
       title: "You could save by switching to annual plans",
-      description: `If providers that bill you monthly offer an annual plan at a typical discount, switching could save an estimated ${formatCents(monthlySavingsCents * 12)}/year.`,
+      description: `If providers that bill you monthly offer an annual plan at a typical discount, switching could save an estimated ${formatCents(monthlySavingsCents * 12, currency)}/year.`,
       severity: "info",
       category: "optimization",
       premium: true,
       subscriptionIds: monthlySubs.map((s) => s.id),
       monthlySavingsCents,
+      currency,
     };
   },
 };
@@ -90,9 +96,15 @@ const riskHighConcentration: InsightRule = {
   category: "usage",
   premium: true,
   evaluate(ctx: EngineContext) {
+    // findExpensiveOutliers already restricts itself to active's primary
+    // currency (see signals.ts) — totalAnnual below must use the same
+    // restricted set, or "over half your annual spend" would divide a
+    // single-currency outlier total by a total that includes other
+    // currencies' spend too.
     const outliers = findExpensiveOutliers(ctx.active);
     if (outliers.length === 0) return null;
-    const totalAnnual = ctx.active.reduce((sum, s) => sum + s.amountCents * (s.billingCycle === "monthly" ? 12 : s.billingCycle === "yearly" ? 1 : s.billingCycle === "quarterly" ? 4 : 52), 0);
+    const { included: primaryActive } = splitByPrimaryCurrency(ctx.active);
+    const totalAnnual = primaryActive.reduce((sum, s) => sum + s.amountCents * (s.billingCycle === "monthly" ? 12 : s.billingCycle === "yearly" ? 1 : s.billingCycle === "quarterly" ? 4 : 52), 0);
     const outlierAnnual = outliers.reduce((sum, o) => sum + o.annualCents, 0);
     if (totalAnnual === 0 || outlierAnnual / totalAnnual < 0.5) return null;
     return riskResult(
@@ -138,13 +150,16 @@ const riskRenewalCluster: InsightRule = {
   premium: true,
   evaluate(ctx: EngineContext) {
     const cluster = findRenewalCluster(ctx.active, ctx.todayIso);
-    if (!cluster || cluster.subscriptionIds.length < 4) return null;
-    const monthly = monthlyTotalCents(ctx.active);
+    if (!cluster || !cluster.currency || cluster.subscriptionIds.length < 4) return null;
+    // Same currency-consistency requirement as health.ts's renewal_risk:
+    // both sides of the comparison must be the same currency cluster.totalCents
+    // is already restricted to.
+    const monthly = monthlyTotalCents(splitByPrimaryCurrency(ctx.active).included);
     if (monthly === 0 || cluster.totalCents <= monthly * 1.5) return null;
     return riskResult(
       riskRenewalCluster,
       `${cluster.subscriptionIds.length} renewals due the same week, well above typical spend`,
-      `Starting ${cluster.windowStartIso}, ${formatCents(cluster.totalCents)} is due within 7 days — notably more than your typical month.`,
+      `Starting ${cluster.windowStartIso}, ${formatCents(cluster.totalCents, cluster.currency)} is due within 7 days — notably more than your typical month.`,
       "critical",
       cluster.subscriptionIds,
     );

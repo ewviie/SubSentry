@@ -34,9 +34,12 @@ export default async function SubscriptionsPage() {
           <StatCard
             icon={DollarSign}
             label="Monthly spend"
-            caption={`${formatCents(data.annualTotalCents)}/yr`}
+            caption={`${formatCents(data.annualTotalCents, data.currency)}/yr`}
           >
-            <CountUp value={data.monthlyTotalCents} format="currency" />
+            {/* Always passed explicitly — see dashboard/page.tsx's own
+                comment on why formatCents/CountUp's "usd" default isn't a
+                safe assumption for a non-USD account. */}
+            <CountUp value={data.monthlyTotalCents} format="currency" currency={data.currency} />
           </StatCard>
           <StatCard icon={Layers} label="Active subscriptions">
             <CountUp value={data.activeCount} format="integer" />

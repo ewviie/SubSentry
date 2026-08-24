@@ -32,6 +32,39 @@ describe("runInsightsEngine", () => {
     expect(output.stats.activeCount).toBe(1);
   });
 
+  // Regression: totalYearlyCents used to be totalMonthlyCents * 12,
+  // double-rounding a yearly subscription's annual figure away from its own
+  // stored price. $99.99/yr must report exactly 9999, not 9996.
+  it("reports a yearly subscription's exact annual total, not a double-rounded one", () => {
+    const output = runInsightsEngine([sub({ name: "Yearly Sub", billingCycle: "yearly", amountCents: 9999 })], false);
+    expect(output.stats.totalYearlyCents).toBe(9999);
+  });
+
+  // Regression, reproducing an exact real-account bug found via live browser
+  // verification: stats.totalMonthlyCents/totalYearlyCents/topMerchants used
+  // to sum/rank across ALL active subscriptions regardless of currency. A
+  // portfolio of 2 USD subscriptions ($15.49/mo Netflix, $8.00/mo Notion)
+  // plus 1 GBP subscription (£25.00/mo UK Gym) used to report $31.82 +
+  // £25.00 = "$56.82"/mo and "$681.87"/yr — a number with no real-world
+  // meaning, labeled as if it were all one currency. The correct totals
+  // exclude the GBP subscription and disclose it via otherCurrencyActiveCount.
+  it("excludes a non-primary-currency subscription from stats totals and discloses it", () => {
+    const netflix = sub({ name: "Netflix", amountCents: 1549, billingCycle: "monthly", currency: "usd" });
+    const notion = sub({ name: "Notion", amountCents: 800, billingCycle: "monthly", currency: "usd" });
+    const ukGym = sub({ name: "UK Gym", amountCents: 2500, billingCycle: "monthly", currency: "gbp" });
+    const output = runInsightsEngine([netflix, notion, ukGym], false);
+
+    expect(output.stats.currency).toBe("usd");
+    expect(output.stats.totalMonthlyCents).toBe(2349); // 1549 + 800, not 4849
+    expect(output.stats.totalYearlyCents).toBe(28188); // 2349 * 12, not (4849 * 12)
+    expect(output.stats.otherCurrencyActiveCount).toBe(1);
+    expect(output.stats.activeCount).toBe(3); // the true count is unaffected
+    // topMerchants must never surface the GBP subscription — it's summed
+    // against totalYearlyCents elsewhere (biggest-opportunity.ts's share%),
+    // which would be wrong if the two disagreed on currency.
+    expect(output.stats.topMerchants.map((m) => m.name)).not.toContain("UK Gym");
+  });
+
   it("quick wins are capped at 3", () => {
     // 5 overdue active subscriptions trips health.overdue_renewals' warning
     // branch every time — a single always-firing source is enough to prove
@@ -102,6 +135,25 @@ describe("runInsightsEngine", () => {
     expect(output.savingsForecast.monthlySavingsCents).toBe(1500);
     expect(output.savingsForecast.yearlySavingsCents).toBe(18000);
     expect(output.estimatedYearlySavingsCents).toBe(18000);
+  });
+
+  // Regression, reproducing another exact real-account bug: with 2 USD
+  // subscriptions and 1 GBP subscription all renewing within 30 days,
+  // totalDueNext30DaysCents used to be 1549 + 800 + 2500 = 4849 ("$48.49"),
+  // silently combining GBP cents into a dollar figure. The correct total
+  // excludes the GBP subscription. Renewal dates are computed relative to
+  // the real current date (the engine reads today via `new Date()`
+  // internally, not an injectable parameter) so this is deterministic
+  // regardless of when the test runs, while still landing within the
+  // engine's actual 30-day window every time.
+  it("excludes a non-primary-currency subscription from the renewal forecast's 30-day total", () => {
+    const inDays = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+    const netflix = sub({ name: "Netflix", amountCents: 1549, nextRenewalDate: inDays(5), currency: "usd" });
+    const notion = sub({ name: "Notion", amountCents: 800, nextRenewalDate: inDays(10), currency: "usd" });
+    const ukGym = sub({ name: "UK Gym", amountCents: 2500, nextRenewalDate: inDays(3), currency: "gbp" });
+    const output = runInsightsEngine([netflix, notion, ukGym], false);
+    expect(output.renewalForecast.currency).toBe("usd");
+    expect(output.renewalForecast.totalDueNext30DaysCents).toBe(2349); // 1549 + 800, not 4849
   });
 
   it("renewal forecast identifies the soonest upcoming renewal", () => {

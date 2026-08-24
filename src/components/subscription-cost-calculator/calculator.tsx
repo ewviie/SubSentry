@@ -11,7 +11,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BILLING_CYCLES } from "@/lib/subscriptions/validation";
 import { BILLING_CYCLE_LABELS } from "@/lib/subscriptions/labels";
-import { monthlyCents, formatCents, amountStringToCents } from "@/lib/subscriptions/money";
+import { monthlyCents, annualCents, formatCents, amountStringToCents } from "@/lib/subscriptions/money";
 import type { Subscription } from "@/lib/db/schema";
 
 type Cycle = Subscription["billingCycle"];
@@ -53,13 +53,20 @@ export function CostCalculator() {
 
   const { monthlyTotalCents, yearlyTotalCents, activeCount } = useMemo(() => {
     let monthly = 0;
+    let yearly = 0;
     let count = 0;
     for (const row of rows) {
       if (!row.name.trim() || !/^\d+(\.\d{1,2})?$/.test(row.amount.trim())) continue;
-      monthly += monthlyCents(amountStringToCents(row.amount), row.billingCycle);
+      const cents = amountStringToCents(row.amount);
+      monthly += monthlyCents(cents, row.billingCycle);
+      // Not monthly * 12 — see money.ts's own annualCents comment for why
+      // that double-rounds a yearly/quarterly/weekly row away from what was
+      // actually typed. Each row's own exact annual figure is summed
+      // directly instead.
+      yearly += annualCents(cents, row.billingCycle);
       count += 1;
     }
-    return { monthlyTotalCents: monthly, yearlyTotalCents: monthly * 12, activeCount: count };
+    return { monthlyTotalCents: monthly, yearlyTotalCents: yearly, activeCount: count };
   }, [rows]);
 
   return (

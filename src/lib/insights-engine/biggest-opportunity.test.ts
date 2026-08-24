@@ -16,6 +16,8 @@ function baseOutput(): EngineOutput {
     stats: {
       totalMonthlyCents: 0,
       totalYearlyCents: 0,
+      currency: null,
+      otherCurrencyActiveCount: 0,
       activeCount: 0,
       newSubscriptionsThisMonth: 0,
       longestRunning: null,
@@ -28,6 +30,7 @@ function baseOutput(): EngineOutput {
       totalDueNext30DaysCents: 0,
       busiestPeriod: null,
       largestUpcomingPayment: null,
+      currency: null,
     },
     positive: [],
     warnings: [],
@@ -52,6 +55,7 @@ function savingsRec(overrides: Partial<SavingsRecommendation>): SavingsRecommend
     urgencyDays: 10,
     targetSubscriptionId: "sub-target",
     involvedSubscriptionIds: ["sub-a", "sub-target"],
+    currency: "usd",
     ...overrides,
   };
 }
@@ -134,7 +138,7 @@ describe("computeBiggestOpportunity", () => {
 
   it("falls back to the highest-cost active subscription when no savings or risk exist", () => {
     const output = baseOutput();
-    output.stats.topMerchants = [{ id: "sub-adobe", name: "Adobe Creative Cloud", category: "software", annualCents: 71988 }];
+    output.stats.topMerchants = [{ id: "sub-adobe", name: "Adobe Creative Cloud", category: "software", annualCents: 71988, currency: "usd" }];
     output.stats.totalYearlyCents = 211729;
 
     const result = computeBiggestOpportunity(output);
@@ -145,13 +149,33 @@ describe("computeBiggestOpportunity", () => {
       amountCents: 71988,
       amountLabel: "/yr",
       amountTone: "neutral",
+      currency: "usd",
     });
     expect(result?.description).toContain("34%");
   });
 
+  // Regression: this card used to render formatCents(opportunity.amountCents)
+  // with no currency argument at all, defaulting to USD — so a GBP
+  // subscription's "£300.00/yr" showed as "$300.00/yr" on a real dashboard,
+  // and (a separate bug, fixed upstream in engine.ts's stats computation —
+  // see engine.test.ts) the 44% share was computed by dividing that GBP
+  // figure into a total that mixed in USD spend too. This test locks in the
+  // contract this function must uphold once its inputs are already
+  // currency-safe: the currency it reports is read from the real
+  // subscription data, never assumed.
+  it("reports the top merchant's own currency, not a hardcoded default", () => {
+    const output = baseOutput();
+    output.stats.topMerchants = [{ id: "sub-gym", name: "UK Gym", category: "fitness", annualCents: 30000, currency: "gbp" }];
+    output.stats.totalYearlyCents = 30000;
+
+    const result = computeBiggestOpportunity(output);
+    expect(result?.currency).toBe("gbp");
+    expect(result?.amountCents).toBe(30000);
+  });
+
   it("returns null when there's spend data but it sums to zero", () => {
     const output = baseOutput();
-    output.stats.topMerchants = [{ id: "sub-free", name: "Free Tier Thing", category: "other", annualCents: 0 }];
+    output.stats.topMerchants = [{ id: "sub-free", name: "Free Tier Thing", category: "other", annualCents: 0, currency: "usd" }];
     output.stats.totalYearlyCents = 0;
 
     expect(computeBiggestOpportunity(output)).toBeNull();

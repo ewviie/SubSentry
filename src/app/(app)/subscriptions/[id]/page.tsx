@@ -4,7 +4,7 @@ import { requireUser } from "@/lib/auth/session";
 import { getSubscription, listSubscriptions, getPriceHistory } from "@/lib/subscriptions/queries";
 import { subscriptionIdSchema } from "@/lib/subscriptions/validation";
 import { computeInsights, computeFunctionalOverlapGroups } from "@/lib/subscriptions/insights";
-import { monthlyCents, formatCents } from "@/lib/subscriptions/money";
+import { monthlyCents, annualCents, formatCents } from "@/lib/subscriptions/money";
 import { runInsightsEngine, RULE_RECOMMENDED_ACTION } from "@/lib/insights-engine";
 import { hasPaidAccess } from "@/lib/billing/plan";
 import { EditSubscriptionForm } from "@/components/subscriptions/edit-subscription-form";
@@ -71,13 +71,18 @@ export default async function SubscriptionDetailPage({
   // share of *this subscription's own currency's* spend, not a fabricated
   // cross-currency percentage.
   const sameCurrencyActive = active.filter((s) => s.currency === subscription.currency);
-  const totalActiveAnnualCents = sameCurrencyActive.reduce((sum, s) => sum + monthlyCents(s.amountCents, s.billingCycle), 0) * 12;
+  // Not monthlyCents(...) summed then * 12 — see money.ts's own annualCents
+  // comment for why that double-rounds every yearly/quarterly/weekly
+  // subscription's annual figure away from its own stored price. Each
+  // subscription's exact annual figure is summed directly instead (same
+  // pattern as signals.ts's annualTotalCents).
+  const totalActiveAnnualCents = sameCurrencyActive.reduce((sum, s) => sum + annualCents(s.amountCents, s.billingCycle), 0);
   // null (not 0) for a paused/canceled subscription, or a portfolio with no
   // same-currency active spend at all — see SubscriptionSummary's own
   // comment on why sharePercent is nullable, not just "0%" in that case.
   const sharePercent =
     subscription.status === "active" && totalActiveAnnualCents > 0
-      ? Math.round((monthlyCents(subscription.amountCents, subscription.billingCycle) * 12 * 100) / totalActiveAnnualCents)
+      ? Math.round((annualCents(subscription.amountCents, subscription.billingCycle) * 100) / totalActiveAnnualCents)
       : null;
 
   const overlapGroup = computeFunctionalOverlapGroups(active).find((group) =>

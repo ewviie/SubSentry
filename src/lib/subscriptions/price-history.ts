@@ -1,4 +1,4 @@
-import { monthlyCents } from "./money";
+import { monthlyCents, annualCents } from "./money";
 import type { Subscription, SubscriptionPriceHistory } from "@/lib/db/schema";
 
 // Phase 9: the read side of price-history capture — see schema.ts's own
@@ -23,10 +23,20 @@ export interface PriceChange {
   // not the "10x increase" comparing the bare numbers would suggest).
   // Signed — positive is an increase, negative is a decrease.
   percentChange: number;
-  // Monthly-equivalent delta * 12 — "what this costs differently per year
-  // now," the same annualization convention every other dollar figure in
-  // this app already uses (dashboard's annualTotalCents, signals.ts's
-  // findExpensiveOutliers, ...).
+  // Each row's own exact annual figure (money.ts's annualCents), differenced
+  // — "what this costs differently per year now." Deliberately not each
+  // row's monthly-equivalent delta * 12: for a same-cycle change (the
+  // common case — a yearly subscription's yearly price moved) that would
+  // round twice, e.g. $70/yr -> $84/yr is exactly a $14.00/yr delta, but
+  // going through monthlyCents (700 -> 700.0 vs 583.33 -> 833.33, rounded
+  // to 583/700) and back would report $14.04. annualCents needs no such
+  // detour for a same-cycle pair (it doesn't touch monthlyCents at all,
+  // yearly figures are already exact), and stays correct even when the two
+  // rows have genuinely different cycles, which is exactly when a common
+  // monthly basis is unavoidable — see percentChange below, which still
+  // uses each row's monthly-equivalent on purpose: a ratio needs a shared
+  // per-period basis to compare at all, and a few cents of rounding on an
+  // intermediate monthly figure is immaterial to a percentage.
   annualDeltaCents: number;
 }
 
@@ -67,7 +77,7 @@ export function computeLatestPriceChange(history: SubscriptionPriceHistory[]): P
       currency: latest.currency,
       observedAtIso: latest.observedAt.toISOString().slice(0, 10),
       percentChange: ((latestMonthly - candidateMonthly) / candidateMonthly) * 100,
-      annualDeltaCents: (latestMonthly - candidateMonthly) * 12,
+      annualDeltaCents: annualCents(latest.amountCents, latest.billingCycle) - annualCents(candidate.amountCents, candidate.billingCycle),
     };
   }
   return null;

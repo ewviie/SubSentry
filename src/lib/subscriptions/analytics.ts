@@ -1,5 +1,5 @@
 import type { Subscription } from "@/lib/db/schema";
-import { monthlyCents } from "./money";
+import { monthlyCents, annualCents, splitByPrimaryCurrency } from "./money";
 import { SOURCE_ANALYTICS_LABELS } from "./analytics-labels";
 
 // Every figure here is derived purely from data already in Postgres — same
@@ -16,8 +16,13 @@ export interface SpendBySourceEntry {
   count: number;
 }
 
+// Restricted to the active set's primary currency (splitByPrimaryCurrency)
+// — summing raw cents across different currencies into one "$X/mo" bar
+// would be fabricated math. A non-primary-currency subscription is simply
+// excluded, matching the rest of this file's/queries.ts's established
+// currency-safety pattern.
 export function computeSpendBySource(subscriptions: Subscription[]): SpendBySourceEntry[] {
-  const active = subscriptions.filter((s) => s.status === "active");
+  const { included: active } = splitByPrimaryCurrency(subscriptions.filter((s) => s.status === "active"));
   const bySource = new Map<Subscription["source"], { cents: number; count: number }>();
   for (const s of active) {
     const entry = bySource.get(s.source) ?? { cents: 0, count: 0 };
@@ -43,8 +48,9 @@ export interface BillingCycleEntry {
 
 const CYCLE_ORDER: Subscription["billingCycle"][] = ["monthly", "yearly", "quarterly", "weekly"];
 
+// Same currency-safety restriction as computeSpendBySource above.
 export function computeSpendByBillingCycle(subscriptions: Subscription[]): BillingCycleEntry[] {
-  const active = subscriptions.filter((s) => s.status === "active");
+  const { included: active } = splitByPrimaryCurrency(subscriptions.filter((s) => s.status === "active"));
   const byCycle = new Map<Subscription["billingCycle"], { cents: number; count: number }>();
   for (const s of active) {
     const entry = byCycle.get(s.billingCycle) ?? { cents: 0, count: 0 };
@@ -78,11 +84,17 @@ const monthLabelFormatter = new Intl.DateTimeFormat("en-US", { month: "short", y
 // user has subscriptions predating SubSentry, every one lands in whichever
 // month they actually imported/added them — an honest "when did tracked
 // spend show up," not a claim about pre-tracking history.
+// Restricted to the primary currency (splitByPrimaryCurrency) for the same
+// reason as computeSpendBySource above — deliberately applied to the full
+// `subscriptions` list (every status), not just active, since this
+// function's own "growth over time" scope already intentionally includes
+// canceled subscriptions' historical cost.
 export function computeGrowthOverTime(subscriptions: Subscription[]): GrowthPoint[] {
   if (subscriptions.length === 0) return [];
+  const { included } = splitByPrimaryCurrency(subscriptions);
 
   const byMonth = new Map<string, number>();
-  for (const s of subscriptions) {
+  for (const s of included) {
     const key = monthKey(s.createdAt);
     byMonth.set(key, (byMonth.get(key) ?? 0) + monthlyCents(s.amountCents, s.billingCycle));
   }
@@ -116,8 +128,13 @@ export interface RenewalMonthEntry {
 // nextRenewalDate/billingCycle, not a smoothed average. A yearly
 // subscription only appears in the one month it actually renews in; a
 // monthly one appears in all 12.
+// Restricted to the active set's primary currency (splitByPrimaryCurrency)
+// — same reason as computeSpendBySource above. (engine.ts already passes an
+// active, primary-currency-only list here for its own renewalForecast; this
+// guard also covers the Analytics page's separate direct call with the full
+// subscription list.)
 export function computeRenewalsTimeline(subscriptions: Subscription[], today: Date = new Date()): RenewalMonthEntry[] {
-  const active = subscriptions.filter((s) => s.status === "active");
+  const { included: active } = splitByPrimaryCurrency(subscriptions.filter((s) => s.status === "active"));
   const months: RenewalMonthEntry[] = [];
   const cursor = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
 
@@ -188,23 +205,11 @@ export interface TopMerchantEntry {
   name: string;
   category: Subscription["category"];
   annualCents: number;
-}
-
-// Annualizes directly from the billing cycle rather than monthlyCents(...) *
-// 12 — monthlyCents() already rounds for weekly/quarterly cycles, so
-// multiplying its result by 12 would compound that rounding a second time
-// instead of computing the exact annual figure in one step.
-function annualizedCents(amountCents: number, cycle: Subscription["billingCycle"]): number {
-  switch (cycle) {
-    case "monthly":
-      return amountCents * 12;
-    case "yearly":
-      return amountCents;
-    case "quarterly":
-      return amountCents * 4;
-    case "weekly":
-      return amountCents * 52;
-  }
+  // Each row's own subscription currency — this is a per-row list, not a
+  // sum, so callers must format annualCents with this rather than assuming
+  // USD (a subscription billed in a non-default currency is still real
+  // spend and belongs in this list, just labeled correctly).
+  currency: string;
 }
 
 export function computeTopMerchantsBySpend(subscriptions: Subscription[], limit = 5): TopMerchantEntry[] {
@@ -214,7 +219,8 @@ export function computeTopMerchantsBySpend(subscriptions: Subscription[], limit 
       id: s.id,
       name: s.name,
       category: s.category,
-      annualCents: annualizedCents(s.amountCents, s.billingCycle),
+      annualCents: annualCents(s.amountCents, s.billingCycle),
+      currency: s.currency,
     }))
     .sort((a, b) => b.annualCents - a.annualCents)
     .slice(0, limit);

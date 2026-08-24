@@ -14,7 +14,7 @@ const BOTTOM_PADDING = 2;
 // SavingsCard), no legend needed per the dataviz single-series rule. Percent
 // coordinate space (viewBox="0 0 100 40") lets hover hit-targets be plain
 // absolutely-positioned buttons instead of SVG-space pointer math.
-export function GrowthChart({ points }: { points: GrowthPoint[] }) {
+export function GrowthChart({ points, currency }: { points: GrowthPoint[]; currency?: string }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
   if (points.length < 2) {
@@ -42,7 +42,7 @@ export function GrowthChart({ points }: { points: GrowthPoint[] }) {
     <div>
       <div className="mb-3 flex items-baseline justify-between">
         <p className="text-sm text-muted-foreground">{active.monthLabel}</p>
-        <p className="font-mono text-lg font-semibold tabular-nums">{formatCents(active.cumulativeMonthlyCents)}/mo</p>
+        <p className="font-mono text-lg font-semibold tabular-nums">{formatCents(active.cumulativeMonthlyCents, currency)}/mo</p>
       </div>
       <div
         className="relative h-48 w-full"
@@ -95,7 +95,7 @@ export function GrowthChart({ points }: { points: GrowthPoint[] }) {
               onMouseEnter={() => setHoverIndex(i)}
               onFocus={() => setHoverIndex(i)}
               onBlur={() => setHoverIndex(null)}
-              aria-label={`${point.monthLabel}: ${formatCents(point.cumulativeMonthlyCents)} per month`}
+              aria-label={`${point.monthLabel}: ${formatCents(point.cumulativeMonthlyCents, currency)} per month`}
             />
           ))}
         </div>
@@ -118,7 +118,7 @@ export function GrowthChart({ points }: { points: GrowthPoint[] }) {
           {points.map((point, i) => (
             <tr key={point.monthIso} className={cn(i === activeIndex && "font-semibold")}>
               <td>{point.monthLabel}</td>
-              <td>{formatCents(point.cumulativeMonthlyCents)}</td>
+              <td>{formatCents(point.cumulativeMonthlyCents, currency)}</td>
             </tr>
           ))}
         </tbody>

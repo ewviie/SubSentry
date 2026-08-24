@@ -15,20 +15,43 @@ import { FREE_RULES } from "./rules/free";
 import { PREMIUM_RULES } from "./rules/premium";
 import { computeHealthScore } from "./health-score";
 import { computeOptimizationScore } from "./optimization-score";
-import { monthlyTotalCents, recentGrowthCount } from "./signals";
+import { monthlyTotalCents, annualTotalCents, recentGrowthCount } from "./signals";
+import { splitByPrimaryCurrency } from "@/lib/subscriptions/money";
 
 export type { EngineContext, InsightResult, HealthScoreResult, InsightRule, HealthBreakdownEntry, HealthRating } from "./types";
 
 export interface RenewalForecast {
-  nextRenewal: { subscriptionId: string; name: string; date: string; cents: number } | null;
+  // nextRenewal/largestUpcomingPayment are single-item picks across ALL
+  // active subscriptions regardless of currency (not sums), each carrying
+  // its own subscription's real currency — comparing "biggest payment" by
+  // raw cents across different currencies is still a face-value comparison
+  // (not a true-value one, since this app has no exchange rates), a known,
+  // documented limitation rather than a fixed one this pass.
+  nextRenewal: { subscriptionId: string; name: string; date: string; cents: number; currency: string } | null;
+  // totalDueNext30DaysCents/busiestPeriod ARE sums across multiple
+  // subscriptions, so — unlike the two picks above — they're restricted to
+  // `currency` (active's primary currency, via splitByPrimaryCurrency) to
+  // avoid combining raw cents from different currencies into one figure.
   totalDueNext30DaysCents: number;
   busiestPeriod: { monthLabel: string; totalCents: number } | null;
-  largestUpcomingPayment: { subscriptionId: string; name: string; monthLabel: string; cents: number } | null;
+  largestUpcomingPayment: { subscriptionId: string; name: string; monthLabel: string; cents: number; currency: string } | null;
+  // The currency totalDueNext30DaysCents/busiestPeriod are denominated in;
+  // null only when there are no active subscriptions at all.
+  currency: string | null;
 }
 
 export interface EngineStats {
+  // totalMonthlyCents/totalYearlyCents/topMerchants are restricted to
+  // `currency` (active's primary currency, via splitByPrimaryCurrency) —
+  // summing raw cents across different currencies into one figure would be
+  // fabricated math, the same rule getDashboardData (queries.ts) already
+  // follows for the dashboard's own headline numbers. otherCurrencyActiveCount
+  // is how many active subscriptions this excludes, so a consumer can
+  // disclose the gap rather than let the total look complete when it isn't.
   totalMonthlyCents: number;
   totalYearlyCents: number;
+  currency: string | null;
+  otherCurrencyActiveCount: number;
   activeCount: number;
   newSubscriptionsThisMonth: number;
   longestRunning: { subscriptionId: string; name: string; createdAt: string } | null;
@@ -62,13 +85,18 @@ function todayIso(): string {
 function buildRenewalForecast(active: Subscription[], today: string): RenewalForecast {
   const upcoming = active.filter((s) => s.nextRenewalDate >= today).sort((a, b) => a.nextRenewalDate.localeCompare(b.nextRenewalDate));
   const nextRenewal = upcoming[0]
-    ? { subscriptionId: upcoming[0].id, name: upcoming[0].name, date: upcoming[0].nextRenewalDate, cents: upcoming[0].amountCents }
+    ? { subscriptionId: upcoming[0].id, name: upcoming[0].name, date: upcoming[0].nextRenewalDate, cents: upcoming[0].amountCents, currency: upcoming[0].currency }
     : null;
 
-  const in30 = new Date(new Date(`${today}T00:00:00Z`).getTime() + 30 * 86_400_000).toISOString().slice(0, 10);
-  const totalDueNext30DaysCents = upcoming.filter((s) => s.nextRenewalDate <= in30).reduce((sum, s) => sum + s.amountCents, 0);
+  // Sums below are restricted to active's primary currency — see this
+  // interface's own field comments.
+  const { currency, included: primaryActive } = splitByPrimaryCurrency(active);
+  const primaryUpcoming = upcoming.filter((s) => s.currency === currency);
 
-  const timeline = computeRenewalsTimeline(active, new Date(`${today}T00:00:00Z`));
+  const in30 = new Date(new Date(`${today}T00:00:00Z`).getTime() + 30 * 86_400_000).toISOString().slice(0, 10);
+  const totalDueNext30DaysCents = primaryUpcoming.filter((s) => s.nextRenewalDate <= in30).reduce((sum, s) => sum + s.amountCents, 0);
+
+  const timeline = computeRenewalsTimeline(primaryActive, new Date(`${today}T00:00:00Z`));
   const busiestMonth = timeline.reduce((max, m) => (m.totalCents > (max?.totalCents ?? 0) ? m : max), timeline[0] ?? null);
   const busiestPeriod = busiestMonth && busiestMonth.totalCents > 0 ? { monthLabel: busiestMonth.monthLabel, totalCents: busiestMonth.totalCents } : null;
 
@@ -79,10 +107,11 @@ function buildRenewalForecast(active: Subscription[], today: string): RenewalFor
         name: largest.name,
         monthLabel: timeline.find((m) => m.monthIso === largest.nextRenewalDate.slice(0, 7))?.monthLabel ?? busiestMonth?.monthLabel ?? "",
         cents: largest.amountCents,
+        currency: largest.currency,
       }
     : null;
 
-  return { nextRenewal, totalDueNext30DaysCents, busiestPeriod, largestUpcomingPayment };
+  return { nextRenewal, totalDueNext30DaysCents, busiestPeriod, largestUpcomingPayment, currency };
 }
 
 export function runInsightsEngine(subscriptions: Subscription[], isPremium: boolean): EngineOutput {
@@ -167,7 +196,10 @@ export function runInsightsEngine(subscriptions: Subscription[], isPremium: bool
   const healthScore = computeHealthScore(ctx);
   const optimizationScore = computeOptimizationScore(ctx, totalUnrealizedMonthlyCents * 12);
 
-  const totalMonthlyCents = monthlyTotalCents(active);
+  // Restricted to active's primary currency (splitByPrimaryCurrency) — see
+  // EngineStats' own field comment.
+  const { currency: primaryCurrency, included: primaryActive, excluded: otherCurrencyActive } = splitByPrimaryCurrency(active);
+  const totalMonthlyCents = monthlyTotalCents(primaryActive);
   const longest = active.length > 0 ? [...active].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0] : null;
 
   return {
@@ -175,7 +207,13 @@ export function runInsightsEngine(subscriptions: Subscription[], isPremium: bool
     optimizationScore,
     stats: {
       totalMonthlyCents,
-      totalYearlyCents: totalMonthlyCents * 12,
+      // Not totalMonthlyCents * 12 — see money.ts's own annualCents comment
+      // (and signals.ts's annualTotalCents, which sums each subscription's
+      // exact annual figure directly rather than scaling an already-rounded
+      // monthly total).
+      totalYearlyCents: annualTotalCents(primaryActive),
+      currency: primaryCurrency,
+      otherCurrencyActiveCount: otherCurrencyActive.length,
       activeCount: active.length,
       newSubscriptionsThisMonth: recentGrowthCount(active, today, 30),
       longestRunning: longest
@@ -183,7 +221,16 @@ export function runInsightsEngine(subscriptions: Subscription[], isPremium: bool
         : null,
       spendBySource: computeSpendBySource(subscriptions),
       billingCycles: computeSpendByBillingCycle(subscriptions),
-      topMerchants: computeTopMerchantsBySpend(subscriptions),
+      // Restricted to primary-currency active subscriptions so this list's
+      // [0] entry (computeBiggestOpportunity's fallback) is guaranteed the
+      // same currency as totalYearlyCents above — the two are combined into
+      // a "% of total annual spend" figure that would otherwise divide one
+      // currency's number by a sum of several. The Analytics page's own
+      // "Top merchants" list calls computeTopMerchantsBySpend directly with
+      // the full subscription list instead (see analytics/page.tsx) — a
+      // per-row list, not a sum, so it correctly still shows every
+      // currency's merchants.
+      topMerchants: computeTopMerchantsBySpend(primaryActive),
     },
     renewalForecast: buildRenewalForecast(active, today),
     positive,

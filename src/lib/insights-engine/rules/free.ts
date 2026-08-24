@@ -17,7 +17,7 @@ const biggestSubscription: InsightRule = {
     return {
       ruleId: this.id,
       title: `${biggest.name} is your biggest subscription`,
-      description: `${formatCents(monthlyCents(biggest.amountCents, biggest.billingCycle))}/mo.`,
+      description: `${formatCents(monthlyCents(biggest.amountCents, biggest.billingCycle), biggest.currency)}/mo.`,
       severity: "info",
       category: "cost",
       premium: false,
@@ -41,7 +41,7 @@ const cheapestSubscription: InsightRule = {
     return {
       ruleId: this.id,
       title: `${cheapest.name} is your cheapest subscription`,
-      description: `${formatCents(monthlyCents(cheapest.amountCents, cheapest.billingCycle))}/mo.`,
+      description: `${formatCents(monthlyCents(cheapest.amountCents, cheapest.billingCycle), cheapest.currency)}/mo.`,
       severity: "info",
       category: "cost",
       premium: false,

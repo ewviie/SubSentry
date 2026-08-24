@@ -68,6 +68,32 @@ describe("computeInsights", () => {
     expect(insights.some((i) => i.type === "expensive_category")).toBe(true);
   });
 
+  // Regression, reproducing an exact real-account bug found via live
+  // browser verification: monthlyTotal/category cents used to sum across
+  // ALL active subscriptions regardless of currency, so a single GBP
+  // subscription (£25.00/mo) mixed into a USD total read as "Fitness makes
+  // up 44% of your monthly spend ($25.00/mo)" — a dollar sign on a pound
+  // amount, and a % computed against a fabricated mixed-currency total.
+  // The category-concentration insight must exclude it entirely (2 USD
+  // subscriptions alone don't clear the 40% share threshold either).
+  it("excludes a non-primary-currency subscription from the expensive-category share", () => {
+    const subs = [
+      sub({ category: "streaming", amountCents: 1549, currency: "usd" }), // Netflix
+      sub({ category: "software", amountCents: 800, currency: "usd" }), // Notion
+      sub({ category: "fitness", amountCents: 2500, currency: "gbp" }), // UK Gym
+    ];
+    const insights = computeInsights(subs);
+    const category = insights.find((i) => i.type === "expensive_category");
+    // Streaming (Netflix, USD) legitimately dominates the USD-only total —
+    // fitness (the GBP subscription) must never win this comparison or
+    // appear in its dollar figure, even though it's the single biggest line
+    // item by raw cents.
+    expect(category?.title).toBe("Streaming is your biggest expense");
+    expect(category?.description).toContain("$15.49/mo");
+    expect(category?.description).not.toContain("$25.00");
+    expect(category?.description).not.toContain("Fitness");
+  });
+
   it("does not flag an expensive category when spend is evenly split", () => {
     const subs = [
       sub({ category: "streaming", amountCents: 1000 }),
@@ -91,6 +117,43 @@ describe("computeInsights", () => {
     ).toBe(true);
   });
 
+  // Regression: the dollar figure in this insight's own text used to be
+  // computed as monthlyCents(...) * 12, double-rounding a yearly
+  // subscription's annual cost away from its own stored price. A $99.99/yr
+  // outlier must say "$99.99/year", never "$99.96/year".
+  it("reports a yearly outlier's exact stored price in its description, not a double-rounded one", () => {
+    const outlier = sub({ name: "Big Ticket", billingCycle: "yearly", amountCents: 9999 });
+    const subs = [
+      outlier,
+      sub({ name: "Small A", amountCents: 100 }),
+      sub({ name: "Small B", amountCents: 100 }),
+    ];
+    const insight = computeInsights(subs).find(
+      (i) => i.type === "high_yearly_spend" && i.subscriptionIds.includes(outlier.id),
+    );
+    expect(insight?.description).toContain("$99.99/year");
+    expect(insight?.description).not.toContain("$99.96/year");
+  });
+
+  // Regression: meanAnnual used to be computed across ALL active
+  // subscriptions regardless of currency, so a large non-primary-currency
+  // subscription could distort (or be wrongly judged against) a mean
+  // blended from a different currency.
+  it("computes the outlier mean only within the primary currency", () => {
+    const outlier = sub({ name: "Big Ticket", amountCents: 10000, billingCycle: "monthly", currency: "usd" });
+    const subs = [
+      outlier,
+      sub({ name: "Small A", amountCents: 500, currency: "usd" }),
+      sub({ name: "Small B", amountCents: 500, currency: "usd" }),
+      sub({ name: "Huge GBP", amountCents: 999999, billingCycle: "monthly", currency: "gbp" }), // must not raise the mean
+    ];
+    const insight = computeInsights(subs).find(
+      (i) => i.type === "high_yearly_spend" && i.subscriptionIds.includes(outlier.id),
+    );
+    expect(insight).toBeDefined();
+    expect(insight?.description).toContain("$1,200.00/year");
+  });
+
   it("flags likely duplicate names", () => {
     const a = sub({ name: "Netflix" });
     const b = sub({ name: "Netflix Premium" });
@@ -100,6 +163,18 @@ describe("computeInsights", () => {
         (i) => i.type === "possible_overlap" && i.subscriptionIds.includes(a.id) && i.subscriptionIds.includes(b.id),
       ),
     ).toBe(true);
+  });
+
+  // Regression: this duplicate-savings figure used to render with
+  // formatCents(savings) — no currency argument, defaulting to USD — so a
+  // GBP duplicate's savings text showed a "$" sign on a pound amount.
+  it("labels a duplicate's savings with its own currency, not a hardcoded default", () => {
+    const a = sub({ name: "UK Gym", currency: "gbp", amountCents: 2000 });
+    const b = sub({ name: "UK Gym Plus", currency: "gbp", amountCents: 2500 });
+    const insights = computeInsights([a, b]);
+    const overlap = insights.find((i) => i.type === "possible_overlap" && i.title.includes("duplicate"));
+    expect(overlap?.description).toContain("£25.00");
+    expect(overlap?.description).not.toContain("$25.00");
   });
 
   it("does not flag unrelated names as duplicates", () => {

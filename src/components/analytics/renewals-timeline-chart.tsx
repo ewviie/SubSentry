@@ -10,7 +10,7 @@ import type { RenewalMonthEntry } from "@/lib/subscriptions/analytics";
 // category — a sequential ramp or per-bar hue here would wrongly imply
 // each month is a different "kind" of thing. Per-bar hover tooltip, same
 // interaction pattern as the line chart's hover.
-export function RenewalsTimelineChart({ months }: { months: RenewalMonthEntry[] }) {
+export function RenewalsTimelineChart({ months, currency }: { months: RenewalMonthEntry[]; currency?: string }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const max = Math.max(...months.map((m) => m.totalCents), 1);
 
@@ -34,7 +34,7 @@ export function RenewalsTimelineChart({ months }: { months: RenewalMonthEntry[] 
               >
                 {hoverIndex === i ? (
                   <div className="absolute -top-9 z-10 whitespace-nowrap rounded-md border border-border bg-popover px-2 py-1 text-xs font-medium shadow-elevation-low">
-                    {formatCents(month.totalCents)}
+                    {formatCents(month.totalCents, currency)}
                   </div>
                 ) : null}
                 <button
@@ -46,7 +46,7 @@ export function RenewalsTimelineChart({ months }: { months: RenewalMonthEntry[] 
                   onMouseEnter={() => setHoverIndex(i)}
                   onFocus={() => setHoverIndex(i)}
                   onBlur={() => setHoverIndex(null)}
-                  aria-label={`${month.monthLabel}: ${formatCents(month.totalCents)} across ${month.count} renewal${month.count === 1 ? "" : "s"}`}
+                  aria-label={`${month.monthLabel}: ${formatCents(month.totalCents, currency)} across ${month.count} renewal${month.count === 1 ? "" : "s"}`}
                 />
               </div>
             </div>
@@ -73,7 +73,7 @@ export function RenewalsTimelineChart({ months }: { months: RenewalMonthEntry[] 
           {months.map((month) => (
             <tr key={month.monthIso}>
               <td>{month.monthLabel}</td>
-              <td>{formatCents(month.totalCents)}</td>
+              <td>{formatCents(month.totalCents, currency)}</td>
               <td>{month.count}</td>
             </tr>
           ))}

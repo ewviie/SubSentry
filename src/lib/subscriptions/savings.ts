@@ -1,5 +1,5 @@
 import type { Subscription } from "@/lib/db/schema";
-import { monthlyCents, formatCents } from "./money";
+import { monthlyCents, annualCents, formatCents } from "./money";
 import { normalizeName, namesLikelyMatch, computeFunctionalOverlapGroups, findSmallSubscriptionsCluster, smallSubscriptionsClusterTitle } from "./insights";
 
 // A dedicated, actionable savings engine — distinct from insights.ts's
@@ -59,6 +59,12 @@ export interface SavingsRecommendation {
   urgencyDays: number;
   targetSubscriptionId: string;
   involvedSubscriptionIds: string[];
+  // Currency monthlySavingsCents/impactCents are denominated in. For
+  // "duplicate" this is the target (redundant) subscription's own currency;
+  // for "functional_overlap"/"small_subscriptions" it's the group/cluster's
+  // single shared currency (both already refuse to form a mixed-currency
+  // group — see computeFunctionalOverlapGroups/findSmallSubscriptionsCluster).
+  currency: string;
 }
 
 function daysUntil(dateIso: string, todayIso: string): number {
@@ -132,6 +138,7 @@ export function computeSavingsRecommendations(
         urgencyDays: soonestUrgencyDays([active[i], active[j]], todayIso),
         targetSubscriptionId: active[j].id,
         involvedSubscriptionIds: [active[i].id, active[j].id],
+        currency: active[j].currency,
       });
     }
   }
@@ -168,6 +175,7 @@ export function computeSavingsRecommendations(
       urgencyDays: soonestUrgencyDays(subs, todayIso),
       targetSubscriptionId: priciest.id,
       involvedSubscriptionIds: subs.map((s) => s.id),
+      currency,
     });
   }
 
@@ -195,6 +203,7 @@ export function computeSavingsRecommendations(
       urgencyDays: soonestUrgencyDays(smallCluster.subscriptions, todayIso),
       targetSubscriptionId: priciest.id,
       involvedSubscriptionIds: smallCluster.subscriptions.map((s) => s.id),
+      currency: smallCluster.currency,
     });
   }
 
@@ -297,7 +306,9 @@ export function computeRealizedSavings(allSubscriptions: Subscription[]): Realiz
   if (!singleCurrency) return { monthlyCents: null, yearlyCents: null, currency: null, canceledCount: canceled.length };
 
   const totalMonthlyCents = canceled.reduce((sum, s) => sum + monthlyCents(s.amountCents, s.billingCycle), 0);
-  return { monthlyCents: totalMonthlyCents, yearlyCents: totalMonthlyCents * 12, currency, canceledCount: canceled.length };
+  // Not totalMonthlyCents * 12 — see money.ts's own annualCents comment.
+  const totalYearlyCents = canceled.reduce((sum, s) => sum + annualCents(s.amountCents, s.billingCycle), 0);
+  return { monthlyCents: totalMonthlyCents, yearlyCents: totalYearlyCents, currency, canceledCount: canceled.length };
 }
 
 export type SavingsPriority = "high" | "medium" | "low";

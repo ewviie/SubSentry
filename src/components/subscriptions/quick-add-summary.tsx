@@ -3,7 +3,7 @@
 import { motion, useReducedMotion } from "framer-motion";
 import { AlertCircle } from "lucide-react";
 import { CATEGORY_LABELS } from "@/lib/subscriptions/labels";
-import { amountStringToCents, formatCents, monthlyCents } from "@/lib/subscriptions/money";
+import { amountStringToCents, formatCents, annualCents } from "@/lib/subscriptions/money";
 import { fadeInUp, staggerContainer } from "@/lib/motion";
 import type { SubscriptionFormValues } from "@/components/subscriptions/subscription-form";
 
@@ -27,7 +27,10 @@ export function QuickAddSummary({
   const prefersReducedMotion = useReducedMotion();
   const dateProvided = draft.nextRenewalDate !== "";
   const amountCents = amountStringToCents(draft.amount);
-  const yearlyCents = monthlyCents(amountCents, draft.billingCycle) * 12;
+  // Not monthlyCents(...) * 12 — see money.ts's own annualCents comment for
+  // why that double-rounds a yearly/quarterly/weekly amount away from what
+  // was actually typed.
+  const yearlyCents = annualCents(amountCents, draft.billingCycle);
 
   const container = prefersReducedMotion ? undefined : staggerContainer(0.06);
 

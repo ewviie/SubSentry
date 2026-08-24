@@ -2,7 +2,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { subscriptions, subscriptionPriceHistory, type Subscription, type SubscriptionPriceHistory, type User } from "@/lib/db/schema";
 import { MAX_ACTIVE_SUBSCRIPTIONS, hasReachedSubscriptionLimit } from "@/lib/billing/plan";
-import { amountStringToCents, monthlyCents } from "./money";
+import { amountStringToCents, monthlyCents, annualCents, splitByPrimaryCurrency } from "./money";
 import type { SubscriptionInput, SubscriptionUpdate } from "./validation";
 import type { SubscriptionSource } from "./source";
 
@@ -282,6 +282,19 @@ export interface DashboardData {
   activeCount: number;
   monthlyTotalCents: number;
   annualTotalCents: number;
+  // The currency monthlyTotalCents/annualTotalCents/categoryBreakdown are
+  // actually denominated in — see splitByPrimaryCurrency's own comment.
+  // Never assume "usd": a single-currency account's own currency is
+  // whatever it is, and formatCents needs to be told, not left to its
+  // "usd" default, or a EUR/GBP-only account's real numbers would render
+  // with a $ sign no subscription of theirs actually uses.
+  currency: string;
+  // How many active subscriptions exist in a currency other than
+  // `currency` above and are therefore NOT included in monthlyTotalCents/
+  // annualTotalCents/categoryBreakdown — 0 for the overwhelmingly common
+  // single-currency case. The UI must disclose this count somewhere
+  // whenever it's nonzero rather than silently under-stating spend.
+  otherCurrencyActiveCount: number;
   upcomingRenewals: Subscription[];
   categoryBreakdown: CategoryBreakdownEntry[];
 }
@@ -294,8 +307,29 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
   const all = await listSubscriptions(userId);
   const active = all.filter((s) => s.status === "active");
 
-  const monthlyTotalCents = active.reduce(
+  // monthlyTotalCents/annualTotalCents/categoryBreakdown below are computed
+  // from `primary` only, never from `active` directly — summing raw cents
+  // across different currencies and labeling the result with just one
+  // currency symbol would be a fabricated number wearing a real one's
+  // formatting (this app has no exchange-rate source — see
+  // splitByPrimaryCurrency's own comment). `other.length` is returned as
+  // otherCurrencyActiveCount so the UI can disclose what's excluded rather
+  // than silently under-stating spend for the (real, if uncommon) case of
+  // an account with a mix — e.g. one subscription entered or imported in a
+  // different currency from the rest.
+  const { currency, included: primary, excluded: other } = splitByPrimaryCurrency(active);
+
+  const monthlyTotalCents = primary.reduce(
     (sum, s) => sum + monthlyCents(s.amountCents, s.billingCycle),
+    0,
+  );
+  // Not monthlyTotalCents * 12 — see money.ts's own annualCents comment.
+  // Summing each subscription's own exact annual figure directly (instead
+  // of scaling an already-rounded monthly total) is the only way this
+  // matches, cent for cent, what a yearly-billed subscription's own stored
+  // price actually is.
+  const annualTotalCents = primary.reduce(
+    (sum, s) => sum + annualCents(s.amountCents, s.billingCycle),
     0,
   );
 
@@ -306,7 +340,7 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
     .sort((a, b) => a.nextRenewalDate.localeCompare(b.nextRenewalDate));
 
   const byCategory = new Map<Subscription["category"], number>();
-  for (const s of active) {
+  for (const s of primary) {
     byCategory.set(
       s.category,
       (byCategory.get(s.category) ?? 0) + monthlyCents(s.amountCents, s.billingCycle),
@@ -320,7 +354,13 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
     subscriptions: all,
     activeCount: active.length,
     monthlyTotalCents,
-    annualTotalCents: monthlyTotalCents * 12,
+    annualTotalCents,
+    // "usd" only when there are zero primary-currency subscriptions to
+    // read a real one from (splitByPrimaryCurrency returns null currency
+    // only for an empty input) — matches formatCents' own "usd" default,
+    // not a claim that this account's currency actually is USD.
+    currency: currency ?? "usd",
+    otherCurrencyActiveCount: other.length,
     upcomingRenewals,
     categoryBreakdown,
   };

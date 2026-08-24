@@ -25,7 +25,7 @@ export function TopMerchantsList({ merchants }: { merchants: TopMerchantEntry[] 
               </div>
               <span className="flex-1 truncate font-medium">{merchant.name}</span>
               <span className="font-mono text-sm tabular-nums text-muted-foreground">
-                {formatCents(merchant.annualCents)}/yr
+                {formatCents(merchant.annualCents, merchant.currency)}/yr
               </span>
             </Link>
           </li>

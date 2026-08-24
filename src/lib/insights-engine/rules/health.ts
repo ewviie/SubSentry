@@ -1,5 +1,5 @@
 import { CATEGORY_LABELS } from "@/lib/subscriptions/labels";
-import { formatCents } from "@/lib/subscriptions/money";
+import { formatCents, splitByPrimaryCurrency } from "@/lib/subscriptions/money";
 import type { EngineContext, InsightRule, HealthDimensionKey } from "../types";
 import {
   monthlyTotalCents,
@@ -95,7 +95,14 @@ const duplicates: InsightRule = {
       subscriptionIds: ids,
       dimension: "redundancy" satisfies HealthDimensionKey,
       scoreImpact: -Math.min(pairs.length * STRONG, 40),
+      // Sums each pair's redundant-subscription cost. Duplicate pairs are
+      // near-always the same currency as the rest of this user's portfolio
+      // in practice; a genuinely mixed-currency set of simultaneous
+      // duplicate pairs (rare — needs 2+ separate name-matches in 2+
+      // different currencies at once) would still sum here, a known,
+      // narrower edge case than the ones this pass fixes.
       monthlySavingsCents: pairs.reduce((sum, p) => sum + p.monthlySavingsCents, 0),
+      currency: pairs[0]?.redundant.currency,
     };
   },
 };
@@ -212,7 +219,7 @@ const outliers: InsightRule = {
     return {
       ruleId: this.id,
       title: found.length === 1 ? "1 outsized subscription" : `${found.length} outsized subscriptions`,
-      description: formatNameList(found.map((o) => `${o.subscription.name} (${formatCents(o.annualCents)}/yr)`)),
+      description: formatNameList(found.map((o) => `${o.subscription.name} (${formatCents(o.annualCents, o.subscription.currency)}/yr)`)),
       severity: "info",
       category: "health",
       premium: false,
@@ -344,7 +351,12 @@ const renewalRisk: InsightRule = {
   category: "health",
   premium: false,
   evaluate(ctx: EngineContext) {
-    const monthly = monthlyTotalCents(ctx.active);
+    // Both sides restricted to active's primary currency (monthlyTotalCents
+    // itself is currency-agnostic — the guard lives at the call site, same
+    // as engine.ts's stats) so "above your typical monthly spend" always
+    // compares two figures in the same currency.
+    const { currency, included: primaryActive } = splitByPrimaryCurrency(ctx.active);
+    const monthly = monthlyTotalCents(primaryActive);
     const cluster = findRenewalCluster(ctx.active, ctx.todayIso);
     if (monthly === 0) return null;
     const upcoming = upcomingRenewalTotalCents(ctx.active, ctx.todayIso);
@@ -355,7 +367,7 @@ const renewalRisk: InsightRule = {
       return {
         ruleId: this.id,
         title: "More than usual is due in the next 30 days",
-        description: `${formatCents(upcoming)} is due in the next 30 days, above your typical monthly spend${clusterNote}.`,
+        description: `${formatCents(upcoming, currency ?? undefined)} is due in the next 30 days, above your typical monthly spend${clusterNote}.`,
         severity: "warning",
         category: "health",
         premium: false,
@@ -364,13 +376,13 @@ const renewalRisk: InsightRule = {
         scoreImpact: -MEDIUM,
       };
     }
-    if (cluster) {
+    if (cluster && cluster.currency) {
       // Informational only — see this rule's own comment on why clustering
       // alone never moves the score.
       return {
         ruleId: this.id,
         title: `${cluster.subscriptionIds.length} renewals land the same week`,
-        description: `Starting ${cluster.windowStartIso}, ${formatCents(cluster.totalCents)} is due within 7 days — in line with your typical monthly spend.`,
+        description: `Starting ${cluster.windowStartIso}, ${formatCents(cluster.totalCents, cluster.currency)} is due within 7 days — in line with your typical monthly spend.`,
         severity: "info",
         category: "health",
         premium: false,

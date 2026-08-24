@@ -22,6 +22,29 @@ describe("premium.annual_switch_savings", () => {
     expect(result!.monthlySavingsCents).toBeGreaterThan(0);
     expect(result!.premium).toBe(true);
   });
+
+  // Regression, reproducing an exact real-account bug found via live
+  // browser verification: totalAnnualCents used to sum amountCents * 12
+  // across ALL monthly subscriptions regardless of currency. A portfolio of
+  // 2 USD monthly subscriptions ($15.49 Netflix, $8.00 Notion) plus 1 GBP
+  // monthly subscription (£25.00 UK Gym) used to compute "switching could
+  // save an estimated $87.24/year" — a number that folded £25/mo raw cents
+  // into a dollar-labeled estimate ((1549+800+2500)*12*0.15/12*12 = 8724
+  // cents). The correct estimate only ever considers the primary (USD)
+  // currency's monthly subscriptions: (1549+800)*12*0.15 rounded, /12
+  // rounded, *12 = 4224 cents = $42.24/year.
+  it("excludes a non-primary-currency monthly subscription from the annual-switch estimate", () => {
+    const netflix = sub({ name: "Netflix", billingCycle: "monthly", amountCents: 1549, currency: "usd" });
+    const notion = sub({ name: "Notion", billingCycle: "monthly", amountCents: 800, currency: "usd" });
+    const ukGym = sub({ name: "UK Gym", billingCycle: "monthly", amountCents: 2500, currency: "gbp" });
+    const result = rule.evaluate(ctx([netflix, notion, ukGym]));
+    expect(result).not.toBeNull();
+    expect(result!.currency).toBe("usd");
+    expect(result!.monthlySavingsCents).toBe(352);
+    expect(result!.description).toContain("$42.24/year");
+    expect(result!.description).not.toContain("$87.24");
+    expect(result!.subscriptionIds).not.toContain(ukGym.id);
+  });
 });
 
 describe("premium.risk_category_concentration", () => {

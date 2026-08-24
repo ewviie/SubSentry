@@ -115,6 +115,20 @@ describe("health.expensive_outliers", () => {
     const result = rule.evaluate(ctx([sub({ amountCents: 1000 }), sub({ amountCents: 1000 }), sub({ amountCents: 10000 })]));
     expect(result?.scoreImpact).toBeLessThan(0);
   });
+
+  // Regression: this used to render formatCents(o.annualCents) with no
+  // currency argument, so a non-USD outlier's own currency symbol was lost.
+  it("labels an outlier's cost with its own currency, not a hardcoded default", () => {
+    const result = rule.evaluate(
+      ctx([
+        sub({ name: "UK Gym", amountCents: 2000, currency: "gbp" }),
+        sub({ name: "Small", amountCents: 200, currency: "gbp" }),
+        sub({ name: "Big UK Sub", amountCents: 20000, currency: "gbp" }),
+      ]),
+    );
+    expect(result?.description).toContain("£");
+    expect(result?.description).not.toContain("$");
+  });
 });
 
 describe("health.small_subscriptions_add_up", () => {
@@ -261,6 +275,25 @@ describe("health.renewal_risk", () => {
     expect(result?.severity).toBe("warning");
     expect(result?.scoreImpact).toBeLessThan(0);
     expect(result?.dimension).toBe("renewal");
+  });
+
+  // Regression: monthly/upcoming totals used to sum amountCents across ALL
+  // active subscriptions regardless of currency, so a large non-primary-
+  // currency renewal landing the same week could fabricate (or mask) a
+  // "spike" that was never real in the account's own currency. A large GBP
+  // renewal alongside a normal USD monthly baseline must not trigger a USD
+  // cash-flow-spike warning.
+  it("does not fabricate a cash-flow spike from a non-primary-currency renewal", () => {
+    const subs = [
+      sub({ nextRenewalDate: "2026-01-05", amountCents: 1000, billingCycle: "monthly", currency: "usd" }),
+      sub({ nextRenewalDate: "2026-01-06", amountCents: 1000, billingCycle: "monthly", currency: "usd" }),
+      // A large GBP yearly charge landing the same week — real money, but
+      // not part of this account's USD baseline or USD upcoming total.
+      sub({ nextRenewalDate: "2026-01-07", amountCents: 20000, billingCycle: "yearly", currency: "gbp" }),
+    ];
+    const result = rule.evaluate(ctx(subs));
+    expect(result?.scoreImpact).toBe(0);
+    expect(result?.severity).not.toBe("warning");
   });
 
   it("positive when renewals are well spread out with no cluster at all", () => {

@@ -151,10 +151,16 @@ export default async function DashboardPage() {
             icon={DollarSign}
             label="Monthly spend"
             accentClassName="bg-emerald-muted text-emerald"
-            caption={`Across ${data.activeCount} active subscription${data.activeCount === 1 ? "" : "s"} · ${formatCents(data.annualTotalCents)}/yr`}
+            caption={`Across ${data.activeCount} active subscription${data.activeCount === 1 ? "" : "s"} · ${formatCents(data.annualTotalCents, data.currency)}/yr`}
             emphasis
           >
-            <CountUp value={data.monthlyTotalCents} format="currency" />
+            {/* Always passed explicitly: formatCents/CountUp's "usd" default
+                is a fallback for genuinely unknown currency, not a safe
+                assumption for an account whose subscriptions are actually
+                priced in EUR, GBP, or anything else — data.currency
+                (getDashboardData, queries.ts) is the account's real,
+                majority currency. */}
+            <CountUp value={data.monthlyTotalCents} format="currency" currency={data.currency} />
           </StatCard>
           <StatCard icon={Layers} label="Active subscriptions" accentClassName="bg-chart-3/10 text-chart-3">
             <CountUp value={data.activeCount} format="integer" />
@@ -246,7 +252,7 @@ export default async function DashboardPage() {
                 <CardTitle>Spend by category</CardTitle>
               </CardHeader>
               <CardContent>
-                <CategorySpendBar entries={data.categoryBreakdown} />
+                <CategorySpendBar entries={data.categoryBreakdown} currency={data.currency} />
               </CardContent>
             </Card>
             <PositiveHabitsCard output={engineOutput} />

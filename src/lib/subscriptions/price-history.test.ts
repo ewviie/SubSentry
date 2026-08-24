@@ -134,6 +134,28 @@ describe("computeLatestPriceChange", () => {
     ];
     expect(computeLatestPriceChange(history)).toBeNull();
   });
+
+  // Regression: a yearly $70 -> $84 price increase — a same-cycle change
+  // with no rounding ambiguity anywhere, since amountCents already *is*
+  // the annual figure for a yearly row. annualDeltaCents must be exactly
+  // $14.00 (1400 cents), not $14.04 (1404 cents) — the old
+  // (monthlyCents(...) * 12) formula rounded $70/12 and $84/12 to the
+  // nearest cent (583, 700) before re-multiplying by 12, landing on 1404.
+  it("a yearly $70 -> $84 price increase reports an exact $14.00/yr delta, not $14.04", () => {
+    const history = [
+      row({ id: "a", amountCents: 7000, billingCycle: "yearly", observedAt: new Date("2026-01-01T00:00:00Z") }),
+      row({ id: "b", amountCents: 8400, billingCycle: "yearly", observedAt: new Date("2026-02-01T00:00:00Z") }),
+    ];
+    const change = computeLatestPriceChange(history);
+    expect(change?.annualDeltaCents).toBe(1400);
+    // percentChange deliberately stays on the monthly-equivalent basis
+    // (583 -> 700, both rounded) rather than annualCents' exact 7000 -> 8400
+    // — a ratio needs a shared per-period basis to compare at all, and a
+    // few cents of rounding on an intermediate monthly figure is immaterial
+    // to a percentage a UI rounds to a whole number anyway ("+20%"). Close
+    // to, not exactly, 20.
+    expect(change?.percentChange).toBeCloseTo(20.07, 1);
+  });
 });
 
 describe("estimatePaidCents", () => {

@@ -45,7 +45,7 @@ export function SavingsRecommendationCard({ recommendation }: { recommendation: 
                   <Badge variant={PRIORITY_BADGE_VARIANT[priority]}>{PRIORITY_LABEL[priority]}</Badge>
                   {hasSavings ? (
                     <Badge className="bg-emerald text-emerald-foreground">
-                      {formatCents(recommendation.monthlySavingsCents)}/mo
+                      {formatCents(recommendation.monthlySavingsCents, recommendation.currency)}/mo
                     </Badge>
                   ) : null}
                 </div>

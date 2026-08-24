@@ -58,7 +58,7 @@ export function QuickWinsCard({ output }: { output: EngineOutput }) {
                 <p className="text-muted-foreground">{win.description}</p>
               </div>
               {win.monthlySavingsCents ? (
-                <Badge className="shrink-0 bg-emerald text-emerald-foreground">{formatCents(win.monthlySavingsCents)}/mo</Badge>
+                <Badge className="shrink-0 bg-emerald text-emerald-foreground">{formatCents(win.monthlySavingsCents, win.currency)}/mo</Badge>
               ) : null}
             </div>
             {/* Same "one clear next click" pattern SavingsOpportunitiesCard
@@ -131,7 +131,7 @@ export function RenewalForecastCard({ output, renewals }: { output: EngineOutput
         <div className="grid grid-cols-1 gap-3 border-b border-border pb-4 text-sm sm:grid-cols-3">
           <div>
             <p className="text-muted-foreground">Due in 30 days</p>
-            <p className="font-mono font-medium tabular-nums">{formatCents(f.totalDueNext30DaysCents)}</p>
+            <p className="font-mono font-medium tabular-nums">{formatCents(f.totalDueNext30DaysCents, f.currency ?? undefined)}</p>
           </div>
           <div>
             <p className="text-muted-foreground">Busiest month</p>
@@ -202,7 +202,7 @@ export function BiggestOpportunityCard({ output }: { output: EngineOutput }) {
                 opportunity.amountTone === "positive" ? "text-emerald" : "text-foreground",
               )}
             >
-              {formatCents(opportunity.amountCents)}
+              {formatCents(opportunity.amountCents, opportunity.currency)}
               <span className="ml-1 text-sm font-normal text-muted-foreground">{opportunity.amountLabel}</span>
             </p>
           ) : null}
@@ -226,6 +226,16 @@ export function BiggestOpportunityCard({ output }: { output: EngineOutput }) {
 
 export function SavingsOpportunitiesCard({ output }: { output: EngineOutput }) {
   if (output.savingsForecast.recommendations.length === 0) return null;
+  // monthlySavingsCents/yearlySavingsCents sum every confirmed-duplicate
+  // recommendation's own (currency-correct) figure — see
+  // computeTotalPotentialSavingsMonthlyCents. Labeling the sum itself
+  // assumes all confirmed duplicates share one currency, true for the
+  // overwhelming common case (this app's own duplicate detection compares
+  // same-service subscriptions, which are almost always billed the same
+  // way); a portfolio with confirmed duplicates in two different
+  // currencies simultaneously is a known, narrower edge case this total
+  // doesn't separately disclose.
+  const savingsCurrency = output.savingsForecast.recommendations.find((r) => r.type === "duplicate")?.currency;
   return (
     <Card size="sm" className="shadow-elevation-low">
       <CardHeader>
@@ -238,7 +248,7 @@ export function SavingsOpportunitiesCard({ output }: { output: EngineOutput }) {
               a dollar figure the app can't back up. Saying "potential" here
               without qualifying it reads as if this total covers every item
               listed below it, including the $0-confidence ones — it doesn't. */}
-          {formatCents(output.savingsForecast.monthlySavingsCents)}/mo · {formatCents(output.savingsForecast.yearlySavingsCents)}/yr
+          {formatCents(output.savingsForecast.monthlySavingsCents, savingsCurrency)}/mo · {formatCents(output.savingsForecast.yearlySavingsCents, savingsCurrency)}/yr
           from confirmed duplicates
         </CardDescription>
       </CardHeader>
@@ -349,7 +359,7 @@ export function OptimizationScoreCard({ output, isPremium, upgradeUrl }: { outpu
       <CardContent>
         <p className="font-mono text-4xl font-semibold tabular-nums">{output.optimizationScore.score}<span className="text-lg text-muted-foreground">/100</span></p>
         <p className="mt-1 text-sm text-muted-foreground">
-          {formatCents(output.optimizationScore.unrealizedYearlySavingsCents)}/yr identified: confirmed duplicates
+          {formatCents(output.optimizationScore.unrealizedYearlySavingsCents, output.stats.currency ?? undefined)}/yr identified: confirmed duplicates
           (Savings opportunities) plus estimates from Optimization recommendations below.
           {/* This now folds in every optimization-category rule's
               monthlySavingsCents (see engine.ts), not just confirmed

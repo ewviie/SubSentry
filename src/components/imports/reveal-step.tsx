@@ -8,7 +8,7 @@ import { CountUp } from "@/components/ui/count-up";
 import { SentryRing } from "@/components/ui/sentry-ring";
 import { Skeleton } from "@/components/ui/skeleton";
 import { springSmooth } from "@/lib/motion";
-import { monthlyCents } from "@/lib/subscriptions/money";
+import { monthlyCents, annualCents, splitByPrimaryCurrency } from "@/lib/subscriptions/money";
 import { cn } from "@/lib/utils";
 import type { DetectedSubscription } from "@/lib/imports/types";
 
@@ -47,11 +47,26 @@ export function RevealStep({
   const merchants = useMemo(() => detected.map((d) => d.merchant.displayName), [detected]);
   const visibleMerchants = useMemo(() => merchants.slice(0, MAX_INDIVIDUAL_REVEALS), [merchants]);
   const hiddenCount = merchants.length - visibleMerchants.length;
-  const totalMonthlyCents = useMemo(
-    () => detected.reduce((sum, d) => sum + monthlyCents(d.amountCents, d.estimatedBillingCycle.cycle), 0),
+  // Restricted to the detected set's primary currency (splitByPrimaryCurrency)
+  // — a bank/CSV import can genuinely span currencies, and summing raw
+  // cents across them into one total would be fabricated math. totalYearlyCents
+  // sums each detected subscription's own exact annual figure directly, not
+  // totalMonthlyCents * 12 — see money.ts's own annualCents comment for why
+  // that composition double-rounds every yearly/quarterly/weekly one.
+  // DetectedSubscription itself carries no top-level currency (same
+  // review-table.tsx convention: it's read off the first raw transaction).
+  const { currency: revealCurrency, included: primaryDetected } = useMemo(
+    () => splitByPrimaryCurrency(detected.map((d) => ({ ...d, currency: d.transactions[0]?.currency ?? "usd" }))),
     [detected],
   );
-  const totalYearlyCents = totalMonthlyCents * 12;
+  const totalMonthlyCents = useMemo(
+    () => primaryDetected.reduce((sum, d) => sum + monthlyCents(d.amountCents, d.estimatedBillingCycle.cycle), 0),
+    [primaryDetected],
+  );
+  const totalYearlyCents = useMemo(
+    () => primaryDetected.reduce((sum, d) => sum + annualCents(d.amountCents, d.estimatedBillingCycle.cycle), 0),
+    [primaryDetected],
+  );
   const duplicateCount = useMemo(() => detected.filter((d) => d.isDuplicateOfExistingId).length, [detected]);
 
   // Always start at the animated defaults, never seeded from
@@ -201,7 +216,12 @@ export function RevealStep({
               className="flex items-baseline justify-center gap-1.5"
             >
               <span className="font-mono text-5xl font-semibold tabular-nums text-emerald">
-                <CountUp value={isYearly ? totalYearlyCents : totalMonthlyCents} format="currency" duration={0.8} />
+                <CountUp
+                  value={isYearly ? totalYearlyCents : totalMonthlyCents}
+                  format="currency"
+                  currency={revealCurrency ?? undefined}
+                  duration={0.8}
+                />
               </span>
               <span className="text-lg text-muted-foreground">{isYearly ? "/yr" : "/mo"}</span>
             </motion.p>

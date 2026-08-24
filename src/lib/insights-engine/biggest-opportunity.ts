@@ -59,6 +59,10 @@ export interface BiggestOpportunity {
   // "confirmed savings" vs. "reviewable spend" conflation Part 6 of the
   // product brief exists to prevent.
   amountTone: "positive" | "neutral";
+  // The currency amountCents is denominated in. Every branch below sources
+  // it from the same real subscription(s) the amount itself was computed
+  // from, never assumed to be USD.
+  currency: string;
   subscriptionId: string | null;
   actionLabel: string;
   actionHref: string;
@@ -88,6 +92,7 @@ export function computeBiggestOpportunity(output: EngineOutput): BiggestOpportun
       amountCents: topSavings.impactCents,
       amountLabel: "/mo",
       amountTone: "positive",
+      currency: topSavings.currency,
       subscriptionId: topSavings.targetSubscriptionId,
       actionLabel: topSavings.actionLabel,
       actionHref: `/subscriptions/${topSavings.targetSubscriptionId}`,
@@ -107,6 +112,11 @@ export function computeBiggestOpportunity(output: EngineOutput): BiggestOpportun
       amountCents: output.renewalForecast.totalDueNext30DaysCents,
       amountLabel: "due in 30 days",
       amountTone: "neutral", // real money, but due, not saved
+      // renewalForecast.currency is only null when there are no active
+      // subscriptions at all, which can't be true here (health.renewal_risk
+      // can't fire with zero spend) — "usd" is an unreachable-in-practice
+      // fallback, not an assumption.
+      currency: output.renewalForecast.currency ?? "usd",
       subscriptionId: null,
       actionLabel: "Review upcoming renewals",
       actionHref: "/subscriptions",
@@ -131,6 +141,7 @@ export function computeBiggestOpportunity(output: EngineOutput): BiggestOpportun
       amountCents: topSavings.impactCents,
       amountLabel: "/mo combined",
       amountTone: "neutral",
+      currency: topSavings.currency,
       subscriptionId: topSavings.targetSubscriptionId,
       actionLabel: topSavings.actionLabel,
       actionHref: `/subscriptions/${topSavings.targetSubscriptionId}`,
@@ -148,6 +159,7 @@ export function computeBiggestOpportunity(output: EngineOutput): BiggestOpportun
       amountCents: biggest.annualCents,
       amountLabel: "/yr",
       amountTone: "neutral", // current spend, not a saving of any kind
+      currency: biggest.currency,
       subscriptionId: biggest.id,
       actionLabel: "Review",
       actionHref: `/subscriptions/${biggest.id}`,

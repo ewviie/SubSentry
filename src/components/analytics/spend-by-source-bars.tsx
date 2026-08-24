@@ -10,7 +10,7 @@ import type { SpendBySourceEntry } from "@/lib/subscriptions/analytics";
 // relative to the largest entry, spring fill animation, rounded track) —
 // deliberately reused rather than a different chart style, so "a ranked
 // breakdown" reads the same way everywhere in the app.
-export function SpendBySourceBars({ entries }: { entries: SpendBySourceEntry[] }) {
+export function SpendBySourceBars({ entries, currency }: { entries: SpendBySourceEntry[]; currency?: string }) {
   if (entries.length === 0) {
     return <p className="text-sm text-muted-foreground">Add a subscription to see where it came from.</p>;
   }
@@ -23,7 +23,7 @@ export function SpendBySourceBars({ entries }: { entries: SpendBySourceEntry[] }
         <li key={entry.source}>
           <div className="mb-1.5 flex items-baseline justify-between text-sm">
             <span className="font-medium">{entry.label}</span>
-            <span className="font-mono tabular-nums text-muted-foreground">{formatCents(entry.monthlyCents)}/mo</span>
+            <span className="font-mono tabular-nums text-muted-foreground">{formatCents(entry.monthlyCents, currency)}/mo</span>
           </div>
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
             <motion.div
