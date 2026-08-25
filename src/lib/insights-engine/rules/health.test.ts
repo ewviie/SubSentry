@@ -2,9 +2,33 @@ import { describe, it, expect } from "vitest";
 import { HEALTH_RULES } from "./health";
 import { sub } from "../test-fixtures";
 import type { EngineContext } from "../types";
+import type { SubscriptionPriceHistory } from "@/lib/db/schema";
 
-function ctx(subs: ReturnType<typeof sub>[]): EngineContext {
-  return { subscriptions: subs, active: subs.filter((s) => s.status === "active"), todayIso: "2026-01-01", isPremium: false };
+function ctx(
+  subs: ReturnType<typeof sub>[],
+  priceHistoryBySubscriptionId?: Map<string, SubscriptionPriceHistory[]>,
+): EngineContext {
+  return {
+    subscriptions: subs,
+    active: subs.filter((s) => s.status === "active"),
+    todayIso: "2026-01-01",
+    isPremium: false,
+    priceHistoryBySubscriptionId,
+  };
+}
+
+function historyRow(overrides: Partial<SubscriptionPriceHistory>): SubscriptionPriceHistory {
+  return {
+    id: overrides.id ?? "row-id",
+    subscriptionId: "sub-id",
+    userId: "user-1",
+    amountCents: 1000,
+    billingCycle: "monthly",
+    currency: "usd",
+    observedAt: new Date("2026-01-01T00:00:00Z"),
+    source: "initial",
+    ...overrides,
+  };
 }
 
 function ruleById(id: string) {
@@ -21,10 +45,10 @@ describe("health.duplicates", () => {
     expect(result?.scoreImpact).toBeGreaterThan(0);
     expect(result?.dimension).toBe("redundancy");
   });
-  it("penalizes duplicates, capped at -40", () => {
+  it("penalizes duplicates, capped at -60", () => {
     const subs = Array.from({ length: 5 }, (_, i) => sub({ name: `Netflix ${i}` }));
     const result = rule.evaluate(ctx(subs));
-    expect(result?.scoreImpact).toBe(-40);
+    expect(result?.scoreImpact).toBe(-60);
     expect(result?.dimension).toBe("redundancy");
   });
 });
@@ -67,7 +91,7 @@ describe("health.concentration", () => {
     const result = rule.evaluate(
       ctx([sub({ category: "streaming", amountCents: 8000 }), sub({ category: "fitness", amountCents: 2000 })]),
     );
-    expect(result?.scoreImpact).toBe(-11);
+    expect(result?.scoreImpact).toBe(-16);
     expect(result?.dimension).toBe("spending");
   });
 
@@ -209,10 +233,10 @@ describe("health.canceled_history", () => {
   it("null with no canceled history", () => {
     expect(rule.evaluate(ctx([sub({ status: "active" })]))).toBeNull();
   });
-  it("positive bonus scaling with canceled count, capped at 15", () => {
+  it("positive bonus scaling with canceled count, capped at 24", () => {
     const subs = [sub({ status: "active" }), ...Array.from({ length: 5 }, () => sub({ status: "canceled" }))];
     const result = rule.evaluate(ctx(subs));
-    expect(result?.scoreImpact).toBe(15);
+    expect(result?.scoreImpact).toBe(24);
     expect(result?.dimension).toBe("hygiene");
   });
 });
@@ -334,5 +358,85 @@ describe("health.overdue_renewals", () => {
     expect(result?.subscriptionIds).toHaveLength(5);
     expect(result?.description).toContain("and 2 more");
     expect(result?.description).not.toContain("Ember");
+  });
+});
+
+describe("health.price_increases", () => {
+  const rule = ruleById("health.price_increases");
+
+  it("null with no price-history map at all — not enough evidence to have an opinion", () => {
+    expect(rule.evaluate(ctx([sub({ id: "a" })]))).toBeNull();
+  });
+
+  it("null when every active subscription has fewer than 2 recorded history rows", () => {
+    const history = new Map([["a", [historyRow({ subscriptionId: "a" })]]]);
+    expect(rule.evaluate(ctx([sub({ id: "a" })], history))).toBeNull();
+  });
+
+  it("positive when there's enough history but nothing increased", () => {
+    const history = new Map([
+      [
+        "a",
+        [
+          historyRow({ subscriptionId: "a", amountCents: 1000, observedAt: new Date("2026-01-01T00:00:00Z") }),
+          historyRow({ subscriptionId: "a", amountCents: 1000, observedAt: new Date("2026-02-01T00:00:00Z") }),
+        ],
+      ],
+    ]);
+    const result = rule.evaluate(ctx([sub({ id: "a", amountCents: 1000 })], history));
+    expect(result?.severity).toBe("positive");
+    expect(result?.dimension).toBe("spending");
+    expect(result?.scoreImpact).toBeGreaterThan(0);
+  });
+
+  it("warns and penalizes when an active subscription's price genuinely went up", () => {
+    const netflix = sub({ id: "netflix", name: "Netflix", amountCents: 1799 });
+    const history = new Map([
+      [
+        "netflix",
+        [
+          historyRow({ subscriptionId: "netflix", amountCents: 1549, observedAt: new Date("2026-01-01T00:00:00Z") }),
+          historyRow({ subscriptionId: "netflix", amountCents: 1799, observedAt: new Date("2026-02-01T00:00:00Z") }),
+        ],
+      ],
+    ]);
+    const result = rule.evaluate(ctx([netflix], history));
+    expect(result?.severity).toBe("warning");
+    expect(result?.dimension).toBe("spending");
+    expect(result?.scoreImpact).toBeLessThan(0);
+    expect(result?.subscriptionIds).toEqual(["netflix"]);
+    expect(result?.description).toContain("Netflix");
+    expect(result?.description).toContain("%");
+  });
+
+  it("does not flag a subscription whose price only decreased", () => {
+    const history = new Map([
+      [
+        "a",
+        [
+          historyRow({ subscriptionId: "a", amountCents: 1500, observedAt: new Date("2026-01-01T00:00:00Z") }),
+          historyRow({ subscriptionId: "a", amountCents: 1000, observedAt: new Date("2026-02-01T00:00:00Z") }),
+        ],
+      ],
+    ]);
+    const result = rule.evaluate(ctx([sub({ id: "a", amountCents: 1000 })], history));
+    expect(result?.severity).toBe("positive");
+  });
+
+  it("only counts subscriptions with recorded history — a subscription with none is silently excluded, not treated as unchanged", () => {
+    const flagged = sub({ id: "flagged", name: "Flagged", amountCents: 1800 });
+    const noHistory = sub({ id: "no-history", name: "NoHistory", amountCents: 500 });
+    const history = new Map([
+      [
+        "flagged",
+        [
+          historyRow({ subscriptionId: "flagged", amountCents: 1500, observedAt: new Date("2026-01-01T00:00:00Z") }),
+          historyRow({ subscriptionId: "flagged", amountCents: 1800, observedAt: new Date("2026-02-01T00:00:00Z") }),
+        ],
+      ],
+    ]);
+    const result = rule.evaluate(ctx([flagged, noHistory], history));
+    expect(result?.subscriptionIds).toEqual(["flagged"]);
+    expect(result?.description).not.toContain("NoHistory");
   });
 });

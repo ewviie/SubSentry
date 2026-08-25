@@ -296,4 +296,92 @@ describe("computeHealthScore", () => {
       expect(result.confidence.reason).toBeUndefined();
     });
   });
+
+  // Rebalance pass — the concrete behavior requested: 100/100 should be
+  // genuinely hard to reach, a real problem should visibly move the score
+  // (not just shave a couple of points off it), and a genuinely clean
+  // account should still land in the 90-100 band. See rules/health.ts's and
+  // this file's own rebalance-pass comments for the two mechanisms (bigger
+  // per-rule tiers, and the worst-dimension penalty) these tests cover.
+  describe("rebalanced scoring — problems must cost more than a rounding error", () => {
+    // Deliberately built so only health.duplicates has anything negative to
+    // say: same category ("other", the fixture default) so concentration
+    // has no opinion (only one category present), equal default amounts so
+    // no outlier, renewal dates far in the future so overdue/renewal_risk
+    // stay silent, manual source so no uncategorized-import gap. One real,
+    // isolated finding — the realistic "otherwise fine, but you do have one
+    // actual duplicate" account, not a portfolio riddled with problems.
+    it("a single confirmed duplicate — otherwise clean — is enough to drop out of the 90-100 band", () => {
+      const clean = computeHealthScore(ctx([sub({ name: "Netflix" }), sub({ name: "Hulu" })]))!;
+      const oneDuplicate = computeHealthScore(ctx([sub({ name: "Netflix" }), sub({ name: "Netflix Premium" })]))!;
+      expect(clean.score).toBeGreaterThanOrEqual(90);
+      expect(oneDuplicate.score).toBeLessThan(90);
+      expect(oneDuplicate.rating).not.toBe("Excellent");
+      // Not artificially tanked either — one real, moderate finding, not a
+      // portfolio-wide catastrophe.
+      expect(oneDuplicate.score).toBeGreaterThanOrEqual(70);
+    });
+
+    // A realistic "average, never actively reviewed" account: no exact
+    // duplicates, but a plausible functional overlap (Spotify + Apple
+    // Music), spending concentrated in one category with a genuine outlier
+    // (Netflix at well over 2x the group's mean), and one overdue renewal
+    // (Notion) — real, moderate findings a typical unexamined account
+    // plausibly has, directly matching the factors this rebalance was asked
+    // to make meaningful (unnecessary/overlapping subscriptions, high
+    // recurring spending, upcoming renewals). Not an extreme, worst-case
+    // portfolio — this should read as "worth a look" (Very Good/Good), not
+    // "Excellent," and not be tanked into "Needs Attention" either.
+    it("an average account with a few moderate findings does not default to 90-100 'Excellent'", () => {
+      const result = computeHealthScore(
+        ctx([
+          sub({ name: "Spotify", category: "streaming", amountCents: 1099 }),
+          sub({ name: "Apple Music", category: "streaming", amountCents: 1099 }),
+          sub({ name: "Netflix", category: "streaming", amountCents: 5000 }),
+          sub({ name: "Notion", category: "software", amountCents: 1000, nextRenewalDate: "2025-06-01" }),
+        ]),
+      )!;
+      expect(result.rating).not.toBe("Excellent");
+      expect(result.score).toBeLessThan(90);
+      expect(result.score).toBeGreaterThanOrEqual(70);
+    });
+
+    // Two confirmed duplicate pairs is a genuinely bad redundancy problem
+    // (dimension score capped at 40/100 — see rules/health.ts's duplicates
+    // cap) — the overall score needs to actually reflect that instead of
+    // being diluted down to "Very Good" by four dimensions parked at their
+    // ceiling. This is the worst-dimension-penalty mechanism, isolated.
+    it("a severe single-dimension problem pulls the overall score further than the plain weighted average would", () => {
+      const result = computeHealthScore(
+        ctx([
+          sub({ name: "Netflix" }),
+          sub({ name: "Netflix Premium" }),
+          sub({ name: "Hulu" }),
+          sub({ name: "Hulu Plus" }),
+        ]),
+      )!;
+      const redundancy = result.dimensions.find((d) => d.key === "redundancy")!;
+      expect(redundancy.score).toBeLessThanOrEqual(40);
+      const weights: Record<string, number> = { spending: 0.2, redundancy: 0.3, growth: 0.1, renewal: 0.2, hygiene: 0.2 };
+      const known = result.dimensions.filter((d) => d.status !== "unknown");
+      const knownWeight = known.reduce((sum, d) => sum + weights[d.key], 0);
+      const plainWeightedAverage = known.reduce((sum, d) => sum + d.score * weights[d.key], 0) / knownWeight;
+      expect(result.score).toBeLessThan(Math.round(plainWeightedAverage));
+      expect(result.rating).not.toBe("Excellent");
+      expect(result.rating).not.toBe("Very Good");
+      // Bounded, not punitive beyond what the evidence supports — the
+      // worst-dimension penalty is capped at 15 on top of the weighted
+      // average, so this can't collapse to near-zero over one dimension.
+      expect(result.score).toBeGreaterThanOrEqual(Math.round(plainWeightedAverage) - 15);
+    });
+
+    // The corrective term must never fire for a dimension that's merely
+    // very good (90+, no real problem) — only genuinely bad ones.
+    it("does not apply the worst-dimension penalty when every dimension is already 90+", () => {
+      const result = computeHealthScore(ctx([sub({ name: "Netflix" }), sub({ name: "Hulu" }), sub({ name: "Adobe" })]))!;
+      const known = result.dimensions.filter((d) => d.status !== "unknown");
+      expect(known.every((d) => d.score >= 90)).toBe(true);
+      expect(result.score).toBeGreaterThanOrEqual(90);
+    });
+  });
 });

@@ -1,4 +1,4 @@
-import type { Subscription } from "@/lib/db/schema";
+import type { Subscription, SubscriptionPriceHistory } from "@/lib/db/schema";
 import {
   computeSpendBySource,
   computeSpendByBillingCycle,
@@ -114,10 +114,14 @@ function buildRenewalForecast(active: Subscription[], today: string): RenewalFor
   return { nextRenewal, totalDueNext30DaysCents, busiestPeriod, largestUpcomingPayment, currency };
 }
 
-export function runInsightsEngine(subscriptions: Subscription[], isPremium: boolean): EngineOutput {
+export function runInsightsEngine(
+  subscriptions: Subscription[],
+  isPremium: boolean,
+  priceHistoryBySubscriptionId?: Map<string, SubscriptionPriceHistory[]>,
+): EngineOutput {
   const active = subscriptions.filter((s) => s.status === "active");
   const today = todayIso();
-  const ctx: EngineContext = { subscriptions, active, todayIso: today, isPremium };
+  const ctx: EngineContext = { subscriptions, active, todayIso: today, isPremium, priceHistoryBySubscriptionId };
 
   // HEALTH_RULES are also evaluated independently by computeHealthScore()
   // below (for its own score/breakdown) — evaluating them a second time

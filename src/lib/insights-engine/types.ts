@@ -1,4 +1,4 @@
-import type { Subscription } from "@/lib/db/schema";
+import type { Subscription, SubscriptionPriceHistory } from "@/lib/db/schema";
 
 // Reusable across the dashboard, /savings, /analytics, and future premium
 // surfaces — a rule never touches the DB or React; it's a pure function of
@@ -9,6 +9,14 @@ export interface EngineContext {
   active: Subscription[]; // status === "active", precomputed once for every rule
   todayIso: string; // YYYY-MM-DD
   isPremium: boolean;
+  // Every price-history row this user has, grouped by subscriptionId — one
+  // bulk query (queries.ts's getAllPriceHistoryForUser), not fetched
+  // per-subscription, so a rule that needs it (health.price_increases)
+  // never becomes an N+1. Optional, not required: every existing rule and
+  // every existing test-built EngineContext predates this field and has no
+  // reason to care about it — a rule that does defaults a missing map to
+  // "no history known," never throws.
+  priceHistoryBySubscriptionId?: Map<string, SubscriptionPriceHistory[]>;
 }
 
 export type InsightSeverity = "positive" | "info" | "warning" | "critical";

@@ -10,18 +10,32 @@ import type {
 } from "./types";
 import { HEALTH_RULES } from "./rules/health";
 
-// Phase 7.2 rewrite — see rules/health.ts's own header comment for the full
+// Phase 7.2 rewrite. See rules/health.ts's own header comment for the full
 // "why" (the old flat model gave every -3/-4/-5 equal footing regardless of
 // how predictive it actually was, which is how "83/100 Very Good" ended up
 // next to genuinely concerning numbers). Now: every health rule declares
 // which of 5 dimensions its finding belongs to, each dimension is scored
 // independently on its own 0-100 scale, and the overall score is a weighted
-// combination — not a flat sum — so a real problem in a heavily-weighted
+// combination, not a flat sum, so a real problem in a heavily-weighted
 // dimension (redundancy, spending) moves the number more than a soft signal
 // in a weakly-weighted one (growth, where this app's evidence is genuinely
-// thin — see rules/health.ts's recentGrowth comment). Add or reweight a
+// thin; see rules/health.ts's recentGrowth comment). Add or reweight a
 // rule in rules/health.ts and both the dimension and overall score change
 // automatically; nothing here special-cases a rule by id.
+//
+// Rebalance pass (post-7.2): the dimension model above was sound, but in
+// practice most accounts landed at 90-100 "Excellent" regardless of whether
+// they had real, evidenced problems. Not because the rules were wrong, but
+// because (a) each rule's point value was tuned small enough that even a
+// genuine finding barely dented its dimension, and (b) a weighted average
+// across 5 dimensions lets one bad dimension get diluted by four clean ones
+// sitting at their 100 ceiling. Fixed on both sides: rules/health.ts's
+// STRONG/MEDIUM/WEAK tiers are bigger (see that file's own comment), and
+// computeHealthScore below adds a bounded extra deduction based on the
+// single worst dimension so a real problem can't fully hide behind clean
+// ones. Neither change touches what counts as a problem, a rule's dimension,
+// or the relative dimension weights: an account with zero genuine negative
+// evidence anywhere still reaches the same 90-100 it always did.
 
 const DIMENSION_LABELS: Record<HealthDimensionKey, string> = {
   spending: "Spending",
@@ -31,7 +45,7 @@ const DIMENSION_LABELS: Record<HealthDimensionKey, string> = {
   hygiene: "Subscription hygiene",
 };
 
-// Redundancy and spending are weighted highest — confirmed duplicates,
+// Redundancy and spending are weighted highest: confirmed duplicates,
 // functional overlap, and spending concentration are the most directly
 // actionable, best-evidenced signals this app can compute. Growth is
 // weighted lowest deliberately: this app cannot distinguish "genuinely new
@@ -51,13 +65,13 @@ const DIMENSION_ORDER: HealthDimensionKey[] = ["spending", "redundancy", "growth
 // Deliberately NOT a pure function of the netted score. A dimension can
 // have an unrelated positive and negative finding at once (e.g. spending:
 // "balanced across categories" +5 alongside a genuine expensive outlier
-// -11) — the positive doesn't address or mitigate the negative, it's a
+// -11). The positive doesn't address or mitigate the negative, it's a
 // different fact about a different aspect of the same dimension, so their
 // net (94) clearing the "good" cutoff would read as "nothing to flag" when
 // there plainly is something. "good" is reserved for dimensions with zero
 // negative evidence at all; any real negative finding caps the status at
 // "watch"/"attention" by score, never lets an unrelated bonus buy it back
-// to "good". (Caught in review — this is the fix, not a hypothetical.)
+// to "good" (caught in review; this is the fix, not a hypothetical).
 function statusForScore(score: number, hasNegativeEvidence: boolean): HealthDimensionStatus {
   if (!hasNegativeEvidence) return "good";
   return score >= 55 ? "watch" : "attention";
@@ -66,7 +80,7 @@ function statusForScore(score: number, hasNegativeEvidence: boolean): HealthDime
 // A dimension whose score defaulted to 100 with literally zero contributing
 // rules (e.g. a single brand-new subscription: spending/growth/renewal can
 // each have nothing to say yet) would otherwise silently read as a perfect,
-// confidently-"good" dimension — a real dishonest-precision bug caught in
+// confidently-"good" dimension, a real dishonest-precision bug caught in
 // review, not a hypothetical one. "unknown" makes that gap visible instead
 // of hiding it behind a green dot; see computeHealthScore's overall-score
 // step for how it's kept out of the weighted average too.
@@ -74,20 +88,20 @@ function statusForScore(score: number, hasNegativeEvidence: boolean): HealthDime
 function summarizeDimension(key: HealthDimensionKey, results: InsightResult[]): string {
   if (results.length === 0) {
     // No rule in this dimension had an opinion at all (e.g. zero spend, or
-    // too little data for any signal to apply) — an honest "nothing to
+    // too little data for any signal to apply): an honest "nothing to
     // report" rather than a fabricated positive.
     return "Not enough data to say anything specific yet.";
   }
   // The single finding with the largest |scoreImpact| is the one most
-  // responsible for this dimension's score — that's what a user actually
+  // responsible for this dimension's score, that's what a user actually
   // wants to know "why" about, not an arbitrary first-fired rule.
   const most = [...results].sort((a, b) => Math.abs(b.scoreImpact ?? 0) - Math.abs(a.scoreImpact ?? 0))[0];
   return most.title;
 }
 
 // Phase 8 Part 7: "for every dimension: ... recommended action." Keyed by
-// ruleId rather than duplicated as a field on every rule in rules/health.ts
-// — the action text is a UI-facing rephrasing of a finding this module
+// ruleId rather than duplicated as a field on every rule in rules/health.ts:
+// the action text is a UI-facing rephrasing of a finding this module
 // already fully owns the presentation for (see summarizeDimension above,
 // same pattern), so it lives in one place instead of twenty. Only rules
 // with a real negative branch appear here on purpose: a rule with no
@@ -98,33 +112,34 @@ function summarizeDimension(key: HealthDimensionKey, results: InsightResult[]): 
 //
 // Wording note (raised in local-council review, Compliance lens): every
 // string here is deliberately a review prompt ("review," "compare,"
-// "confirm"), never an unconditional instruction — this app suggests what
+// "confirm"), never an unconditional instruction. This app suggests what
 // to look at, it never claims to know a subscription is unwanted, and it
 // never implies SubSentry itself would act on a user's behalf (same
 // "informational, not a claim of action taken" boundary savings.ts's own
 // computeRealizedSavings comment already documents for "confirmed"/
 // "realized" language). Keep new entries to that same register.
 // Exported (not just used internally) specifically so a test can assert
-// every key here still matches a real HEALTH_RULES id — caught in
+// every key here still matches a real HEALTH_RULES id, caught in
 // local-council review (Maintainability/Simplicity lenses): this table is
 // coupled by a bare string to `id` fields declared in a different file
 // (rules/health.ts), and a typo or rename on either side used to compile
 // clean and silently degrade to a missing action with no test failure. See
 // health-score.test.ts's "every RULE_RECOMMENDED_ACTION key matches a real
-// rule id" test — that's the guard, not documentation discipline alone.
+// rule id" test, that's the guard, not documentation discipline alone.
 export const RULE_RECOMMENDED_ACTION: Partial<Record<string, string>> = {
   "health.duplicates": "Review the redundant subscription and cancel it if it's no longer needed.",
   "health.functional_overlap": "Compare the overlapping subscriptions and decide if you need more than one.",
   "health.concentration": "Review your spending in the category that's dominating your monthly total.",
-  "health.expensive_outliers": "Review your outsized subscription — confirm it's still worth the cost.",
+  "health.expensive_outliers": "Review your outsized subscription and confirm it's still worth the cost.",
+  "health.price_increases": "Review whether the new price is still worth paying: switch, downgrade, or cancel if not.",
   "health.small_subscriptions_add_up": "Review your smaller subscriptions for any that have gone unused.",
   "health.recent_growth": "Skim what was recently added to confirm it's all genuinely new.",
-  "health.renewal_risk": "Review what's due soon — spread out renewals if that's avoidable.",
+  "health.renewal_risk": "Review what's due soon; spread out renewals if that's avoidable.",
   "health.overdue_renewals": "Update the renewal date, or mark it canceled if it no longer applies.",
   "health.uncategorized_imports": "Set the right category for your uncategorized imported subscriptions.",
 };
 
-// Only recommends acting on real negative evidence — a dimension whose
+// Only recommends acting on real negative evidence: a dimension whose
 // dominant (or only) finding is positive has nothing to fix, so this
 // returns null rather than manufacturing a task out of good news (the same
 // hasNegativeEvidence concept statusForScore already applies to the status
@@ -136,13 +151,13 @@ function recommendedActionFor(results: InsightResult[]): string | null {
   return RULE_RECOMMENDED_ACTION[dominant.ruleId] ?? null;
 }
 
-// Confidence reflects how much real evidence backs this score — not a
+// Confidence reflects how much real evidence backs this score, not a
 // fabricated "we've been watching you for months" claim, just an honest
 // read of two things already in the data: how many active subscriptions
 // exist to reason about, and how long this account has actually had data in
-// it (the earliest subscription's own createdAt, across any status — the
+// it (the earliest subscription's own createdAt, across any status: the
 // only real "history depth" signal this schema has; see PART 9/15's own
-// comment in the brief this rewrite implements — no invented history).
+// comment in the brief this rewrite implements, no invented history).
 function computeConfidence(ctx: EngineContext): HealthConfidence {
   const oldestCreatedAt = ctx.subscriptions.reduce<Date | null>(
     (oldest, s) => (oldest === null || s.createdAt < oldest ? s.createdAt : oldest),
@@ -150,7 +165,7 @@ function computeConfidence(ctx: EngineContext): HealthConfidence {
   );
   // Number.isFinite guards a malformed todayIso (or, in principle, an
   // invalid stored createdAt) producing NaN and silently corrupting every
-  // threshold check below it — falls back to "no history" (the same value
+  // threshold check below it: falls back to "no history" (the same value
   // an unknown oldestCreatedAt already gets), never a fabricated number.
   const rawHistoryDays = oldestCreatedAt
     ? (new Date(`${ctx.todayIso}T00:00:00Z`).getTime() - oldestCreatedAt.getTime()) / 86_400_000
@@ -162,7 +177,7 @@ function computeConfidence(ctx: EngineContext): HealthConfidence {
       level: "low",
       reason:
         ctx.active.length < 2
-          ? "Based on very few active subscriptions — most signals need at least 2 to mean anything."
+          ? "Based on very few active subscriptions: most signals need at least 2 to mean anything."
           : "Based on limited subscription history.",
     };
   }
@@ -204,14 +219,14 @@ export function computeHealthScore(ctx: EngineContext): HealthScoreResult | null
     };
   });
 
-  // Renormalized across only the dimensions that actually had evidence — an
+  // Renormalized across only the dimensions that actually had evidence: an
   // "unknown" dimension's placeholder 100 must not silently inflate the
   // overall score the way a real "good" 100 would. In today's rule set,
   // knownWeight can never be 0: hygiene's overdue-renewals rule fires
   // unconditionally whenever active.length > 0 (guaranteed by the early
   // return above). That's a cross-module invariant living in rules/
   // health.ts, not something this function can enforce on its own, so the
-  // fallback below doesn't rely on it holding forever — an edit to
+  // fallback below doesn't rely on it holding forever; an edit to
   // health.ts that made every rule conditionally null shouldn't turn this
   // into a divide-by-zero NaN score.
   const knownDimensions = dimensions.filter((d) => d.status !== "unknown");
@@ -220,9 +235,33 @@ export function computeHealthScore(ctx: EngineContext): HealthScoreResult | null
     knownWeight > 0
       ? knownDimensions.reduce((sum, d) => sum + d.score * DIMENSION_WEIGHTS[d.key], 0) / knownWeight
       : 100;
-  const score = Math.max(0, Math.min(100, Math.round(overallRaw)));
 
-  // Slightly tighter top bands than a naive 90/75/60/40 split — "Excellent"
+  // A straight weighted average lets a genuinely bad dimension hide behind
+  // clean ones: even redundancy (0.3, the heaviest weight) sitting at 40/100
+  // (two confirmed duplicate pairs, a real problem) only pulls the overall
+  // average down to ~82 when the other four dimensions default to their 100
+  // ceiling, because it's still only 30% of the sum. That reads as "Very
+  // Good" for an account with a genuine redundancy problem, which is exactly
+  // the credibility gap this whole rebalance exists to close (see
+  // rules/health.ts's own rebalance-pass comment for the per-rule half of
+  // this fix). This adds a small additional deduction based on how far the
+  // single *worst* known dimension sits below 90, on top of, not instead
+  // of, the weighted average, and capped at 15 points so it can move a
+  // rating band but can never single-handedly tank the score on its own.
+  // The threshold is deliberately 90, not just the "attention" cutoff
+  // (55): the goal isn't only to catch severe problems (the bigger
+  // per-rule tiers in rules/health.ts already do that on their own); it's
+  // that *any* dimension with real, evidenced negative findings, even one
+  // moderate one, the realistic "average, not exceptional" account this
+  // whole pass is about, should keep the overall score out of the 90-100
+  // band reserved for accounts with nothing real to flag anywhere. A
+  // dimension genuinely at 90+ (no negative evidence, or evidence too minor
+  // to matter) never triggers this at all.
+  const worstKnownScore = knownDimensions.length > 0 ? Math.min(...knownDimensions.map((d) => d.score)) : 100;
+  const worstDimensionPenalty = Math.min(15, Math.max(0, (90 - worstKnownScore) * 0.2));
+  const score = Math.max(0, Math.min(100, Math.round(overallRaw - worstDimensionPenalty)));
+
+  // Slightly tighter top bands than a naive 90/75/60/40 split: "Excellent"
   // and "Very Good" should mean genuinely little to flag across all 5
   // dimensions, not just a high average that a couple of strong dimensions
   // could produce while one dimension is quietly struggling.

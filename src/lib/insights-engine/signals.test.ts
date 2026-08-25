@@ -11,8 +11,25 @@ import {
   recentGrowthCount,
   upcomingRenewalTotalCents,
   canceledCount,
+  findPriceIncreases,
+  hasEnoughPriceHistoryToEvaluate,
 } from "./signals";
 import { sub } from "./test-fixtures";
+import type { SubscriptionPriceHistory } from "@/lib/db/schema";
+
+function historyRow(overrides: Partial<SubscriptionPriceHistory>): SubscriptionPriceHistory {
+  return {
+    id: overrides.id ?? "row-id",
+    subscriptionId: "sub-id",
+    userId: "user-1",
+    amountCents: 1000,
+    billingCycle: "monthly",
+    currency: "usd",
+    observedAt: new Date("2026-01-01T00:00:00Z"),
+    source: "initial",
+    ...overrides,
+  };
+}
 
 describe("monthlyTotalCents", () => {
   it("sums monthly-equivalent cost across active subs", () => {
@@ -241,5 +258,154 @@ describe("upcomingRenewalTotalCents", () => {
 describe("canceledCount", () => {
   it("counts canceled subscriptions across all statuses", () => {
     expect(canceledCount([sub({ status: "canceled" }), sub({ status: "active" }), sub({ status: "canceled" })])).toBe(2);
+  });
+});
+
+describe("findPriceIncreases", () => {
+  it("returns nothing for a subscription with no recorded history", () => {
+    expect(findPriceIncreases([sub({ id: "a" })], new Map())).toEqual([]);
+  });
+
+  it("returns nothing when the price never changed", () => {
+    const s = sub({ id: "a", amountCents: 1000 });
+    const history = new Map([
+      [
+        "a",
+        [
+          historyRow({ subscriptionId: "a", amountCents: 1000, observedAt: new Date("2026-01-01T00:00:00Z") }),
+          historyRow({ subscriptionId: "a", amountCents: 1000, observedAt: new Date("2026-02-01T00:00:00Z") }),
+        ],
+      ],
+    ]);
+    expect(findPriceIncreases([s], history)).toEqual([]);
+  });
+
+  it("ignores a below-threshold (<3%) move — rounding noise, not a real increase", () => {
+    const s = sub({ id: "a", amountCents: 1000 });
+    const history = new Map([
+      [
+        "a",
+        [
+          historyRow({ subscriptionId: "a", amountCents: 1000, observedAt: new Date("2026-01-01T00:00:00Z") }),
+          historyRow({ subscriptionId: "a", amountCents: 1010, observedAt: new Date("2026-02-01T00:00:00Z") }), // +1%
+        ],
+      ],
+    ]);
+    expect(findPriceIncreases([s], history)).toEqual([]);
+  });
+
+  it("ignores a price decrease", () => {
+    const s = sub({ id: "a", amountCents: 800 });
+    const history = new Map([
+      [
+        "a",
+        [
+          historyRow({ subscriptionId: "a", amountCents: 1000, observedAt: new Date("2026-01-01T00:00:00Z") }),
+          historyRow({ subscriptionId: "a", amountCents: 800, observedAt: new Date("2026-02-01T00:00:00Z") }),
+        ],
+      ],
+    ]);
+    expect(findPriceIncreases([s], history)).toEqual([]);
+  });
+
+  it("flags a genuine, meaningful increase and reports its dollar/percent impact", () => {
+    const s = sub({ id: "a", amountCents: 1800, billingCycle: "monthly" });
+    const history = new Map([
+      [
+        "a",
+        [
+          historyRow({ subscriptionId: "a", amountCents: 1500, observedAt: new Date("2026-01-01T00:00:00Z") }),
+          historyRow({ subscriptionId: "a", amountCents: 1800, observedAt: new Date("2026-02-01T00:00:00Z") }),
+        ],
+      ],
+    ]);
+    const found = findPriceIncreases([s], history);
+    expect(found).toHaveLength(1);
+    expect(found[0].subscription.id).toBe("a");
+    expect(found[0].change.percentChange).toBeCloseTo(20);
+    expect(found[0].change.annualDeltaCents).toBe(3600); // (1800-1500)*12
+  });
+
+  // Regression (product council review, Product Manager lens): a relative-
+  // only bar let a trivially cheap subscription's price double (+100%, but
+  // a negligible real dollar amount) read as identically "meaningful" as a
+  // real Netflix-sized hike. Mirrors findExpensiveOutliers' own
+  // relative-AND-absolute pairing.
+  it("ignores a large percentage move that's still below the $30/yr dollar floor", () => {
+    const s = sub({ id: "a", amountCents: 100 });
+    const history = new Map([
+      [
+        "a",
+        [
+          historyRow({ subscriptionId: "a", amountCents: 50, observedAt: new Date("2026-01-01T00:00:00Z") }),
+          historyRow({ subscriptionId: "a", amountCents: 100, observedAt: new Date("2026-02-01T00:00:00Z") }), // +100%, but only +$6.00/yr
+        ],
+      ],
+    ]);
+    expect(findPriceIncreases([s], history)).toEqual([]);
+  });
+
+  it("includes an exact 3.0% increase and excludes a 2.99% increase, at a dollar amount well above the floor either way", () => {
+    const included = sub({ id: "included", amountCents: 103000 });
+    const excluded = sub({ id: "excluded", amountCents: 102990 });
+    const history = new Map([
+      [
+        "included",
+        [
+          historyRow({ subscriptionId: "included", amountCents: 100000, observedAt: new Date("2026-01-01T00:00:00Z") }),
+          historyRow({ subscriptionId: "included", amountCents: 103000, observedAt: new Date("2026-02-01T00:00:00Z") }),
+        ],
+      ],
+      [
+        "excluded",
+        [
+          historyRow({ subscriptionId: "excluded", amountCents: 100000, observedAt: new Date("2026-01-01T00:00:00Z") }),
+          historyRow({ subscriptionId: "excluded", amountCents: 102990, observedAt: new Date("2026-02-01T00:00:00Z") }),
+        ],
+      ],
+    ]);
+    const found = findPriceIncreases([included, excluded], history);
+    expect(found.map((f) => f.subscription.id)).toEqual(["included"]);
+  });
+
+  it("sorts multiple increases by dollar impact, largest first", () => {
+    const small = sub({ id: "small", amountCents: 1300 });
+    const big = sub({ id: "big", amountCents: 2000 });
+    const history = new Map([
+      [
+        "small",
+        [
+          historyRow({ subscriptionId: "small", amountCents: 1000, observedAt: new Date("2026-01-01T00:00:00Z") }),
+          historyRow({ subscriptionId: "small", amountCents: 1300, observedAt: new Date("2026-02-01T00:00:00Z") }),
+        ],
+      ],
+      [
+        "big",
+        [
+          historyRow({ subscriptionId: "big", amountCents: 1000, observedAt: new Date("2026-01-01T00:00:00Z") }),
+          historyRow({ subscriptionId: "big", amountCents: 2000, observedAt: new Date("2026-02-01T00:00:00Z") }),
+        ],
+      ],
+    ]);
+    const found = findPriceIncreases([small, big], history);
+    expect(found.map((f) => f.subscription.id)).toEqual(["big", "small"]);
+  });
+});
+
+describe("hasEnoughPriceHistoryToEvaluate", () => {
+  it("is false with no history at all", () => {
+    expect(hasEnoughPriceHistoryToEvaluate([sub({ id: "a" })], new Map())).toBe(false);
+  });
+
+  it("is false with only a single (initial) row — nothing to compare against yet", () => {
+    const history = new Map([["a", [historyRow({ subscriptionId: "a" })]]]);
+    expect(hasEnoughPriceHistoryToEvaluate([sub({ id: "a" })], history)).toBe(false);
+  });
+
+  it("is true once at least one active subscription has 2+ recorded rows", () => {
+    const history = new Map([
+      ["a", [historyRow({ subscriptionId: "a" }), historyRow({ subscriptionId: "a", amountCents: 1100 })]],
+    ]);
+    expect(hasEnoughPriceHistoryToEvaluate([sub({ id: "a" })], history)).toBe(true);
   });
 });

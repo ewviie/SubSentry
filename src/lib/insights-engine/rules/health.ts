@@ -13,27 +13,30 @@ import {
   canceledCount,
   overdueRenewals,
   uncategorizedImports,
+  findPriceIncreases,
+  hasEnoughPriceHistoryToEvaluate,
 } from "../signals";
 import { computeFunctionalOverlapGroups, findSmallSubscriptionsCluster, smallSubscriptionsClusterTitle } from "@/lib/subscriptions/insights";
 
 // Phase 7.2 rewrite. The old model was one flat list where every rule's
 // scoreImpact competed against every other rule's on a single shared 100
-// baseline — a hand-tuned -3 here, a -5 there, with no way to tell whether
+// baseline: a hand-tuned -3 here, a -5 there, with no way to tell whether
 // the resulting number reflected genuine risk or just how many rules
 // happened to fire. That produced real credibility problems: "83/100 Very
 // Good" next to $173.93/mo, 7 renewals clustered together, and a $719.88/yr
 // outlier read as reassuring when a user's own eyes said otherwise.
 //
 // Every rule below now also declares a `dimension` (see types.ts's
-// HealthDimensionKey) — health-score.ts scores each dimension independently
+// HealthDimensionKey). health-score.ts scores each dimension independently
 // on its own 0-100 scale, then combines them with weights that reflect how
 // predictive each dimension actually is (redundancy/spending matter more to
 // "is this account healthy" than growth, which this app has weak evidence
-// for at all — see the growth rule's own comment). Evidence tiers used
+// for at all; see the growth rule's own comment). Evidence tiers used
 // throughout, not arbitrary numbers: STRONG (confirmed duplicate, proven
-// cash-flow risk) moves a dimension ~20-25 points; MEDIUM (plausible
-// overlap, spending concentration, an outsized subscription) ~10-12; WEAK
-// (a soft, low-confidence signal like recent growth) ~4-6.
+// cash-flow risk) moves a dimension 30 points; MEDIUM (plausible overlap,
+// spending concentration, an outsized subscription) 16; WEAK (a soft,
+// low-confidence signal like recent growth) 8. See the rebalance-pass
+// comment further down for why these are bigger than the original 20/11/5.
 //
 // Several rules the old model scored are gone entirely, not just
 // reweighted, because the brief the audit worked from is explicit that they
@@ -42,14 +45,29 @@ import { computeFunctionalOverlapGroups, findSmallSubscriptionsCluster, smallSub
 // having many subscriptions is not inherently unhealthy. Scoring either was
 // manufacturing a warning to populate the UI, which is exactly what this
 // rewrite exists to stop doing.
-
-const STRONG = 20;
-const MEDIUM = 11;
-const WEAK = 5;
+//
+// Rebalance pass: the original 20/11/5 tiers made "100/100 Excellent" the
+// default outcome for almost any account, not just a genuinely well-managed
+// one. A single confirmed duplicate, the strongest, highest-weighted signal
+// this app can compute, only cost the *overall* score ~6 points (redundancy
+// dropping from 100 to 80, at 30% weight, diluted by four other dimensions
+// still parked at their 100 ceiling). That's not "meaningful," it's a
+// rounding error. Tiers roughly 1.5x'd (and each rule's multi-instance cap
+// scaled with it, same ratio as before) so a real, single finding in the
+// heaviest-weighted dimension is enough to visibly drop out of "Excellent,"
+// while a dimension with zero negative evidence is completely unaffected.
+// This changes how much a *problem* costs, not what counts as one, and a
+// genuinely clean account still reaches the same 90-100 it always did (see
+// computeHealthScore's worstDimensionPenalty comment for the other half of
+// this fix: even bigger per-rule tiers still get diluted away by four clean
+// dimensions unless the aggregation itself accounts for it).
+const STRONG = 30;
+const MEDIUM = 16;
+const WEAK = 8;
 
 // Shared by every rule below that lists subscription names in its
 // description (outliers, small-subscriptions, overdue renewals,
-// uncategorized imports) — all four were joining an unbounded list with no
+// uncategorized imports). All four were joining an unbounded list with no
 // cap (caught in CodeRabbit review on the newest of the four,
 // uncategorized_imports, but the same latent issue existed in the other
 // three: a user with many flagged subscriptions at once would get a
@@ -65,7 +83,7 @@ function formatNameList(names: string[]): string {
 const duplicates: InsightRule = {
   id: "health.duplicates",
   name: "Confirmed duplicate subscriptions",
-  description: "Near-identical subscription names — the strongest redundancy signal this app can compute deterministically.",
+  description: "Near-identical subscription names: the strongest redundancy signal this app can compute deterministically.",
   severity: "warning",
   category: "health",
   premium: false,
@@ -75,13 +93,13 @@ const duplicates: InsightRule = {
       return {
         ruleId: this.id,
         title: "No confirmed duplicates",
-        description: "Nothing looks redundant — you're not paying twice for the same thing.",
+        description: "Nothing looks redundant, you're not paying twice for the same thing.",
         severity: "positive",
         category: "health",
         premium: false,
         subscriptionIds: [],
         dimension: "redundancy" satisfies HealthDimensionKey,
-        scoreImpact: 8,
+        scoreImpact: WEAK,
       };
     }
     const ids = pairs.flatMap((p) => [p.keep.id, p.redundant.id]);
@@ -94,7 +112,7 @@ const duplicates: InsightRule = {
       premium: false,
       subscriptionIds: ids,
       dimension: "redundancy" satisfies HealthDimensionKey,
-      scoreImpact: -Math.min(pairs.length * STRONG, 40),
+      scoreImpact: -Math.min(pairs.length * STRONG, 60),
       // Sums each pair's redundant-subscription cost. Duplicate pairs are
       // near-always the same currency as the rest of this user's portfolio
       // in practice; a genuinely mixed-currency set of simultaneous
@@ -107,12 +125,12 @@ const duplicates: InsightRule = {
   },
 };
 
-// Distinct from — and deliberately weaker than — confirmed duplicates
+// Distinct from, and deliberately weaker than, confirmed duplicates
 // above: two subscriptions genuinely solving the same problem (Spotify +
 // Apple Music) is plausible evidence, not proof either is redundant (a
 // household could use both). See computeFunctionalOverlapGroups' own
 // comment for why category equality alone was replaced with this. Only
-// returns a result when overlap is actually found — the absence of overlap
+// returns a result when overlap is actually found: the absence of overlap
 // is already covered by the duplicates rule's own positive case, so this
 // doesn't crowd the dimension with a second "nothing found" message.
 const functionalOverlap: InsightRule = {
@@ -135,7 +153,7 @@ const functionalOverlap: InsightRule = {
       premium: false,
       subscriptionIds: ids,
       dimension: "redundancy" satisfies HealthDimensionKey,
-      scoreImpact: -Math.min(groups.length * MEDIUM, 22),
+      scoreImpact: -Math.min(groups.length * MEDIUM, 32),
     };
   },
 };
@@ -143,13 +161,13 @@ const functionalOverlap: InsightRule = {
 const concentration: InsightRule = {
   id: "health.concentration",
   name: "Spending concentration",
-  description: "One category eating an outsized share of monthly spend — a real spending-pattern signal, not a claim about waste.",
+  description: "One category eating an outsized share of monthly spend: a real spending-pattern signal, not a claim about waste.",
   severity: "info",
   category: "health",
   premium: false,
   evaluate(ctx: EngineContext) {
     const c = categoryConcentration(ctx.active);
-    if (!c) return null; // zero spend or only one category — "balanced" doesn't apply, no opinion
+    if (!c) return null; // zero spend or only one category: "balanced" doesn't apply, no opinion
     if (c.share < 0.4) {
       return {
         ruleId: this.id,
@@ -166,15 +184,15 @@ const concentration: InsightRule = {
     // Double-counting guard (caught in local-council review, Devil's
     // Advocate lens): a category with exactly one subscription in it that
     // ALSO happens to be a real cost outlier would otherwise be penalized
-    // twice for one fact — once here ("Streaming is concentrated") and
+    // twice for one fact: once here ("Streaming is concentrated") and
     // once by the outliers rule below ("this subscription costs way more
     // than the rest"). When the dominant category's only contributor is
     // already an outlier, this is the same underlying story told a second
-    // way, not two independent spending problems — the outliers rule
+    // way, not two independent spending problems. The outliers rule
     // already covers it with the more specific framing, so this stays
     // silent rather than double-penalizing the spending dimension for a
-    // single subscription. A category with 2+ contributors never hits this
-    // — concentration is still real, independent evidence there.
+    // single subscription. A category with 2+ contributors never hits
+    // this: concentration is still real, independent evidence there.
     if (c.subscriptionIds.length === 1) {
       const outlierIds = new Set(findExpensiveOutliers(ctx.active).map((o) => o.subscription.id));
       if (outlierIds.has(c.subscriptionIds[0])) return null;
@@ -196,7 +214,7 @@ const concentration: InsightRule = {
 const outliers: InsightRule = {
   id: "health.expensive_outliers",
   name: "Expensive subscriptions",
-  description: "Subscriptions costing at least 2x the group's mean annual cost — a real outlier, not a judgment that it's unaffordable.",
+  description: "Subscriptions costing at least 2x the group's mean annual cost: a real outlier, not a judgment that it's unaffordable.",
   severity: "info",
   category: "health",
   premium: false,
@@ -225,18 +243,91 @@ const outliers: InsightRule = {
       premium: false,
       subscriptionIds: found.map((o) => o.subscription.id),
       dimension: "spending" satisfies HealthDimensionKey,
-      scoreImpact: -Math.min(found.length * MEDIUM, 22),
+      scoreImpact: -Math.min(found.length * MEDIUM, 32),
     };
   },
 };
 
-// "Death by a thousand cuts" — see findSmallSubscriptionsCluster's own
+// North Star Part: "meaningful price increases" was the one signal type
+// explicitly called out as high-value and currently missing entirely. The
+// infrastructure (subscriptionPriceHistory, computeLatestPriceChange) has
+// existed since Phase 9, but was only ever surfaced passively, one
+// subscription at a time, on that subscription's own detail page. Nobody
+// was told proactively. This is the same real, already-recorded history,
+// no new detection heuristic, no estimate, just finally checked across the
+// whole active portfolio and folded into the same score/Quick-Wins/"What
+// SubSentry noticed" machinery every other health rule already feeds.
+// Returns null (not a fabricated positive) for an account with too little
+// recorded history to have an opinion yet; see
+// hasEnoughPriceHistoryToEvaluate's own comment.
+//
+// Honest scope, not oversold (product council review, Devil's Advocate
+// lens): no import path (Gmail/Plaid/TrueLayer/CSV) writes a
+// subscriptionPriceHistory row for an *existing* subscription today.
+// Imports only ever create new rows (see schema.ts's own comment on that
+// table). The only writer is a user's own edit (updateSubscription). So
+// today this can only ever fire in response to a price the user themselves
+// typed in. Proactively surfacing and scoring it across the whole
+// portfolio (instead of only on that one subscription's own detail page)
+// is still real, new value, but this does not yet "catch" a price hike a
+// provider raised quietly in the background. Wiring import-side price
+// reconciliation (detection.ts already fuzzy-matches a detected charge
+// against an existing active subscription by name; it just never compares
+// the amount or writes history) is the natural next step that would make
+// this genuinely proactive.
+const priceIncreases: InsightRule = {
+  id: "health.price_increases",
+  name: "Price increases",
+  description: "Active subscriptions whose price genuinely went up since SubSentry first recorded it: real observed history, never an estimate.",
+  severity: "warning",
+  category: "health",
+  premium: false,
+  evaluate(ctx: EngineContext) {
+    const historyMap = ctx.priceHistoryBySubscriptionId ?? new Map();
+    if (!hasEnoughPriceHistoryToEvaluate(ctx.active, historyMap)) return null;
+    const found = findPriceIncreases(ctx.active, historyMap);
+    if (found.length === 0) {
+      return {
+        ruleId: this.id,
+        // Not an unqualified "No price increases": hasEnoughPriceHistoryToEvaluate's
+        // bar is "at least one active subscription has history," so this
+        // positive can legitimately fire having only ever checked a small
+        // slice of a larger portfolio. The title says so explicitly (product
+        // council review, Fintech/Trust lens) rather than reading as a
+        // portfolio-wide assurance a skimming user would take at face value.
+        title: "No price increases in your tracked history",
+        description: "Every subscription SubSentry has price history for has stayed the same price or gotten cheaper.",
+        severity: "positive",
+        category: "health",
+        premium: false,
+        subscriptionIds: [],
+        dimension: "spending" satisfies HealthDimensionKey,
+        scoreImpact: WEAK,
+      };
+    }
+    return {
+      ruleId: this.id,
+      title: found.length === 1 ? "1 subscription got more expensive" : `${found.length} subscriptions got more expensive`,
+      description: `${formatNameList(
+        found.map((f) => `${f.subscription.name} (+${Math.round(f.change.percentChange)}%, ${formatCents(f.change.annualDeltaCents, f.change.currency)}/yr)`),
+      )}, based on SubSentry's own recorded price history.`,
+      severity: "warning",
+      category: "health",
+      premium: false,
+      subscriptionIds: found.map((f) => f.subscription.id),
+      dimension: "spending" satisfies HealthDimensionKey,
+      scoreImpact: -Math.min(found.length * MEDIUM, 32),
+    };
+  },
+};
+
+// "Death by a thousand cuts." See findSmallSubscriptionsCluster's own
 // comment for the full relative-threshold reasoning. Complementary to,
 // never contradictory with, the outliers rule above: "nothing is
 // individually outsized" and "several small ones add up" can both be true
 // facts about the same portfolio at once (health-score.ts's status
 // decoupling already handles a dimension carrying both a positive and a
-// negative finding honestly). Only a negative case exists here — there's
+// negative finding honestly). Only a negative case exists here: there's
 // no positive-evidence version of "your small subscriptions don't add up
 // to anything," so this stays silent (returns null) rather than manufacture
 // a bonus for the absence of a pattern that most portfolios don't have
@@ -278,7 +369,7 @@ const longRunning: InsightRule = {
     return {
       ruleId: this.id,
       title: `${found.length} long-standing subscription${found.length === 1 ? "" : "s"}`,
-      description: "You have subscriptions you've kept for over a year — stable, deliberate spend.",
+      description: "You have subscriptions you've kept for over a year: stable, deliberate spend.",
       severity: "positive",
       category: "health",
       premium: false,
@@ -291,18 +382,18 @@ const longRunning: InsightRule = {
 
 // Deliberately the weakest-evidence dimension in this whole model. This app
 // only knows when a subscription row was *added to SubSentry*
-// (createdAt) — it has no idea whether that reflects a genuinely new
+// (createdAt). It has no idea whether that reflects a genuinely new
 // subscription or a long-standing one imported for the first time (a CSV
 // import of 10 years of bank history adds 10 years of subscriptions "in the
 // last 30 days" by this measure). The bar is set high (5+, not the old
 // model's 3+) and the wording never claims real spending growth is
-// happening — only what's actually known: rows landed in SubSentry
+// happening, only what's actually known: rows landed in SubSentry
 // recently. See health-score.ts's confidence calculation, which also
 // factors this same uncertainty in.
 const recentGrowth: InsightRule = {
   id: "health.recent_growth",
   name: "Recently added to SubSentry",
-  description: "Subscriptions added to SubSentry in the last 30 days — reflects import/entry activity, not proven spending growth.",
+  description: "Subscriptions added to SubSentry in the last 30 days: reflects import/entry activity, not proven spending growth.",
   severity: "info",
   category: "health",
   premium: false,
@@ -325,7 +416,7 @@ const recentGrowth: InsightRule = {
     return {
       ruleId: this.id,
       title: `${added} subscriptions were added to SubSentry in the last 30 days`,
-      description: "This reflects when they were added here, not necessarily when they actually started — worth a look if that many are genuinely new.",
+      description: "This reflects when they were added here, not necessarily when they actually started. Worth a look if that many are genuinely new.",
       severity: "info",
       category: "health",
       premium: false,
@@ -337,7 +428,7 @@ const recentGrowth: InsightRule = {
 };
 
 // Replaces two old rules (renewal_clustering and renewal_spike) with one:
-// clustering by itself — several renewals landing the same week — is not
+// clustering by itself, several renewals landing the same week, is not
 // automatically unhealthy (a user could have 3 cheap subscriptions renew
 // the same week and feel nothing), so it's surfaced as neutral, zero-impact
 // context whenever it's the only evidence. The score only moves when
@@ -346,7 +437,7 @@ const recentGrowth: InsightRule = {
 const renewalRisk: InsightRule = {
   id: "health.renewal_risk",
   name: "Upcoming renewal load",
-  description: "Total due in the next 30 days vs. a typical month's spend — clustering alone is neutral; a genuine spike is what actually matters.",
+  description: "Total due in the next 30 days vs. a typical month's spend. Clustering alone is neutral; a genuine spike is what actually matters.",
   severity: "info",
   category: "health",
   premium: false,
@@ -377,12 +468,12 @@ const renewalRisk: InsightRule = {
       };
     }
     if (cluster && cluster.currency) {
-      // Informational only — see this rule's own comment on why clustering
+      // Informational only, see this rule's own comment on why clustering
       // alone never moves the score.
       return {
         ruleId: this.id,
         title: `${cluster.subscriptionIds.length} renewals land the same week`,
-        description: `Starting ${cluster.windowStartIso}, ${formatCents(cluster.totalCents, cluster.currency)} is due within 7 days — in line with your typical monthly spend.`,
+        description: `Starting ${cluster.windowStartIso}, ${formatCents(cluster.totalCents, cluster.currency)} is due within 7 days, in line with your typical monthly spend.`,
         severity: "info",
         category: "health",
         premium: false,
@@ -409,7 +500,7 @@ const renewalRisk: InsightRule = {
 const overdue: InsightRule = {
   id: "health.overdue_renewals",
   name: "Overdue renewal dates",
-  description: "An active subscription whose renewal date has already passed — real bookkeeping neglect, not a guess about usage.",
+  description: "An active subscription whose renewal date has already passed: real bookkeeping neglect, not a guess about usage.",
   severity: "warning",
   category: "health",
   premium: false,
@@ -438,7 +529,7 @@ const overdue: InsightRule = {
       premium: false,
       subscriptionIds: found.map((s) => s.id),
       dimension: "hygiene" satisfies HealthDimensionKey,
-      scoreImpact: -Math.min(found.length * MEDIUM, 22),
+      scoreImpact: -Math.min(found.length * MEDIUM, 32),
     };
   },
 };
@@ -462,24 +553,24 @@ const canceledHistory: InsightRule = {
       premium: false,
       subscriptionIds: [],
       dimension: "hygiene" satisfies HealthDimensionKey,
-      scoreImpact: Math.min(count * WEAK, 15),
+      scoreImpact: Math.min(count * WEAK, 24),
     };
   },
 };
 
 // "The product should tell users when SubSentry itself needs better data"
-// (Phase 8 brief) — this is the one hygiene signal that's honestly about
+// (Phase 8 brief). This is the one hygiene signal that's honestly about
 // *this app's* classification gap, not the user's own record-keeping. Only
 // counts imported rows (see uncategorizedImports' own comment on why a
 // manually-chosen "Other" is a legitimate, deliberate answer, not a gap).
 // Positive branch only fires when there's something to be positive ABOUT
-// (at least one imported subscription exists) — an all-manual account
+// (at least one imported subscription exists): an all-manual account
 // saying "all your imports are categorized" would be a vacuous, borrowed
 // compliment for zero actual imports.
 const uncategorizedImportsRule: InsightRule = {
   id: "health.uncategorized_imports",
   name: "Uncategorized imported subscriptions",
-  description: "Imported subscriptions SubSentry's merchant classifier couldn't confidently categorize — a data gap on this app's side, not a judgment about the subscription.",
+  description: "Imported subscriptions SubSentry's merchant classifier couldn't confidently categorize: a data gap on this app's side, not a judgment about the subscription.",
   severity: "info",
   category: "health",
   premium: false,
@@ -519,6 +610,7 @@ export const HEALTH_RULES: InsightRule[] = [
   functionalOverlap,
   concentration,
   outliers,
+  priceIncreases,
   smallSubscriptionsAddUp,
   longRunning,
   recentGrowth,
