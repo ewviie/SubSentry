@@ -1,5 +1,13 @@
 # PRODUCTION_READINESS_REPORT.md
 
+> **⚠️ ARCHIVED — superseded by [SECURITY_STATUS.md](./SECURITY_STATUS.md) (2026-08-22).**
+> Retained for historical narrative only. This file predates a full
+> independent re-audit and 7-role adversarial council review that found
+> several claims below stale or no longer accurate against current code
+> (see SECURITY_STATUS.md for specifics and current verified state). Do not
+> treat anything in this file as a current claim without re-checking it
+> against the actual source first.
+
 Final phase of the production-hardening mission. Builds on `PROJECT_SECURITY_MAP.md`, `SECURITY_HARDENING_REPORT.md`, `DATABASE_QUERY_AUDIT.md`, and `SCALING_READINESS_REPORT.md` — this report indexes all of them plus the new work from this phase (accessibility, E2E testing, CI/CD, distributed rate limiting, caching, observability).
 
 **Headline finding of this phase**: building the E2E test suite (task-required, not optional) surfaced a real, previously-unknown production bug — `src/proxy.ts`'s CSRF Origin-check compared against `request.nextUrl.origin`, which does not reliably reflect the true `Host` header (verified empirically: resolved to `"localhost"` while the real Host/Origin was `"127.0.0.1"`). This silently 403'd every legitimate same-origin state-changing request — including logout — the moment the app was reached by anything other than literally `localhost`. Fixed to compare against the raw `Host` header instead. This also corrected two factual errors in the Phase-1/2 reports, which had missed `src/proxy.ts` entirely (searched for the old Next.js "middleware.ts" filename; Next.js 16 renamed the convention to "proxy.ts") and so incorrectly reported "no middleware" and "no CSP" when both already existed.
