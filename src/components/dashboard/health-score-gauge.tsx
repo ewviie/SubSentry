@@ -14,7 +14,7 @@ import { CountUp } from "@/components/ui/count-up";
 // and the middle ground stays neutral rather than an arbitrary amber.
 //
 // Derived from `rating`, not a second copy of health-score.ts's own score
-// thresholds — this component used to re-derive its own 90/50 cutoffs
+// thresholds. This component used to re-derive its own 90/50 cutoffs
 // independently, which drifted out of sync the moment health-score.ts's
 // bands were recalibrated (Phase 7.2). One source of truth for "what score
 // counts as which tier" now lives only in health-score.ts.
@@ -63,11 +63,23 @@ export function HealthScoreGauge({
           transition={prefersReducedMotion ? { duration: 0 } : { ...springSmooth, delay: 0.15 }}
         />
       </svg>
+      {/* Both the score and "/100" scale with `size` (instead of a fixed
+          text-2xl) and stay visible at every size, including the compact
+          52px overview-panel.tsx uses. "/100" scales down as a genuinely
+          smaller secondary label rather than being dropped, with a floor
+          (8px) below which it'd stop being legible at all. The score stays
+          the visual focus throughout: it's always sized well above "/100",
+          never just a slightly-bigger sibling. */}
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className={cn("font-mono text-2xl font-semibold tabular-nums", text)}>
+        <span
+          className={cn("font-mono leading-none font-semibold tabular-nums", text)}
+          style={{ fontSize: size * 0.29 }}
+        >
           <CountUp value={result.score} format="integer" />
         </span>
-        <span className="text-[0.65rem] text-muted-foreground">/100</span>
+        <span className="text-muted-foreground" style={{ fontSize: Math.max(8, size * 0.11), lineHeight: 1 }}>
+          /100
+        </span>
       </div>
     </div>
   );

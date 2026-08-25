@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, Copy, PieChart, ShieldCheck, Sparkles, TrendingUp } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { AlertTriangle, Check, Copy, Loader2, PieChart, ShieldCheck, Sparkles, TrendingUp } from "lucide-react";
 import { motion } from "framer-motion";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,6 +17,53 @@ const ICONS: Record<InsightType, typeof TrendingUp> = {
   high_yearly_spend: TrendingUp,
   possible_overlap: Copy,
 };
+
+// Same status-only PATCH, same toast-then-refresh pattern
+// EditSubscriptionForm's own "Mark as canceled" already uses (see its
+// comment: acting on a plain text recommendation used to mean opening the
+// full edit form, finding Status among 7 other fields, and saving). An
+// overdue-renewal insight naming exactly one subscription is the single
+// clearest case on this whole dashboard where "what should I do about
+// this" has one unambiguous, one-click answer — SubSentry can't know
+// whether it's actually still active, but it can make "no, cancel it"
+// take one click instead of a full page trip.
+function MarkOverdueCanceled({ subscriptionId }: { subscriptionId: string }) {
+  const router = useRouter();
+  const [canceling, setCanceling] = useState(false);
+
+  async function handleCancel() {
+    setCanceling(true);
+    try {
+      const res = await fetch(`/api/subscriptions/${subscriptionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "canceled" }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        toast.error(data?.message ?? "Couldn't cancel that. Try again.");
+        return;
+      }
+      toast.success("Marked canceled");
+      router.refresh();
+    } catch {
+      toast.error("Couldn't cancel that. Try again.");
+    } finally {
+      setCanceling(false);
+    }
+  }
+
+  return (
+    <Button size="sm" variant="outline" className="w-fit" onClick={handleCancel} disabled={canceling}>
+      {canceling ? (
+        <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+      ) : (
+        <Check className="size-3.5" aria-hidden="true" />
+      )}
+      Mark canceled
+    </Button>
+  );
+}
 
 export function InsightsSection({ insights }: { insights: ComputedInsight[] }) {
   const [descriptions, setDescriptions] = useState(() => insights.map((i) => i.description));
@@ -94,7 +143,7 @@ export function InsightsSection({ insights }: { insights: ComputedInsight[] }) {
                 transition={springSnappy}
               >
                 <Card size="sm" className="h-full shadow-elevation-low transition-shadow duration-200 hover:shadow-elevation-medium">
-                  {/* No pt override here on purpose — the empty-state Card
+                  {/* No pt override here on purpose. The empty-state Card
                       just above (when insights.length === 0) doesn't add one
                       either, and this used to disagree with it for no
                       documented reason, stacking an extra pt-4 on top of the
@@ -114,7 +163,7 @@ export function InsightsSection({ insights }: { insights: ComputedInsight[] }) {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
                           <p className="text-sm font-medium">{insight.title}</p>
-                          {/* Severity signaled by text, not color alone — a
+                          {/* Severity signaled by text, not color alone. A
                               colorblind reader can't distinguish the
                               destructive/10 vs ai-muted icon backgrounds
                               above by hue. */}
@@ -131,12 +180,22 @@ export function InsightsSection({ insights }: { insights: ComputedInsight[] }) {
                         <p className="mt-1 text-sm text-muted-foreground">{descriptions[idx]}</p>
                       </div>
                     </div>
-                    <Link
-                      href={singleSubscriptionId ? `/subscriptions/${singleSubscriptionId}` : "/subscriptions"}
-                      className="mt-auto text-xs font-medium text-foreground hover:underline"
-                    >
-                      Review →
-                    </Link>
+                    <div className="mt-auto flex flex-wrap items-center gap-3">
+                      <Link
+                        href={singleSubscriptionId ? `/subscriptions/${singleSubscriptionId}` : "/subscriptions"}
+                        className="text-xs font-medium text-foreground hover:underline"
+                      >
+                        Review →
+                      </Link>
+                      {/* Only when this insight names exactly one
+                          subscription: a multi-subscription overdue insight
+                          has no single unambiguous target to cancel, and
+                          canceling the wrong one of several would be worse
+                          than the friction this button removes. */}
+                      {insight.type === "overdue_renewal" && singleSubscriptionId ? (
+                        <MarkOverdueCanceled subscriptionId={singleSubscriptionId} />
+                      ) : null}
+                    </div>
                   </CardContent>
                 </Card>
               </motion.div>

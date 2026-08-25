@@ -15,8 +15,8 @@ export function StatCard({
   label: string;
   accentClassName?: string;
   // The one number a user actually opens this page to check gets a
-  // visually dominant treatment — a emerald top rule, a larger figure, more
-  // breathing room — so it reads first. Everything else stays plain: making
+  // visually dominant treatment: a emerald top rule, a larger figure, more
+  // breathing room, so it reads first. Everything else stays plain: making
   // every card shout equally is the same as none of them shouting at all.
   emphasis?: boolean;
   caption?: string;
@@ -32,7 +32,12 @@ export function StatCard({
         )}
       >
         <CardHeader>
-          <CardTitle className="text-sm font-normal text-muted-foreground">{label}</CardTitle>
+          <CardTitle
+            as="h3"
+            className="text-xs font-medium tracking-wide text-muted-foreground uppercase"
+          >
+            {label}
+          </CardTitle>
           <CardAction>
             <div
               aria-hidden="true"
@@ -49,13 +54,13 @@ export function StatCard({
         <CardContent>
           <p
             className={cn(
-              "font-mono font-semibold tabular-nums",
+              "font-financial leading-none font-semibold",
               emphasis ? "text-4xl" : "text-2xl",
             )}
           >
             {children}
           </p>
-          {caption ? <p className="mt-1 text-xs text-muted-foreground">{caption}</p> : null}
+          {caption ? <p className="mt-2 text-xs text-muted-foreground">{caption}</p> : null}
         </CardContent>
       </Card>
     </MotionCard>
