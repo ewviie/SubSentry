@@ -4,7 +4,7 @@ import type { DetectedSubscription } from "@/lib/imports/types";
 
 // This project has no React component-rendering test setup (no
 // testing-library/jsdom dependency, no other *.test.tsx anywhere under
-// src/components) — detectedToFormValues is a plain function, so it's
+// src/components). detectedToFormValues is a plain function, so it's
 // tested directly here rather than introducing a new testing paradigm for
 // one function.
 
@@ -42,11 +42,11 @@ describe("detectedToFormValues", () => {
   });
 
   // Regression: normalizeMerchant() deliberately does NOT truncate
-  // displayName (see merchant-normalizer.ts's own comment — it's also
+  // displayName (see merchant-normalizer.ts's own comment: it's also
   // detection.ts's clustering key, and truncating it there would collide
   // unrelated long descriptions onto the same cluster). The length cap
   // belongs here instead, at the one point this becomes a submitted
-  // subscription name — this is the only place that actually enforces it,
+  // subscription name. This is the only place that actually enforces it,
   // so it needs its own direct test now that it moved out of
   // merchant-normalizer.ts.
   it("truncates an over-long merchant display name to the subscription name limit", () => {
@@ -71,7 +71,7 @@ describe("detectedToFormValues", () => {
 
 // Regression coverage for a Phase 7 fix: detectRecurringSubscriptions()
 // (lib/imports/detection.ts) already computes isDuplicateOfExistingId, but
-// nothing consulted it when deciding what to pre-select — a high-confidence
+// nothing consulted it when deciding what to pre-select. A high-confidence
 // duplicate of an existing subscription got checked by default and could be
 // silently re-imported as a second, real, recurring charge.
 describe("isPreselectedByDefault", () => {
@@ -88,5 +88,33 @@ describe("isPreselectedByDefault", () => {
   it("does not pre-select a medium/low-confidence row regardless of duplicate status", () => {
     expect(isPreselectedByDefault(makeDetected({ confidence: "medium" }))).toBe(false);
     expect(isPreselectedByDefault(makeDetected({ confidence: "low" }))).toBe(false);
+  });
+
+  // A row carrying a price-change proposal always also carries
+  // isDuplicateOfExistingId (detection.ts only ever attaches one alongside
+  // the other), asserted directly here so this stays true even if that
+  // invariant ever drifts, since a pre-selected price-change row would mean
+  // "Confirm" both updates the existing subscription's price AND creates a
+  // second, duplicate one for the same charge.
+  it("does not pre-select a row carrying a price-change proposal", () => {
+    expect(
+      isPreselectedByDefault(
+        makeDetected({
+          confidence: "high",
+          isDuplicateOfExistingId: "existing-sub-1",
+          priceChangeProposal: {
+            existingSubscriptionId: "existing-sub-1",
+            existingName: "Netflix",
+            existingAmountCents: 1599,
+            existingBillingCycle: "monthly",
+            currency: "usd",
+            detectedAmountCents: 1999,
+            detectedBillingCycle: "monthly",
+            percentChange: 25,
+            annualDeltaCents: 4800,
+          },
+        }),
+      ),
+    ).toBe(false);
   });
 });

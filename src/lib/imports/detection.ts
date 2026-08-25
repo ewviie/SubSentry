@@ -1,4 +1,5 @@
 import { levenshtein, normalizeName } from "@/lib/subscriptions/insights";
+import { computePriceChangeIfMeaningful } from "@/lib/subscriptions/price-history";
 import type { Subscription } from "@/lib/db/schema";
 import { normalizeMerchant } from "./merchant-normalizer";
 import type {
@@ -195,11 +196,12 @@ export function detectRecurringSubscriptions(
   // default selection and show a warning badge) — before that it only fed
   // an aggregate count, so this distinction not mattering as much went
   // unnoticed; it matters now that a real UI decision hangs on it.
-  const existingNormalizedNames = existingSubscriptions
+  const existingActive = existingSubscriptions
     .filter((s) => s.status === "active")
     .map((s) => ({
       id: s.id,
       normalized: normalizeName(s.name),
+      subscription: s,
     }));
 
   const detected: DetectedSubscription[] = [];
@@ -257,9 +259,67 @@ export function detectRecurringSubscriptions(
     const suggestedNextRenewalDate = addDays(lastTransactionDate, estimatedBillingCycle.averageIntervalDays);
 
     const normalizedDetectedName = normalizeName(merchant.displayName);
-    const duplicateMatch = existingNormalizedNames.find((existing) =>
+    // Every existing active subscription whose name fuzzy-matches this
+    // cluster — not just the first one found. existingActive's order comes
+    // from listSubscriptions' own ORDER BY next renewal date, which has no
+    // relationship to match quality; picking arbitrarily off the front of
+    // that order (the old behavior) meant a looser match happening to renew
+    // sooner could silently win over an exact match sitting later in the
+    // array (product council review, Devil's Advocate lens — concretely:
+    // "Disney+ Bundle" fuzzy-matches a real "Disney+" charge via substring
+    // containment, so if it renews before the user's actual "Disney+"
+    // subscription, the old .find() would compare/update the Bundle's price
+    // instead of the real match).
+    const nameMatches = existingActive.filter((existing) =>
       likelyMatchesExistingName(normalizedDetectedName, existing.normalized),
     );
+    const exactNameMatches = nameMatches.filter((existing) => existing.normalized === normalizedDetectedName);
+    // An exact match always wins when there's exactly one, regardless of
+    // fuzzy candidates or array order — this is what fixes the Disney+ vs
+    // Disney+ Bundle case. Otherwise falls back to the first fuzzy
+    // candidate (undefined when there are none), same as the prior
+    // behavior for the single-candidate case, which is unambiguous by
+    // construction.
+    const duplicateMatch = exactNameMatches.length === 1 ? exactNameMatches[0] : nameMatches[0];
+    // Genuinely ambiguous — 2+ subscriptions fuzzy-match this cluster with
+    // no single exact winner to break the tie. Still flagged as a plain
+    // "possible duplicate" below (nothing regresses for that existing,
+    // non-destructive badge), but never assertive enough to propose
+    // overwriting one specific subscription's price when it's genuinely
+    // unclear which one is the real match.
+    const isAmbiguousMatch = exactNameMatches.length !== 1 && nameMatches.length > 1;
+
+    // Price-change proposal: only for a strong-enough, unambiguous match
+    // (confidence gates out a weak/fuzzy name match, isAmbiguousMatch gates
+    // out a genuinely uncertain one — both fall back to a plain duplicate
+    // flag instead of an assertive price-change suggestion, per "if
+    // confidence is insufficient, require user review"). Currency mismatch,
+    // a $0 baseline, and a sub-3% move are all rejected inside
+    // computePriceChangeIfMeaningful itself; representativeAmount already
+    // reflects detection.ts's own intro-pricing/steady-state and
+    // amount-consistency filtering above, so a promo/trial's discounted
+    // first charge or a noisy one-off never reaches this comparison as if
+    // it were the real recurring price.
+    // representativeAmount is a median across every transaction in this
+    // cluster, computed with no regard to each transaction's own currency —
+    // safe only when the whole cluster genuinely shares one. Clustering
+    // itself groups purely by merchant name (no currency partitioning), so
+    // a multi-currency account/CSV could in principle produce a mixed-
+    // currency cluster; using just sorted[0].currency as "the" cluster
+    // currency in that case could pair a same-currency-by-coincidence label
+    // with a representativeAmount that's actually a meaningless cross-
+    // currency median (CodeRabbit review). Requiring every transaction in
+    // the cluster to agree before ever proposing a change is the safe
+    // direction — same "only propose when it's actually safe" bar this
+    // whole feature is held to.
+    const hasSingleClusterCurrency = sorted.every((t) => t.currency === sorted[0].currency);
+    const priceChangeCandidate =
+      duplicateMatch && confidence !== "low" && !isAmbiguousMatch && hasSingleClusterCurrency
+        ? computePriceChangeIfMeaningful(
+            { amountCents: duplicateMatch.subscription.amountCents, billingCycle: duplicateMatch.subscription.billingCycle, currency: duplicateMatch.subscription.currency },
+            { amountCents: representativeAmount, billingCycle: estimatedBillingCycle.cycle, currency: sorted[0].currency },
+          )
+        : null;
 
     detected.push({
       id: crypto.randomUUID(),
@@ -273,6 +333,20 @@ export function detectRecurringSubscriptions(
       confidenceSignals: signals,
       suggestedNextRenewalDate,
       isDuplicateOfExistingId: duplicateMatch?.id,
+      priceChangeProposal:
+        duplicateMatch && priceChangeCandidate
+          ? {
+              existingSubscriptionId: duplicateMatch.id,
+              existingName: duplicateMatch.subscription.name,
+              existingAmountCents: duplicateMatch.subscription.amountCents,
+              existingBillingCycle: duplicateMatch.subscription.billingCycle,
+              currency: duplicateMatch.subscription.currency,
+              detectedAmountCents: representativeAmount,
+              detectedBillingCycle: estimatedBillingCycle.cycle,
+              percentChange: priceChangeCandidate.percentChange,
+              annualDeltaCents: priceChangeCandidate.annualDeltaCents,
+            }
+          : undefined,
     });
   }
 

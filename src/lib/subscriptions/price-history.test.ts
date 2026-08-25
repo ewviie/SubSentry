@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
-import { computeLatestPriceChange, estimatePaidCents } from "./price-history";
+import { computeLatestPriceChange, computePriceChangeIfMeaningful, estimatePaidCents } from "./price-history";
 import type { Subscription, SubscriptionPriceHistory } from "@/lib/db/schema";
 
 function row(overrides: Partial<SubscriptionPriceHistory>): SubscriptionPriceHistory {
@@ -101,6 +101,24 @@ describe("computeLatestPriceChange", () => {
       row({ id: "b", amountCents: 900, currency: "gbp", observedAt: new Date("2026-02-01T00:00:00Z") }),
     ];
     expect(computeLatestPriceChange(history)).toBeNull();
+  });
+
+  // Regression (product council review, Data/Analytics lens): a
+  // mismatched-currency row that ISN'T the row immediately before `latest`
+  // used to make this function give up entirely (`return null`) the moment
+  // it was encountered while walking backward, even though a genuine
+  // same-currency comparison existed further back. A transient eur row in
+  // the middle of otherwise-usd history must not permanently hide a real
+  // usd -> usd increase.
+  it("skips a mismatched-currency row in the middle of history to find a genuine same-currency change further back", () => {
+    const history = [
+      row({ id: "a", amountCents: 800, currency: "usd", observedAt: new Date("2024-01-01T00:00:00Z") }),
+      row({ id: "b", amountCents: 999, currency: "eur", observedAt: new Date("2024-06-01T00:00:00Z") }),
+      row({ id: "c", amountCents: 1200, currency: "usd", observedAt: new Date("2025-01-01T00:00:00Z") }),
+    ];
+    const change = computeLatestPriceChange(history);
+    expect(change).toMatchObject({ fromCents: 800, toCents: 1200, currency: "usd", percentChange: 50 });
+    expect(change?.annualDeltaCents).toBe(4800);
   });
 
   it("returns null rather than dividing by zero when the prior monthly-equivalent price was 0", () => {
@@ -242,5 +260,78 @@ describe("estimatePaidCents", () => {
       row({ id: "b", amountCents: 1500, currency: "usd", observedAt: new Date("2026-02-01T00:00:00Z") }),
     ];
     expect(estimatePaidCents(subscription, history)).toBe(1500);
+  });
+});
+
+describe("computePriceChangeIfMeaningful", () => {
+  it("returns null for a currency mismatch — never compares across currencies", () => {
+    const existing = { amountCents: 1000, billingCycle: "monthly" as const, currency: "usd" };
+    const candidate = { amountCents: 1500, billingCycle: "monthly" as const, currency: "eur" };
+    expect(computePriceChangeIfMeaningful(existing, candidate)).toBeNull();
+  });
+
+  it("returns null for a $0 existing baseline (undefined percent change)", () => {
+    const existing = { amountCents: 0, billingCycle: "monthly" as const, currency: "usd" };
+    const candidate = { amountCents: 999, billingCycle: "monthly" as const, currency: "usd" };
+    expect(computePriceChangeIfMeaningful(existing, candidate)).toBeNull();
+  });
+
+  it("returns null for the exact same price", () => {
+    const existing = { amountCents: 1599, billingCycle: "monthly" as const, currency: "usd" };
+    expect(computePriceChangeIfMeaningful(existing, { ...existing })).toBeNull();
+  });
+
+  it("returns null for a sub-3% move — noise, not a genuine change", () => {
+    const existing = { amountCents: 1000, billingCycle: "monthly" as const, currency: "usd" };
+    const candidate = { amountCents: 1010, billingCycle: "monthly" as const, currency: "usd" }; // +1%
+    expect(computePriceChangeIfMeaningful(existing, candidate)).toBeNull();
+  });
+
+  it("detects a genuine increase with signed percent and annualized delta", () => {
+    const existing = { amountCents: 1599, billingCycle: "monthly" as const, currency: "usd" };
+    const candidate = { amountCents: 1999, billingCycle: "monthly" as const, currency: "usd" };
+    const result = computePriceChangeIfMeaningful(existing, candidate);
+    expect(result?.percentChange).toBeCloseTo(25.0156, 3);
+    expect(result?.annualDeltaCents).toBe((1999 - 1599) * 12);
+  });
+
+  it("detects a genuine decrease with a negative percent change", () => {
+    const existing = { amountCents: 2000, billingCycle: "monthly" as const, currency: "usd" };
+    const candidate = { amountCents: 1500, billingCycle: "monthly" as const, currency: "usd" };
+    const result = computePriceChangeIfMeaningful(existing, candidate);
+    expect(result?.percentChange).toBeCloseTo(-25);
+    expect(result?.annualDeltaCents).toBe((1500 - 2000) * 12);
+  });
+
+  // Same regression as computeLatestPriceChange's own $70 -> $84 case above,
+  // exercised through this function's separate (existing/candidate)
+  // PricePoint shape used by import-side price reconciliation.
+  it("a yearly $70 -> $84 price increase reports an exact $14.00/yr delta, not $14.04", () => {
+    const existing = { amountCents: 7000, billingCycle: "yearly" as const, currency: "usd" };
+    const candidate = { amountCents: 8400, billingCycle: "yearly" as const, currency: "usd" };
+    const result = computePriceChangeIfMeaningful(existing, candidate);
+    expect(result?.annualDeltaCents).toBe(1400);
+  });
+
+  // Billing-cycle mismatch: a genuine cadence change must be judged on
+  // monthly-equivalent cost, never raw cents — otherwise a monthly->yearly
+  // switch that's actually a *decrease* would misread as a huge fake
+  // increase (yearly's raw amountCents is naturally ~12x a monthly one).
+  it("correctly compares across a billing-cycle change instead of raw amounts", () => {
+    const existing = { amountCents: 1599, billingCycle: "monthly" as const, currency: "usd" }; // $15.99/mo
+    const candidate = { amountCents: 18000, billingCycle: "yearly" as const, currency: "usd" }; // $180/yr = $15/mo, a real decrease
+    const result = computePriceChangeIfMeaningful(existing, candidate);
+    // Exact value, not just "less than 0" (product council review,
+    // Data/Analytics lens) — pins the actual magnitude, not just the sign,
+    // so a subtly wrong divisor in the cross-cycle normalization would
+    // still fail this test even if it happened to land on the correct
+    // sign.
+    expect(result?.percentChange).toBeCloseTo(-6.1914, 3);
+  });
+
+  it("does not flag a billing-cycle change whose monthly-equivalent is unchanged", () => {
+    const existing = { amountCents: 1000, billingCycle: "monthly" as const, currency: "usd" }; // $10/mo
+    const candidate = { amountCents: 12000, billingCycle: "yearly" as const, currency: "usd" }; // $120/yr = $10/mo
+    expect(computePriceChangeIfMeaningful(existing, candidate)).toBeNull();
   });
 });

@@ -59,7 +59,21 @@ export function computeLatestPriceChange(history: SubscriptionPriceHistory[]): P
 
   for (let i = sorted.length - 2; i >= 0; i--) {
     const candidate = sorted[i];
-    if (candidate.currency !== latest.currency) return null;
+    // Skip past a mismatched-currency row rather than giving up entirely —
+    // a transient different-currency entry somewhere in the middle of
+    // history (a data-entry glitch, a temporary regional pricing quirk)
+    // must not permanently block detecting a genuine change further back
+    // once the subscription is back to a currency matching `latest`.
+    // Bug found in product council review (Data/Analytics lens): the
+    // original `return null` here fired on ANY mismatch encountered while
+    // walking backward — including one several rows behind an
+    // already-skipped identical-price row — silently losing a real,
+    // same-currency increase that existed further back (repro: usd 800 ->
+    // eur 999 -> usd 1200 reported nothing instead of the genuine +50%).
+    // Two rows with no other same-currency row between them (the original,
+    // still-covered case) correctly falls through to the final `return
+    // null` below once the loop is exhausted.
+    if (candidate.currency !== latest.currency) continue;
 
     const candidateMonthly = monthlyCents(candidate.amountCents, candidate.billingCycle);
     if (candidateMonthly === latestMonthly) continue;
@@ -81,6 +95,57 @@ export function computeLatestPriceChange(history: SubscriptionPriceHistory[]): P
     };
   }
   return null;
+}
+
+export interface PricePoint {
+  amountCents: number;
+  billingCycle: Subscription["billingCycle"];
+  currency: string;
+}
+
+export interface PriceChangeCandidate {
+  percentChange: number;
+  annualDeltaCents: number;
+}
+
+// A <3% monthly-equivalent move is within normal rounding/plan-restructuring
+// noise, not a genuine price change worth surfacing — same bar
+// insights-engine/signals.ts's MEANINGFUL_INCREASE_PERCENT applies for the
+// health-score rule (kept as a separate constant here rather than shared:
+// that one is increase-only and health-score-specific; this one is
+// bidirectional and import-detection-specific, and the two call sites have
+// no other reason to be coupled).
+const MEANINGFUL_PRICE_CHANGE_PERCENT = 3;
+
+// Compares an existing subscription's stored price against a freshly
+// detected recurring amount (import-side price reconciliation) — the same
+// monthly-equivalent normalization computeLatestPriceChange above uses for
+// two history rows, applied here to "what's currently stored" vs. "what a
+// bank/CSV import just detected," so a genuine price change can be proposed
+// without ever assuming a differing raw number means a differing real
+// price. Returns null (not a fabricated proposal) for any of:
+// - a currency mismatch (never compare cents across currencies — same rule
+//   savings.ts/computeLatestPriceChange/estimatePaidCents all follow);
+// - a $0 monthly-equivalent baseline (percent change undefined);
+// - a move under MEANINGFUL_PRICE_CHANGE_PERCENT (noise, not a real change).
+// Deliberately has no opinion on match confidence, promo pricing, or
+// one-off charges — those are the caller's (detection.ts) job, using
+// signals (confidence, introPricingDetected/representativeAmount) this
+// function doesn't have access to and shouldn't re-derive.
+export function computePriceChangeIfMeaningful(existing: PricePoint, candidate: PricePoint): PriceChangeCandidate | null {
+  if (existing.currency !== candidate.currency) return null;
+  const existingMonthly = monthlyCents(existing.amountCents, existing.billingCycle);
+  if (existingMonthly === 0) return null;
+  const candidateMonthly = monthlyCents(candidate.amountCents, candidate.billingCycle);
+  const percentChange = ((candidateMonthly - existingMonthly) / existingMonthly) * 100;
+  if (Math.abs(percentChange) < MEANINGFUL_PRICE_CHANGE_PERCENT) return null;
+  // Not (candidateMonthly - existingMonthly) * 12 — see PriceChange's own
+  // annualDeltaCents comment above for why each side's exact annual figure,
+  // differenced, is more correct than a monthly-equivalent delta scaled by 12.
+  return {
+    percentChange,
+    annualDeltaCents: annualCents(candidate.amountCents, candidate.billingCycle) - annualCents(existing.amountCents, existing.billingCycle),
+  };
 }
 
 const CYCLE_DAYS: Record<Subscription["billingCycle"], number> = {

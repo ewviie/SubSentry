@@ -192,6 +192,192 @@ describe("detectRecurringSubscriptions", () => {
   });
 });
 
+describe("price-change proposal (import reconciliation)", () => {
+  it("strong match + price increase: proposes an update with the correct signed percent/dollar delta", () => {
+    const existing = sub({ name: "Netflix", amountCents: 1599, billingCycle: "monthly", currency: "usd" });
+    const detected = detectRecurringSubscriptions(
+      [
+        tx({ description: "NETFLIX.COM", date: "2026-01-01", amountCents: 1999 }),
+        tx({ description: "NETFLIX.COM", date: addDaysISO("2026-01-01", 31), amountCents: 1999 }),
+      ],
+      [existing],
+    );
+    expect(detected[0].isDuplicateOfExistingId).toBe(existing.id);
+    const proposal = detected[0].priceChangeProposal;
+    expect(proposal).toBeDefined();
+    expect(proposal!.existingSubscriptionId).toBe(existing.id);
+    expect(proposal!.existingAmountCents).toBe(1599);
+    expect(proposal!.detectedAmountCents).toBe(1999);
+    expect(proposal!.percentChange).toBeGreaterThan(0);
+    expect(proposal!.annualDeltaCents).toBe((1999 - 1599) * 12);
+  });
+
+  it("strong match + price decrease: proposes an update with a negative percent change", () => {
+    const existing = sub({ name: "Netflix", amountCents: 1999, billingCycle: "monthly", currency: "usd" });
+    const detected = detectRecurringSubscriptions(
+      [
+        tx({ description: "NETFLIX.COM", date: "2026-01-01", amountCents: 1599 }),
+        tx({ description: "NETFLIX.COM", date: addDaysISO("2026-01-01", 31), amountCents: 1599 }),
+      ],
+      [existing],
+    );
+    const proposal = detected[0].priceChangeProposal;
+    expect(proposal).toBeDefined();
+    expect(proposal!.percentChange).toBeLessThan(0);
+  });
+
+  it("exact same price: still a duplicate, but no price-change proposal", () => {
+    const existing = sub({ name: "Netflix", amountCents: 1599, billingCycle: "monthly", currency: "usd" });
+    const detected = detectRecurringSubscriptions(
+      [
+        tx({ description: "NETFLIX.COM", date: "2026-01-01", amountCents: 1599 }),
+        tx({ description: "NETFLIX.COM", date: addDaysISO("2026-01-01", 31), amountCents: 1599 }),
+      ],
+      [existing],
+    );
+    expect(detected[0].isDuplicateOfExistingId).toBe(existing.id);
+    expect(detected[0].priceChangeProposal).toBeUndefined();
+  });
+
+  it("weak match: a low-confidence cluster never gets a price-change proposal, even against a name match with a different amount", () => {
+    const existing = sub({ name: "Random Store", amountCents: 500, billingCycle: "monthly", currency: "usd" });
+    const detected = detectRecurringSubscriptions(
+      [
+        tx({ description: "RANDOM STORE", date: "2026-01-01", amountCents: 500 }),
+        tx({ description: "RANDOM STORE", date: "2026-01-15", amountCents: 5000 }),
+        tx({ description: "RANDOM STORE", date: "2026-03-20", amountCents: 100 }),
+        tx({ description: "RANDOM STORE", date: "2026-03-25", amountCents: 3000 }),
+      ],
+      [existing],
+    );
+    expect(detected[0].confidence).toBe("low");
+    // Still flagged as a plain duplicate (name-match alone doesn't need
+    // confidence gating) — only the more assertive price-change proposal
+    // requires it.
+    expect(detected[0].isDuplicateOfExistingId).toBe(existing.id);
+    expect(detected[0].priceChangeProposal).toBeUndefined();
+  });
+
+  it("currency mismatch: a strong name match with a different transaction currency never proposes a price change", () => {
+    const existing = sub({ name: "Netflix", amountCents: 1599, billingCycle: "monthly", currency: "usd" });
+    const detected = detectRecurringSubscriptions(
+      [
+        tx({ description: "NETFLIX.COM", date: "2026-01-01", amountCents: 1999, currency: "eur" }),
+        tx({ description: "NETFLIX.COM", date: addDaysISO("2026-01-01", 31), amountCents: 1999, currency: "eur" }),
+      ],
+      [existing],
+    );
+    expect(detected[0].isDuplicateOfExistingId).toBe(existing.id);
+    expect(detected[0].priceChangeProposal).toBeUndefined();
+  });
+
+  it("billing-cycle mismatch: compares monthly-equivalents correctly, not raw amounts, and reports each side's own cycle", () => {
+    // Existing tracked as $15.99/mo; the bank now shows a quarterly charge
+    // of $59.97 (== $19.99/mo) — a real ~25% increase, not the ~275% a raw
+    // amountCents comparison ($59.97 vs $15.99) would suggest.
+    const existing = sub({ name: "Netflix", amountCents: 1599, billingCycle: "monthly", currency: "usd" });
+    const detected = detectRecurringSubscriptions(
+      [
+        tx({ description: "NETFLIX.COM", date: "2026-01-01", amountCents: 5997 }),
+        tx({ description: "NETFLIX.COM", date: addDaysISO("2026-01-01", 91), amountCents: 5997 }),
+      ],
+      [existing],
+    );
+    expect(detected[0].estimatedBillingCycle.cycle).toBe("quarterly");
+    const proposal = detected[0].priceChangeProposal;
+    expect(proposal).toBeDefined();
+    expect(proposal!.existingBillingCycle).toBe("monthly");
+    expect(proposal!.detectedBillingCycle).toBe("quarterly");
+    expect(proposal!.percentChange).toBeGreaterThan(0);
+    expect(proposal!.percentChange).toBeLessThan(50); // real ~25%, not a raw-amount artifact
+  });
+
+  it("promo/one-off: proposes a change based on the steady-state price, not a discounted intro charge", () => {
+    // Existing already tracked at the real steady-state price ($19.99) —
+    // the discounted first charge ($4.99, an intro offer) must not be read
+    // as a price *decrease* against it.
+    const existing = sub({ name: "Streamer Plus", amountCents: 1999, billingCycle: "monthly", currency: "usd" });
+    const detected = detectRecurringSubscriptions(
+      [
+        tx({ description: "STREAMER PLUS", date: "2026-01-01", amountCents: 499 }),
+        tx({ description: "STREAMER PLUS", date: addDaysISO("2026-01-01", 30), amountCents: 1999 }),
+        tx({ description: "STREAMER PLUS", date: addDaysISO("2026-01-01", 60), amountCents: 1999 }),
+      ],
+      [existing],
+    );
+    expect(detected[0].confidenceSignals).toContain("introductory_pricing_detected");
+    expect(detected[0].amountCents).toBe(1999); // steady-state, not the $4.99 intro charge
+    expect(detected[0].priceChangeProposal).toBeUndefined(); // matches existing exactly once intro is excluded
+  });
+
+  // Regression (product council review, Devil's Advocate lens): the old
+  // .find() picked whichever existing subscription happened to come first
+  // in array order (real callers order by next renewal date — a field with
+  // no relationship to name-match quality), not the best match. A base
+  // plan's name is very often a clean substring of its own bundle/family
+  // variant ("Streamflix Plus" inside "Streamflix Plus Family"), so a
+  // looser fuzzy match could silently win over an exact one sitting later
+  // in the array — proposing (and letting the user one-click-confirm) a
+  // price update against the WRONG subscription.
+  it("prefers an exact name match over a fuzzy one, regardless of array order", () => {
+    const bundle = sub({ name: "Streamflix Plus Family", amountCents: 2999, billingCycle: "monthly", currency: "usd" });
+    const exact = sub({ name: "Streamflix Plus", amountCents: 1599, billingCycle: "monthly", currency: "usd" });
+    // Bundle listed first — simulates it sorting earlier (e.g. by an
+    // earlier next-renewal-date) than the real exact match.
+    const detected = detectRecurringSubscriptions(
+      [
+        tx({ description: "STREAMFLIX PLUS", date: "2026-01-01", amountCents: 1999 }),
+        tx({ description: "STREAMFLIX PLUS", date: addDaysISO("2026-01-01", 30), amountCents: 1999 }),
+      ],
+      [bundle, exact],
+    );
+    expect(detected[0].isDuplicateOfExistingId).toBe(exact.id);
+    const proposal = detected[0].priceChangeProposal;
+    expect(proposal).toBeDefined();
+    expect(proposal!.existingSubscriptionId).toBe(exact.id);
+    expect(proposal!.existingAmountCents).toBe(1599);
+  });
+
+  // The genuinely ambiguous case: no single exact winner, 2+ subscriptions
+  // fuzzy-match the same cluster. Still flagged as a plain duplicate (an
+  // existing, non-destructive badge), but must never propose overwriting
+  // one specific subscription's price when it's actually unclear which one
+  // is the real match.
+  it("does not propose a price change when two existing subscriptions both fuzzy-match, with no exact winner", () => {
+    const familyA = sub({ name: "Streamflix Plus Family", amountCents: 2999, billingCycle: "monthly", currency: "usd" });
+    const familyB = sub({ name: "Streamflix Plus Household", amountCents: 3499, billingCycle: "monthly", currency: "usd" });
+    const detected = detectRecurringSubscriptions(
+      [
+        tx({ description: "STREAMFLIX PLUS", date: "2026-01-01", amountCents: 1999 }),
+        tx({ description: "STREAMFLIX PLUS", date: addDaysISO("2026-01-01", 30), amountCents: 1999 }),
+      ],
+      [familyA, familyB],
+    );
+    expect(detected[0].isDuplicateOfExistingId).toBeDefined();
+    expect(detected[0].priceChangeProposal).toBeUndefined();
+  });
+
+  // Regression (CodeRabbit review): clustering groups purely by merchant
+  // name, with no currency partitioning — a mixed-currency cluster is
+  // possible (a multi-currency account, a mis-tagged CSV column). Using
+  // just one transaction's currency as "the" cluster currency while
+  // representativeAmount (a median across ALL of them) silently ignores
+  // that mix would be exactly the kind of "assumed safe, wasn't" write this
+  // feature's trust requirements exist to prevent.
+  it("never proposes a price change when the cluster's own transactions don't all share one currency", () => {
+    const existing = sub({ name: "Netflix", amountCents: 1599, billingCycle: "monthly", currency: "usd" });
+    const detected = detectRecurringSubscriptions(
+      [
+        tx({ description: "NETFLIX.COM", date: "2026-01-01", amountCents: 1999, currency: "usd" }),
+        tx({ description: "NETFLIX.COM", date: addDaysISO("2026-01-01", 31), amountCents: 1999, currency: "eur" }),
+      ],
+      [existing],
+    );
+    expect(detected[0].isDuplicateOfExistingId).toBe(existing.id);
+    expect(detected[0].priceChangeProposal).toBeUndefined();
+  });
+});
+
 describe("introductory pricing / free-trial transitions", () => {
   it("treats a discounted first charge followed by a steady price as high confidence, not irregular_amount", () => {
     // 31-day gaps (not 30) so each charge reliably lands in a new calendar

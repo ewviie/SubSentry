@@ -48,6 +48,26 @@ export interface BillingCycleEstimate {
   intervalVarianceDays: number;
 }
 
+// Only ever attached alongside isDuplicateOfExistingId — a strong name
+// match against an existing (active) subscription whose stored price
+// differs meaningfully from what this import batch actually detected. See
+// detection.ts for the confidence/currency/materiality gating; see
+// computePriceChangeIfMeaningful (lib/subscriptions/price-history.ts) for
+// the comparison math itself.
+export interface PriceChangeProposal {
+  existingSubscriptionId: string;
+  existingName: string;
+  existingAmountCents: number;
+  existingBillingCycle: Subscription["billingCycle"];
+  currency: string;
+  detectedAmountCents: number;
+  detectedBillingCycle: Subscription["billingCycle"];
+  // Signed — positive is an increase, negative is a decrease. Same
+  // convention as lib/subscriptions/price-history.ts's PriceChange.
+  percentChange: number;
+  annualDeltaCents: number;
+}
+
 export interface DetectedSubscription {
   // Stable within one analyze response — lets the review UI track
   // selection/edits by id without relying on array index.
@@ -62,4 +82,5 @@ export interface DetectedSubscription {
   confidenceSignals: ConfidenceSignal[];
   suggestedNextRenewalDate: string;
   isDuplicateOfExistingId?: string;
+  priceChangeProposal?: PriceChangeProposal;
 }

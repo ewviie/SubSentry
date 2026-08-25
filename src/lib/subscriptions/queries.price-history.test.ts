@@ -75,7 +75,7 @@ describe.skipIf(!hasDb)("subscription price history", () => {
       status: "active",
     });
 
-    await queries.updateSubscription(userA, sub.id, { amount: "15.00" });
+    await queries.updateSubscription(userA, sub.id, "free", { amount: "15.00" });
 
     const history = await queries.getPriceHistory(userA, sub.id);
     expect(history).toHaveLength(2);
@@ -94,7 +94,7 @@ describe.skipIf(!hasDb)("subscription price history", () => {
       status: "active",
     });
 
-    await queries.updateSubscription(userA, sub.id, { billingCycle: "yearly" });
+    await queries.updateSubscription(userA, sub.id, "free", { billingCycle: "yearly" });
 
     const history = await queries.getPriceHistory(userA, sub.id);
     expect(history).toHaveLength(2);
@@ -113,7 +113,7 @@ describe.skipIf(!hasDb)("subscription price history", () => {
       status: "active",
     });
 
-    await queries.updateSubscription(userA, sub.id, { amount: "12.00" });
+    await queries.updateSubscription(userA, sub.id, "free", { amount: "12.00" });
 
     const history = await queries.getPriceHistory(userA, sub.id);
     expect(history).toHaveLength(1);
@@ -130,7 +130,7 @@ describe.skipIf(!hasDb)("subscription price history", () => {
       status: "active",
     });
 
-    await queries.updateSubscription(userA, sub.id, { name: "Renamed" });
+    await queries.updateSubscription(userA, sub.id, "free", { name: "Renamed" });
 
     const history = await queries.getPriceHistory(userA, sub.id);
     expect(history).toHaveLength(1);
@@ -188,5 +188,121 @@ describe.skipIf(!hasDb)("subscription price history", () => {
     const asOther = await queries.getPriceHistory(userB, sub.id);
     expect(asOwner).toHaveLength(1);
     expect(asOther).toHaveLength(0);
+  });
+
+  it("getAllPriceHistoryForUser: groups every subscription's history in one bulk query, scoped to the caller", async () => {
+    const subA1 = await queries.createSubscription(userA, {
+      name: "Bulk Test A1",
+      amount: "10.00",
+      currency: "usd",
+      billingCycle: "monthly",
+      category: "other",
+      nextRenewalDate: "2099-01-01",
+      status: "active",
+    });
+    const subA2 = await queries.createSubscription(userA, {
+      name: "Bulk Test A2",
+      amount: "20.00",
+      currency: "usd",
+      billingCycle: "monthly",
+      category: "other",
+      nextRenewalDate: "2099-01-01",
+      status: "active",
+    });
+    // A genuine second row on subA1 — proves grouping doesn't just take the
+    // first row per subscription.
+    await queries.updateSubscription(userA, subA1.id, "free", { amount: "15.00" });
+
+    await queries.createSubscription(userB, {
+      name: "Bulk Test B",
+      amount: "5.00",
+      currency: "usd",
+      billingCycle: "monthly",
+      category: "other",
+      nextRenewalDate: "2099-01-01",
+      status: "active",
+    });
+
+    const grouped = await queries.getAllPriceHistoryForUser(userA);
+    expect(grouped.get(subA1.id)).toHaveLength(2);
+    expect(grouped.get(subA2.id)).toHaveLength(1);
+    // User B's row must never appear in user A's map, under any key —
+    // not just "not under B's own subscription id" (that's the obvious
+    // check) but genuinely absent from every value in the map.
+    expect([...grouped.values()].flat().every((row) => row.userId === userA)).toBe(true);
+  });
+
+  // Import price-reconciliation: "Update price" (review-table.tsx) reuses
+  // the exact same updateSubscription/PATCH path a manual edit does, tagged
+  // with an optional priceHistorySource for provenance only — these prove
+  // the tag actually lands on the written row, and that omitting it (every
+  // pre-existing caller, including a plain manual edit) still defaults to
+  // "user_edit" with zero behavior change.
+  it("updateSubscription: tags the price-history row 'import_update' when the caller confirms an import-detected price change", async () => {
+    const sub = await queries.createSubscription(userA, {
+      name: "Import Update Test",
+      amount: "15.99",
+      currency: "usd",
+      billingCycle: "monthly",
+      category: "other",
+      nextRenewalDate: "2099-01-01",
+      status: "active",
+    });
+
+    const result = await queries.updateSubscription(userA, sub.id, "free", {
+      amount: "19.99",
+      priceHistorySource: "import_update",
+    });
+    expect(result.kind).toBe("updated");
+
+    const history = await queries.getPriceHistory(userA, sub.id);
+    expect(history).toHaveLength(2);
+    expect(history[1]).toMatchObject({ amountCents: 1999, source: "import_update" });
+  });
+
+  it("updateSubscription: a plain edit with no priceHistorySource ('Keep existing'/manual edit) still writes 'user_edit'", async () => {
+    const sub = await queries.createSubscription(userA, {
+      name: "Manual Edit Test",
+      amount: "15.99",
+      currency: "usd",
+      billingCycle: "monthly",
+      category: "other",
+      nextRenewalDate: "2099-01-01",
+      status: "active",
+    });
+
+    const result = await queries.updateSubscription(userA, sub.id, "free", { amount: "19.99" });
+    expect(result.kind).toBe("updated");
+
+    const history = await queries.getPriceHistory(userA, sub.id);
+    expect(history[1]).toMatchObject({ amountCents: 1999, source: "user_edit" });
+  });
+
+  // Ownership isolation: the price-reconciliation PATCH reuses
+  // updateSubscription's own userId-scoped WHERE clause unchanged — this
+  // proves user B can't use the new priceHistorySource param as a side
+  // door to write a price-history row (or touch the row at all) on a
+  // subscription they don't own.
+  it("updateSubscription: user B cannot use priceHistorySource to update or record history on user A's subscription", async () => {
+    const sub = await queries.createSubscription(userA, {
+      name: "Ownership Isolation Test",
+      amount: "15.99",
+      currency: "usd",
+      billingCycle: "monthly",
+      category: "other",
+      nextRenewalDate: "2099-01-01",
+      status: "active",
+    });
+
+    const result = await queries.updateSubscription(userB, sub.id, "free", {
+      amount: "19.99",
+      priceHistorySource: "import_update",
+    });
+    expect(result).toEqual({ kind: "not_found" });
+
+    const stillOwnedByA = await queries.getSubscription(userA, sub.id);
+    expect(stillOwnedByA?.amountCents).toBe(1599);
+    const history = await queries.getPriceHistory(userA, sub.id);
+    expect(history).toHaveLength(1); // only the "initial" row — no unauthorized second row
   });
 });
