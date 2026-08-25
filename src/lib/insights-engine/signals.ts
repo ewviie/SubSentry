@@ -1,6 +1,7 @@
-import type { Subscription } from "@/lib/db/schema";
+import type { Subscription, SubscriptionPriceHistory } from "@/lib/db/schema";
 import { monthlyCents, annualCents, splitByPrimaryCurrency } from "@/lib/subscriptions/money";
 import { forEachLikelyDuplicatePair } from "@/lib/subscriptions/insights";
+import { computeLatestPriceChange, type PriceChange } from "@/lib/subscriptions/price-history";
 import type { EngineContext } from "./types";
 
 // Pure, side-effect-free computations shared by health/free/premium rules —
@@ -220,3 +221,68 @@ export function uncategorizedImports(active: Subscription[]): Subscription[] {
 }
 
 export const ctxTotal = (ctx: EngineContext) => monthlyTotalCents(ctx.active);
+
+export interface PriceIncrease {
+  subscription: Subscription;
+  change: PriceChange;
+}
+
+// A <3% move is well within the kind of rounding/plan-restructuring noise
+// that doesn't deserve the same "your bill went up" framing as a real
+// increase — Netflix raising $15.49 -> $17.99 is a real ~16% jump; $9.99 ->
+// $10.00 from a currency-conversion rounding quirk is not. computeLatestPriceChange
+// (lib/subscriptions/price-history.ts) already excludes exact-same-price
+// pairs and cross-currency pairs; this is the additional "meaningful, not
+// just nonzero" bar for a *health* finding specifically.
+const MEANINGFUL_INCREASE_PERCENT = 3;
+
+// A relative-only bar lets a trivially small subscription's price double
+// (say, $0.50 -> $1.00/mo, +100%) read as identically "meaningful" to a
+// real Netflix-sized hike — same relative move, negligible real dollar
+// impact. findExpensiveOutliers (this file) applies the exact same
+// "relative AND absolute" pairing for the same reason (a 2x-the-mean
+// subscription only counts once it also clears a real dollar floor); this
+// mirrors that $30/yr bar for consistency (found in product council
+// review, Product Manager lens — the original relative-only version was an
+// inconsistency with that established sibling pattern).
+const MEANINGFUL_INCREASE_ANNUAL_DELTA_CENTS = 3000;
+
+// Every active subscription's most recent genuine price change, filtered to
+// real, meaningful increases and sorted by dollar impact — reads only real
+// recorded history (priceHistoryBySubscriptionId, built by a single bulk
+// query, see queries.ts's getAllPriceHistoryForUser), never estimates or
+// infers a change that wasn't actually observed.
+export function findPriceIncreases(
+  active: Subscription[],
+  priceHistoryBySubscriptionId: Map<string, SubscriptionPriceHistory[]>,
+): PriceIncrease[] {
+  const found: PriceIncrease[] = [];
+  for (const s of active) {
+    const history = priceHistoryBySubscriptionId.get(s.id);
+    if (!history) continue;
+    const change = computeLatestPriceChange(history);
+    if (
+      change &&
+      change.percentChange >= MEANINGFUL_INCREASE_PERCENT &&
+      change.annualDeltaCents >= MEANINGFUL_INCREASE_ANNUAL_DELTA_CENTS
+    ) {
+      found.push({ subscription: s, change });
+    }
+  }
+  return found.sort((a, b) => b.change.annualDeltaCents - a.change.annualDeltaCents);
+}
+
+// Whether there's enough recorded price history among active subscriptions
+// to have an opinion at all — distinct from findPriceIncreases returning
+// zero results, which could honestly mean either "checked, found no
+// increase" or "haven't observed enough history yet to check." Same
+// two-states distinction PriceHistoryNote already makes on the detail page,
+// applied here so the health rule can stay silent (not claim a positive
+// "no increases" it hasn't actually earned) for an account with too little
+// history.
+export function hasEnoughPriceHistoryToEvaluate(
+  active: Subscription[],
+  priceHistoryBySubscriptionId: Map<string, SubscriptionPriceHistory[]>,
+): boolean {
+  return active.some((s) => (priceHistoryBySubscriptionId.get(s.id)?.length ?? 0) >= 2);
+}
