@@ -4,6 +4,7 @@ import { subscriptionIdSchema, subscriptionUpdateSchema } from "@/lib/subscripti
 import { deleteSubscription, getSubscription, updateSubscription } from "@/lib/subscriptions/queries";
 import { checkSubscriptionMutateRateLimit } from "@/lib/subscriptions/rate-limit";
 import { readJsonBody, MAX_JSON_BODY_BYTES } from "@/lib/http/request-size";
+import { FREE_PLAN_SUBSCRIPTION_LIMIT } from "@/lib/billing/plan";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -66,10 +67,19 @@ export async function PATCH(request: Request, { params }: Params) {
     );
   }
 
-  const subscription = await updateSubscription(session.user.id, validId, parsed.data);
-  if (!subscription) return NextResponse.json({ error: "not_found" }, { status: 404 });
+  const result = await updateSubscription(session.user.id, validId, session.user.plan, parsed.data);
+  if (result.kind === "not_found") return NextResponse.json({ error: "not_found" }, { status: 404 });
+  if (result.kind === "plan") {
+    return NextResponse.json(
+      {
+        error: "plan_limit_reached",
+        message: `You've reached the free plan limit of ${FREE_PLAN_SUBSCRIPTION_LIMIT} active subscriptions. Upgrade to Pro for unlimited tracking.`,
+      },
+      { status: 403 },
+    );
+  }
 
-  return NextResponse.json({ subscription });
+  return NextResponse.json({ subscription: result.subscription });
 }
 
 export async function DELETE(_request: Request, { params }: Params) {

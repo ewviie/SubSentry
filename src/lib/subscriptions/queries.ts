@@ -169,11 +169,17 @@ export async function createSubscriptionsBulkWithLimitCheck(
   });
 }
 
+export type SubscriptionUpdateResult =
+  | { kind: "not_found" }
+  | { kind: "plan" }
+  | { kind: "updated"; subscription: Subscription };
+
 export async function updateSubscription(
   userId: string,
   id: string,
+  plan: User["plan"],
   input: SubscriptionUpdate,
-): Promise<Subscription | undefined> {
+): Promise<SubscriptionUpdateResult> {
   const values: Partial<typeof subscriptions.$inferInsert> = { updatedAt: new Date() };
 
   if (input.name !== undefined) values.name = input.name;
@@ -185,32 +191,43 @@ export async function updateSubscription(
   if (input.status !== undefined) values.status = input.status;
   if (input.notes !== undefined) values.notes = input.notes || null;
 
+  // Reactivating a subscription (status -> "active" from something else,
+  // e.g. "cancelled"/"paused") re-enters the active count the free plan
+  // caps, exactly like creating a new one does — without this check, a
+  // free-plan user could cancel then reactivate (or reactivate several
+  // already-cancelled rows) to exceed FREE_PLAN_SUBSCRIPTION_LIMIT entirely
+  // through PATCH, bypassing the limit createSubscriptionWithLimitCheck
+  // enforces on the create path. Currently inert while BETA_ALL_ACCESS is
+  // on (hasReachedSubscriptionLimit always returns false — see
+  // lib/billing/plan.ts), but must hold the moment that flag flips off.
+  const mayActivate = input.status === "active";
+
   // Only pay for the extra read/transaction when this edit could possibly
-  // touch price — the common edits (rename, recategorize, change renewal
-  // date, bulk status change) never do. billingCycle is included, not just
-  // amount/currency: amountCents is unit-less on its own ("$10" means
-  // something very different at monthly vs. yearly cadence), so a
-  // cycle-only change (same amountCents, different cadence) is just as
-  // real a price change as an amount edit — see schema.ts's
-  // subscriptionPriceHistory comment.
+  // touch price or reactivate a subscription — the common edits (rename,
+  // recategorize, change renewal date, cancelling) never need either.
+  // billingCycle is included, not just amount/currency: amountCents is
+  // unit-less on its own ("$10" means something very different at monthly
+  // vs. yearly cadence), so a cycle-only change (same amountCents,
+  // different cadence) is just as real a price change as an amount edit —
+  // see schema.ts's subscriptionPriceHistory comment.
   const touchesPrice = input.amount !== undefined || input.currency !== undefined || input.billingCycle !== undefined;
-  if (!touchesPrice) {
+  if (!touchesPrice && !mayActivate) {
     const [row] = await db
       .update(subscriptions)
       .set(values)
       .where(and(eq(subscriptions.userId, userId), eq(subscriptions.id, id)))
       .returning();
-    return row;
+    return row ? { kind: "updated", subscription: row } : { kind: "not_found" };
   }
 
-  // The pre-edit read, the update, and the price-history insert all run
-  // inside one advisory-locked transaction — same per-user lock
-  // createSubscriptionWithLimitCheck uses, for the same reason: without it,
-  // two concurrent price-touching edits for the same subscription could
-  // each read the same "before" row ahead of either update committing,
-  // letting one edit's price-history row compare against a value that was
-  // never actually current (a lost-update race on the *comparison*, not on
-  // the subscriptions row itself, which Postgres's own UPDATE already
+  // The pre-edit read, the limit check, the update, and the price-history
+  // insert all run inside one advisory-locked transaction — same per-user
+  // lock createSubscriptionWithLimitCheck uses, for the same reason:
+  // without it, two concurrent edits for the same account could each read
+  // the same "before" state ahead of either committing, letting one edit's
+  // price-history comparison or plan-limit count use a value that was never
+  // actually current (a lost-update race on the *comparison*, not on the
+  // subscriptions row itself, which Postgres's own UPDATE already
   // serializes correctly). Caught in CodeRabbit review.
   return db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${userId}))`);
@@ -221,18 +238,26 @@ export async function updateSubscription(
       .where(and(eq(subscriptions.userId, userId), eq(subscriptions.id, id)))
       .limit(1);
 
+    if (!before) return { kind: "not_found" };
+
+    if (mayActivate && before.status !== "active") {
+      const existing = await tx.select().from(subscriptions).where(eq(subscriptions.userId, userId));
+      const activeCount = existing.filter((s) => s.status === "active" && s.id !== id).length;
+      if (hasReachedSubscriptionLimit(plan, activeCount)) return { kind: "plan" };
+    }
+
     const [row] = await tx
       .update(subscriptions)
       .set(values)
       .where(and(eq(subscriptions.userId, userId), eq(subscriptions.id, id)))
       .returning();
 
+    if (!row) return { kind: "not_found" };
+
     if (
-      row &&
-      before &&
-      (row.amountCents !== before.amountCents ||
-        row.currency !== before.currency ||
-        row.billingCycle !== before.billingCycle)
+      row.amountCents !== before.amountCents ||
+      row.currency !== before.currency ||
+      row.billingCycle !== before.billingCycle
     ) {
       await tx.insert(subscriptionPriceHistory).values({
         subscriptionId: row.id,
@@ -240,11 +265,11 @@ export async function updateSubscription(
         amountCents: row.amountCents,
         billingCycle: row.billingCycle,
         currency: row.currency,
-        source: "user_edit",
+        source: input.priceHistorySource ?? "user_edit",
       });
     }
 
-    return row;
+    return { kind: "updated", subscription: row };
   });
 }
 
@@ -262,6 +287,29 @@ export async function getPriceHistory(userId: string, subscriptionId: string): P
     .from(subscriptionPriceHistory)
     .where(and(eq(subscriptionPriceHistory.userId, userId), eq(subscriptionPriceHistory.subscriptionId, subscriptionId)))
     .orderBy(asc(subscriptionPriceHistory.observedAt));
+}
+
+// One query for every price-history row this user has, grouped by
+// subscriptionId — the bulk counterpart to getPriceHistory above. Feeds
+// insights-engine's EngineContext.priceHistoryBySubscriptionId
+// (health.price_increases): looping getPriceHistory per active
+// subscription there would turn one dashboard load into N+1 queries.
+// Scoped by this table's own denormalized userId column (same reasoning as
+// getPriceHistory), not a join through `subscriptions`.
+export async function getAllPriceHistoryForUser(userId: string): Promise<Map<string, SubscriptionPriceHistory[]>> {
+  const rows = await db
+    .select()
+    .from(subscriptionPriceHistory)
+    .where(eq(subscriptionPriceHistory.userId, userId))
+    .orderBy(asc(subscriptionPriceHistory.observedAt));
+
+  const bySubscriptionId = new Map<string, SubscriptionPriceHistory[]>();
+  for (const row of rows) {
+    const existing = bySubscriptionId.get(row.subscriptionId);
+    if (existing) existing.push(row);
+    else bySubscriptionId.set(row.subscriptionId, [row]);
+  }
+  return bySubscriptionId;
 }
 
 export async function deleteSubscription(userId: string, id: string): Promise<boolean> {

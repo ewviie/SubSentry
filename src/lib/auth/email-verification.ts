@@ -72,22 +72,31 @@ export type ConsumeTokenResult =
 export async function consumeVerificationToken(rawToken: string): Promise<ConsumeTokenResult> {
   const tokenHash = hashToken(rawToken);
 
-  const [row] = await db
-    .delete(emailVerificationTokens)
-    .where(eq(emailVerificationTokens.tokenHash, tokenHash))
-    .returning();
+  // The delete and the users update run in one transaction (Database
+  // Security Engineer council review) — without it, the token row could be
+  // deleted and then the process crash/the DB throw before the users
+  // update commits, permanently burning the user's only valid link while
+  // leaving their account unverified with no way to get a working one back
+  // except a fresh resend. Matches the pattern password-reset.ts's
+  // consumePasswordResetToken already uses for the same reason.
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .delete(emailVerificationTokens)
+      .where(eq(emailVerificationTokens.tokenHash, tokenHash))
+      .returning();
 
-  if (!row) return { ok: false, reason: "invalid" };
-  if (row.expiresAt.getTime() < Date.now()) {
-    return { ok: false, reason: "expired" };
-  }
+    if (!row) return { ok: false, reason: "invalid" };
+    if (row.expiresAt.getTime() < Date.now()) {
+      return { ok: false, reason: "expired" };
+    }
 
-  await db
-    .update(users)
-    .set({ emailVerified: true, emailVerifiedAt: new Date(), updatedAt: new Date() })
-    .where(eq(users.id, row.userId));
+    await tx
+      .update(users)
+      .set({ emailVerified: true, emailVerifiedAt: new Date(), updatedAt: new Date() })
+      .where(eq(users.id, row.userId));
 
-  return { ok: true, userId: row.userId };
+    return { ok: true, userId: row.userId };
+  });
 }
 
 // Best-effort housekeeping for tokens nobody ever clicked — not required

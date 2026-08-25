@@ -1,5 +1,13 @@
 # AUTH_BOT_PROTECTION_REPORT.md
 
+> **⚠️ ARCHIVED — superseded by [SECURITY_STATUS.md](./SECURITY_STATUS.md) (2026-08-22).**
+> Retained for historical narrative only. This file predates a full
+> independent re-audit and 7-role adversarial council review that found
+> several claims below stale or no longer accurate against current code
+> (see SECURITY_STATUS.md for specifics and current verified state). Do not
+> treat anything in this file as a current claim without re-checking it
+> against the actual source first.
+
 Production hardening pass focused on CAPTCHA/bot protection and email verification. Read `PROJECT_SECURITY_MAP.md`, `SECURITY_HARDENING_REPORT.md`, `FINAL_PRODUCTION_AUDIT.md`, `PRODUCTION_READINESS_REPORT.md`, and the actual current auth/email-verification source (not assumed from the reports) before changing anything. Every claim below is either a direct source read from this session or a live-verified result — real signups against the real Cloudflare Turnstile API, not just mocked tests — marked accordingly.
 
 ## 1. Audit — existing vulnerabilities found

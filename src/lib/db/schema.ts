@@ -9,6 +9,7 @@ import {
   uniqueIndex,
   jsonb,
   boolean,
+  check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { SUBSCRIPTION_SOURCES } from "@/lib/subscriptions/source";
@@ -116,6 +117,30 @@ export const subscriptions = pgTable(
     index("subscriptions_active_renewal_idx")
       .on(table.nextRenewalDate)
       .where(sql`${table.status} = 'active'`),
+    // Defense in depth, not a replacement for subscriptionInputSchema
+    // (validation.ts) — that's still what runs first and produces a real
+    // 400 with a helpful message on a bad request. These exist because
+    // Drizzle's `{ enum: [...] }` on a `text` column (billingCycle,
+    // category, status above) is TypeScript-only: it constrains what this
+    // codebase's own queries can *write* through the type system, but
+    // Postgres itself never rejected an out-of-set value before this —
+    // confirmed by reading the actual generated migration SQL, which
+    // create these as plain `text NOT NULL` with no CHECK at all. Any
+    // future write path that reaches this table without going through
+    // validation.ts (a raw query, a script, a bug in a new API route)
+    // would have been accepted silently. amountCents >= 0, not > 0: $0.00
+    // is a real, allowed value (a free trial or promo subscription — see
+    // price-history.ts's own comment on this), never negative.
+    check("subscriptions_amount_cents_non_negative", sql`${table.amountCents} >= 0`),
+    check(
+      "subscriptions_billing_cycle_valid",
+      sql`${table.billingCycle} in ('monthly', 'yearly', 'weekly', 'quarterly')`,
+    ),
+    check("subscriptions_status_valid", sql`${table.status} in ('active', 'paused', 'canceled')`),
+    check(
+      "subscriptions_category_valid",
+      sql`${table.category} in ('streaming', 'software', 'fitness', 'utilities', 'finance', 'news', 'gaming', 'other')`,
+    ),
   ],
 );
 
@@ -437,17 +462,64 @@ export const subscriptionPriceHistory = pgTable(
     // "initial": the row written the moment a subscription is created (by
     // any source — manual, import, quick-add). "user_edit": amountCents,
     // billingCycle, or currency genuinely changed via the edit form/API.
-    // Deliberately no "import_update" — no current import path ever
-    // updates an existing subscription's price (imports only ever create
-    // new rows; see api/imports/confirm/route.ts), so that source would
-    // never be producible and would be exactly the kind of unused,
-    // misleading enum value the rest of this schema avoids. Add it when a
-    // real write path needs it, not before.
-    source: text("source", { enum: ["initial", "user_edit"] }).notNull(),
+    // "import_update": same PATCH write path as "user_edit" (updateSubscription,
+    // queries.ts), but the user explicitly confirmed an import-detected
+    // price-reconciliation proposal (review-table.tsx's "Update price")
+    // rather than editing the form directly — see detection.ts's
+    // priceChangeProposal for how that proposal is computed. Plain `text`,
+    // no DB check constraint, so adding this required no migration.
+    source: text("source", { enum: ["initial", "user_edit", "import_update"] }).notNull(),
   },
   (table) => [
     index("subscription_price_history_subscription_idx").on(table.subscriptionId, table.observedAt),
     index("subscription_price_history_user_idx").on(table.userId),
+    // Same defense-in-depth reasoning as subscriptions' own checks above —
+    // a negative or out-of-enum row here would silently corrupt
+    // computeLatestPriceChange's "price increased/decreased" math (it has
+    // no reason to distrust what's already in this table). `source`
+    // deliberately has no check here — see its own column comment on why.
+    check("subscription_price_history_amount_cents_non_negative", sql`${table.amountCents} >= 0`),
+    check(
+      "subscription_price_history_billing_cycle_valid",
+      sql`${table.billingCycle} in ('monthly', 'yearly', 'weekly', 'quarterly')`,
+    ),
+  ],
+);
+
+// One row per savings recommendation a user has dismissed from their own
+// /savings review list (see savings-recommendation-card.tsx's "Dismiss"
+// button — before this table existed, that button only set local React
+// state, so a dismissed finding silently came back on the very next page
+// load with no record it had ever been acted on). recommendationId is
+// computeSavingsRecommendations' own deterministic id string (e.g.
+// "duplicate-<idA>-<idB>"), not a subscription FK: a recommendation is
+// often about a *pair* of subscriptions, not one, and this id already
+// encodes whichever ones are involved. No FK integrity needed against
+// subscriptions — if the underlying subscription(s) are later
+// canceled/deleted, computeSavingsRecommendations simply stops generating
+// that id at all (it only ever reads from active subscriptions), so an
+// orphaned dismissal row here is inert, never a dangling reference a query
+// could trip over.
+//
+// Deliberately scoped to the /savings recommendation list only — it does
+// not exclude the same underlying finding from the health score, the
+// dashboard's "Your biggest opportunity"/"Savings opportunities" cards, or
+// Quick Wins. Those surfaces state facts about the portfolio (score,
+// dollar totals), not a personal to-do list; dismissing "stop asking me
+// about this on my review list" should not quietly make a real duplicate
+// invisible to the number that's supposed to reflect it honestly.
+export const dismissedSavingsRecommendations = pgTable(
+  "dismissed_savings_recommendations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    recommendationId: text("recommendation_id").notNull(),
+    dismissedAt: timestamp("dismissed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("dismissed_savings_recommendations_user_rec_idx").on(table.userId, table.recommendationId),
   ],
 );
 
@@ -469,3 +541,4 @@ export type EmailVerificationToken = typeof emailVerificationTokens.$inferSelect
 export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 export type SubscriptionPriceHistory = typeof subscriptionPriceHistory.$inferSelect;
 export type NewSubscriptionPriceHistory = typeof subscriptionPriceHistory.$inferInsert;
+export type DismissedSavingsRecommendation = typeof dismissedSavingsRecommendations.$inferSelect;

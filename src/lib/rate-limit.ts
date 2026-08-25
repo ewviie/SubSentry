@@ -10,7 +10,19 @@ export interface RateLimitResult {
   remaining: number;
 }
 
-export function createRateLimiter(limit: number, windowMs: number) {
+// The consuming check is also exposed as a plain callable function (every
+// existing call site invokes a limiter as `checkX(key)`) — `peek` is an
+// additional, non-consuming read attached to it, for callers that want to
+// reject an already-exhausted caller before doing real work, without
+// spending one of that caller's remaining slots on a request that was
+// always going to be rejected. Purely additive: no existing call site's
+// `checkX(key)` calling convention changes.
+export interface RateLimiter {
+  (key: string): RateLimitResult;
+  peek(key: string): RateLimitResult;
+}
+
+export function createRateLimiter(limit: number, windowMs: number): RateLimiter {
   const buckets = new Map<string, { count: number; resetAt: number }>();
 
   // Bounds the map's size on a long-running process — without this, every
@@ -28,7 +40,7 @@ export function createRateLimiter(limit: number, windowMs: number) {
     }
   }
 
-  return function checkAndConsume(key: string): RateLimitResult {
+  const checkAndConsume = function checkAndConsume(key: string): RateLimitResult {
     const now = Date.now();
     sweepExpired(now);
     const bucket = buckets.get(key);
@@ -44,5 +56,21 @@ export function createRateLimiter(limit: number, windowMs: number) {
 
     bucket.count += 1;
     return { allowed: true, remaining: limit - bucket.count };
+  } as RateLimiter;
+
+  checkAndConsume.peek = function peek(key: string): RateLimitResult {
+    const now = Date.now();
+    // Same opportunistic sweep checkAndConsume does — a caller that only
+    // ever peeks (never consumes) for a given key shouldn't be the reason
+    // that key's expired bucket lingers in the map forever (CodeRabbit
+    // review). Correctness doesn't depend on this: the resetAt check right
+    // below already treats an expired bucket as fresh either way.
+    sweepExpired(now);
+    const bucket = buckets.get(key);
+    if (!bucket || now >= bucket.resetAt) return { allowed: true, remaining: limit };
+    if (bucket.count >= limit) return { allowed: false, remaining: 0 };
+    return { allowed: true, remaining: limit - bucket.count };
   };
+
+  return checkAndConsume;
 }

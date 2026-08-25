@@ -1,5 +1,13 @@
 # SECURITY_HARDENING_REPORT.md
 
+> **⚠️ ARCHIVED — superseded by [SECURITY_STATUS.md](./SECURITY_STATUS.md) (2026-08-22).**
+> Retained for historical narrative only. This file predates a full
+> independent re-audit and 7-role adversarial council review that found
+> several claims below stale or no longer accurate against current code
+> (see SECURITY_STATUS.md for specifics and current verified state). Do not
+> treat anything in this file as a current claim without re-checking it
+> against the actual source first.
+
 Phase 2 of the security hardening mission. Continues from `PROJECT_SECURITY_MAP.md` and `.claude/rules/security.md`. Every item below was verified against actual code (grep/read across all 20 API routes, all Drizzle query modules, all Zod schemas), not assumed.
 
 ## Areas audited

@@ -1,5 +1,13 @@
 # DATABASE_QUERY_AUDIT.md
 
+> **⚠️ ARCHIVED — superseded by [SECURITY_STATUS.md](./SECURITY_STATUS.md) (2026-08-22).**
+> Retained for historical narrative only. This file predates a full
+> independent re-audit and 7-role adversarial council review that found
+> several claims below stale or no longer accurate against current code
+> (see SECURITY_STATUS.md for specifics and current verified state). Do not
+> treat anything in this file as a current claim without re-checking it
+> against the actual source first.
+
 Full audit of every Drizzle query call site (`src/lib/*/queries.ts`, `src/lib/imports/bank-connections.ts`, all API routes) for N+1 patterns, missing joins, missing indexes, and redundant fetches. Method: grepped every `for`/`.map`/`.forEach` loop in the codebase for a DB call inside its body, and cross-referenced every `.where()`/`.orderBy()` clause against `schema.ts`'s indexes.
 
 ## Result: no N+1 query patterns found

@@ -78,6 +78,20 @@
       "when": 1786930861681,
       "tag": "0010_cooing_wraith",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1787568678970,
+      "tag": "0011_shocking_living_lightning",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1787581658298,
+      "tag": "0012_wealthy_elektra",
+      "breakpoints": true
     }
   ]
 }

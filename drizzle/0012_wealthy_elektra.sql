@@ -1,0 +1,6 @@
+ALTER TABLE "subscription_price_history" ADD CONSTRAINT "subscription_price_history_amount_cents_non_negative" CHECK ("subscription_price_history"."amount_cents" >= 0);--> statement-breakpoint
+ALTER TABLE "subscription_price_history" ADD CONSTRAINT "subscription_price_history_billing_cycle_valid" CHECK ("subscription_price_history"."billing_cycle" in ('monthly', 'yearly', 'weekly', 'quarterly'));--> statement-breakpoint
+ALTER TABLE "subscriptions" ADD CONSTRAINT "subscriptions_amount_cents_non_negative" CHECK ("subscriptions"."amount_cents" >= 0);--> statement-breakpoint
+ALTER TABLE "subscriptions" ADD CONSTRAINT "subscriptions_billing_cycle_valid" CHECK ("subscriptions"."billing_cycle" in ('monthly', 'yearly', 'weekly', 'quarterly'));--> statement-breakpoint
+ALTER TABLE "subscriptions" ADD CONSTRAINT "subscriptions_status_valid" CHECK ("subscriptions"."status" in ('active', 'paused', 'canceled'));--> statement-breakpoint
+ALTER TABLE "subscriptions" ADD CONSTRAINT "subscriptions_category_valid" CHECK ("subscriptions"."category" in ('streaming', 'software', 'fitness', 'utilities', 'finance', 'news', 'gaming', 'other'));

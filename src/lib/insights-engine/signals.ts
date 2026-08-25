@@ -1,6 +1,6 @@
 import type { Subscription } from "@/lib/db/schema";
 import { monthlyCents, annualCents, splitByPrimaryCurrency } from "@/lib/subscriptions/money";
-import { normalizeName, namesLikelyMatch } from "@/lib/subscriptions/insights";
+import { forEachLikelyDuplicatePair } from "@/lib/subscriptions/insights";
 import type { EngineContext } from "./types";
 
 // Pure, side-effect-free computations shared by health/free/premium rules —
@@ -32,21 +32,17 @@ export interface DuplicatePair {
 // re-imported from savings.ts to keep this module dependency-free of the
 // standalone /savings page's own presentation-oriented types.
 export function findDuplicates(active: Subscription[]): DuplicatePair[] {
-  const normalized = active.map((s) => normalizeName(s.name));
   const pairs: DuplicatePair[] = [];
   const seenRedundant = new Set<string>();
-  for (let i = 0; i < active.length; i++) {
-    for (let j = i + 1; j < active.length; j++) {
-      if (!namesLikelyMatch(normalized[i], normalized[j])) continue;
-      if (seenRedundant.has(active[j].id)) continue;
-      seenRedundant.add(active[j].id);
-      pairs.push({
-        keep: active[i],
-        redundant: active[j],
-        monthlySavingsCents: monthlyCents(active[j].amountCents, active[j].billingCycle),
-      });
-    }
-  }
+  forEachLikelyDuplicatePair(active, (a, b) => {
+    if (seenRedundant.has(b.id)) return;
+    seenRedundant.add(b.id);
+    pairs.push({
+      keep: a,
+      redundant: b,
+      monthlySavingsCents: monthlyCents(b.amountCents, b.billingCycle),
+    });
+  });
   return pairs;
 }
 

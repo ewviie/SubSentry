@@ -1,5 +1,13 @@
 # FINAL_PRODUCTION_AUDIT.md
 
+> **⚠️ ARCHIVED — superseded by [SECURITY_STATUS.md](./SECURITY_STATUS.md) (2026-08-22).**
+> Retained for historical narrative only. This file predates a full
+> independent re-audit and 7-role adversarial council review that found
+> several claims below stale or no longer accurate against current code
+> (see SECURITY_STATUS.md for specifics and current verified state). Do not
+> treat anything in this file as a current claim without re-checking it
+> against the actual source first.
+
 Two-part audit: (1) every finding from a CodeRabbit CLI review (`coderabbit review --uncommitted --include-untracked --agent`) against the current uncommitted working tree, triaged and fixed or explicitly rejected; (2) an independent senior-engineer pass across security, auth, permissions, API routes, database, performance, scalability, frontend, accessibility, testing, and production readiness, not limited to what CodeRabbit flagged. Builds on, and does not repeat, `PROJECT_SECURITY_MAP.md`, `SECURITY_HARDENING_REPORT.md`, `DATABASE_QUERY_AUDIT.md`, `SCALING_READINESS_REPORT.md`, `PRODUCTION_READINESS_REPORT.md`.
 
 **Note on tooling**: there was no GitHub PR to pull "CodeRabbit comments" from — this repo has no `gh` CLI and no open PR (all work is uncommitted on `main`). What was actually available and used is CodeRabbit's local CLI (`coderabbit`/`cr`, already authenticated), run via `coderabbit review --uncommitted --include-untracked --agent` against the full uncommitted+untracked diff.

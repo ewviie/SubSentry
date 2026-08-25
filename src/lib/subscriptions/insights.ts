@@ -88,6 +88,47 @@ export function namesLikelyMatch(normA: string, normB: string): boolean {
   return levenshtein(normA, normB) <= 2;
 }
 
+// Defensive ceiling on the O(n²) fuzzy name-matching pass specifically —
+// distinct from MAX_ACTIVE_SUBSCRIPTIONS (2000, lib/billing/plan.ts's
+// storage/create-time ceiling). That limit bounds how many rows an account
+// can ever have; this bounds how many of those rows this specific quadratic
+// comparison runs over on every dashboard/insights/savings computation.
+// Benchmarked directly: 2000 active subscriptions with worst-case (uniform
+// length, so namesLikelyMatch's length-difference short-circuit never
+// fires) names took 30+ seconds of blocking CPU time for a single pass —
+// and this comparison runs independently up to four times per page load
+// (this file's own duplicate/functional-overlap passes, savings.ts, and
+// insights-engine/signals.ts each iterate it separately). That's a real,
+// reachable CPU-exhaustion DoS an authenticated user can trigger just by
+// holding a large subscription list — no attack tooling required. No
+// legitimate user tracks anywhere near this many (see plan.ts's own
+// comment on MAX_ACTIVE_SUBSCRIPTIONS); comparisons beyond the cap are
+// simply skipped, so duplicate detection degrades gracefully instead of
+// the app hanging.
+export const MAX_DUPLICATE_COMPARISON_SUBSCRIPTIONS = 300;
+
+// Shared O(n²)-bounded pair iterator for fuzzy name-duplicate detection —
+// used by this file's own possible_overlap/functional-overlap passes,
+// savings.ts's duplicate recommendation, and
+// insights-engine/signals.ts's findDuplicates, so the cap above and the
+// nested-loop shape live in exactly one place instead of four copies of
+// the same logic drifting independently.
+export function forEachLikelyDuplicatePair(
+  active: Subscription[],
+  callback: (a: Subscription, b: Subscription) => void,
+): void {
+  const bounded =
+    active.length > MAX_DUPLICATE_COMPARISON_SUBSCRIPTIONS
+      ? active.slice(0, MAX_DUPLICATE_COMPARISON_SUBSCRIPTIONS)
+      : active;
+  const normalized = bounded.map((s) => normalizeName(s.name));
+  for (let i = 0; i < bounded.length; i++) {
+    for (let j = i + 1; j < bounded.length; j++) {
+      if (namesLikelyMatch(normalized[i], normalized[j])) callback(bounded[i], bounded[j]);
+    }
+  }
+}
+
 // All detection here is deterministic — plain computation over data already
 // in Postgres, not an LLM call. See src/lib/ai/provider.ts's narrateInsights
 // for the optional layer that turns these into looser prose; the detection
@@ -191,22 +232,17 @@ export function computeInsights(allSubscriptions: Subscription[]): ComputedInsig
 
   // 4. Possible overlap/duplicates — same or near-identical names, or
   // multiple active subscriptions in the same category.
-  const normalizedNames = active.map((s) => normalizeName(s.name));
-  for (let i = 0; i < active.length; i++) {
-    for (let j = i + 1; j < active.length; j++) {
-      if (namesLikelyMatch(normalizedNames[i], normalizedNames[j])) {
-        const savings = monthlyCents(active[j].amountCents, active[j].billingCycle);
-        insights.push({
-          type: "possible_overlap",
-          title: `Possible duplicate: ${active[i].name} and ${active[j].name}`,
-          description: `These look like the same service. If one is stale, canceling it saves ${formatCents(savings, active[j].currency)}/mo.`,
-          severity: "warning",
-          subscriptionIds: [active[i].id, active[j].id],
-          potentialSavingsMonthlyCents: savings,
-        });
-      }
-    }
-  }
+  forEachLikelyDuplicatePair(active, (a, b) => {
+    const savings = monthlyCents(b.amountCents, b.billingCycle);
+    insights.push({
+      type: "possible_overlap",
+      title: `Possible duplicate: ${a.name} and ${b.name}`,
+      description: `These look like the same service. If one is stale, canceling it saves ${formatCents(savings, b.currency)}/mo.`,
+      severity: "warning",
+      subscriptionIds: [a.id, b.id],
+      potentialSavingsMonthlyCents: savings,
+    });
+  });
   // Category alone is too broad a redundancy signal — Adobe and Dropbox are
   // both "software" but solve nothing similar; this used to flag any 2+
   // subscriptions sharing a raw category. Now only fires when 2+ active
@@ -263,15 +299,10 @@ export interface FunctionalOverlapGroupResult {
 // so a genuinely distinct third service (e.g. Disney+ alongside a Netflix/
 // Netflix Premium duplicate pair) still surfaces as a real overlap.
 export function computeFunctionalOverlapGroups(active: Subscription[]): FunctionalOverlapGroupResult[] {
-  const normalizedNames = active.map((s) => normalizeName(s.name));
   const alreadyDuplicateFlagged = new Set<string>();
-  for (let i = 0; i < active.length; i++) {
-    for (let j = i + 1; j < active.length; j++) {
-      if (namesLikelyMatch(normalizedNames[i], normalizedNames[j])) {
-        alreadyDuplicateFlagged.add(active[j].id);
-      }
-    }
-  }
+  forEachLikelyDuplicatePair(active, (_a, b) => {
+    alreadyDuplicateFlagged.add(b.id);
+  });
 
   // currency is unvalidated free text on this schema (see money.ts's own
   // comment on formatCents) — two subscriptions in the same functional

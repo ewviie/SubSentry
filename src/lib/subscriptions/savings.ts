@@ -1,6 +1,6 @@
 import type { Subscription } from "@/lib/db/schema";
 import { monthlyCents, annualCents, formatCents } from "./money";
-import { normalizeName, namesLikelyMatch, computeFunctionalOverlapGroups, findSmallSubscriptionsCluster, smallSubscriptionsClusterTitle } from "./insights";
+import { forEachLikelyDuplicatePair, computeFunctionalOverlapGroups, findSmallSubscriptionsCluster, smallSubscriptionsClusterTitle } from "./insights";
 
 // A dedicated, actionable savings engine — distinct from insights.ts's
 // dashboard-summary cards (which surface one headline number + a link to
@@ -104,44 +104,40 @@ export function computeSavingsRecommendations(
   // 1. Duplicates — same identity rule as insights.ts's possible_overlap:
   // the second (redundant) half of each matching pair is the recommended
   // cancel target, credited with its own monthly cost as the savings.
-  const normalizedNames = active.map((s) => normalizeName(s.name));
   const alreadyFlagged = new Set<string>();
-  for (let i = 0; i < active.length; i++) {
-    for (let j = i + 1; j < active.length; j++) {
-      if (!namesLikelyMatch(normalizedNames[i], normalizedNames[j])) continue;
-      if (alreadyFlagged.has(active[j].id)) continue;
-      alreadyFlagged.add(active[j].id);
+  forEachLikelyDuplicatePair(active, (a, b) => {
+    if (alreadyFlagged.has(b.id)) return;
+    alreadyFlagged.add(b.id);
 
-      const savings = monthlyCents(active[j].amountCents, active[j].billingCycle);
-      // Identical raw names (not just namesLikelyMatch's fuzzy sense — two
-      // subscriptions both literally called "Netflix") produce "Netflix and
-      // Netflix look like duplicates" if the two names are just concatenated
-      // — reads like generated copy that never accounted for its own most
-      // common case. Renewal date is real, already-stored data (not a
-      // fabricated distinguisher) and is what actually tells the two apart
-      // in the description below, the same way the badge next to each row
-      // in the list already does.
-      const sameName = active[i].name === active[j].name;
-      recommendations.push({
-        id: `duplicate-${active[i].id}-${active[j].id}`,
-        type: "duplicate",
-        title: sameName
-          ? `Two ${active[i].name} subscriptions look like duplicates`
-          : `${active[i].name} and ${active[j].name} look like duplicates`,
-        description: sameName
-          ? `These look like the same service — one renews ${active[i].nextRenewalDate}, the other ${active[j].nextRenewalDate}. If the one renewing ${active[j].nextRenewalDate} is the stale one, canceling it saves you money every month.`
-          : `These look like the same service. If ${active[j].name} is the stale one, canceling it saves you money every month.`,
-        actionLabel: `Review ${active[j].name}`,
-        monthlySavingsCents: savings,
-        impactCents: savings,
-        evidenceTier: "confirmed",
-        urgencyDays: soonestUrgencyDays([active[i], active[j]], todayIso),
-        targetSubscriptionId: active[j].id,
-        involvedSubscriptionIds: [active[i].id, active[j].id],
-        currency: active[j].currency,
-      });
-    }
-  }
+    const savings = monthlyCents(b.amountCents, b.billingCycle);
+    // Identical raw names (not just namesLikelyMatch's fuzzy sense — two
+    // subscriptions both literally called "Netflix") produce "Netflix and
+    // Netflix look like duplicates" if the two names are just concatenated
+    // — reads like generated copy that never accounted for its own most
+    // common case. Renewal date is real, already-stored data (not a
+    // fabricated distinguisher) and is what actually tells the two apart
+    // in the description below, the same way the badge next to each row
+    // in the list already does.
+    const sameName = a.name === b.name;
+    recommendations.push({
+      id: `duplicate-${a.id}-${b.id}`,
+      type: "duplicate",
+      title: sameName
+        ? `Two ${a.name} subscriptions look like duplicates`
+        : `${a.name} and ${b.name} look like duplicates`,
+      description: sameName
+        ? `These look like the same service — one renews ${a.nextRenewalDate}, the other ${b.nextRenewalDate}. If the one renewing ${b.nextRenewalDate} is the stale one, canceling it saves you money every month.`
+        : `These look like the same service. If ${b.name} is the stale one, canceling it saves you money every month.`,
+      actionLabel: `Review ${b.name}`,
+      monthlySavingsCents: savings,
+      impactCents: savings,
+      evidenceTier: "confirmed",
+      urgencyDays: soonestUrgencyDays([a, b], todayIso),
+      targetSubscriptionId: b.id,
+      involvedSubscriptionIds: [a.id, b.id],
+      currency: b.currency,
+    });
+  });
 
   // 2. Functional overlap — category alone is too broad a redundancy signal
   // (Adobe and Dropbox are both "software" but solve nothing similar; the

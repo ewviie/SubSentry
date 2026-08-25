@@ -1,5 +1,13 @@
 # SCALING_READINESS_REPORT.md
 
+> **⚠️ ARCHIVED — superseded by [SECURITY_STATUS.md](./SECURITY_STATUS.md) (2026-08-22).**
+> Retained for historical narrative only. This file predates a full
+> independent re-audit and 7-role adversarial council review that found
+> several claims below stale or no longer accurate against current code
+> (see SECURITY_STATUS.md for specifics and current verified state). Do not
+> treat anything in this file as a current claim without re-checking it
+> against the actual source first.
+
 ## Backend statelessness
 
 - **Stateless app servers**: yes. All state lives in Postgres (users, sessions, subscriptions, rate-limit/lockout tracking as of this pass) or Redis (rate limits, when `UPSTASH_REDIS_REST_URL` is configured — see `src/lib/rate-limit-distributed.ts`). No in-process state a horizontally-scaled instance needs to share *except* the remaining in-memory rate limiters (billing, imports, AI, subscriptions, profile-update — see `SECURITY_HARDENING_REPORT.md`), which degrade to "each instance enforces its own limit independently" under scale-out — a real but bounded gap (worse abuse tolerance, not a correctness bug).

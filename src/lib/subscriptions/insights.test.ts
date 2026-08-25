@@ -5,6 +5,8 @@ import {
   computeFunctionalOverlapGroups,
   findSmallSubscriptionsCluster,
   smallSubscriptionsClusterTitle,
+  forEachLikelyDuplicatePair,
+  MAX_DUPLICATE_COMPARISON_SUBSCRIPTIONS,
 } from "./insights";
 import type { Subscription } from "@/lib/db/schema";
 
@@ -423,5 +425,62 @@ describe("smallSubscriptionsClusterTitle", () => {
       sub({ name: "Tiny3", amountCents: 300 }),
     ])!;
     expect(smallSubscriptionsClusterTitle(cluster)).toBe("3 smaller subscriptions add up to $9.00/mo");
+  });
+});
+
+// Regression for a confirmed CPU-exhaustion DoS (7-role security council,
+// API Security Engineer + Devil's Advocate lenses): computeInsights/
+// computeFunctionalOverlapGroups/savings.ts/insights-engine's findDuplicates
+// all ran an unbounded O(n²) fuzzy name-match over every active subscription
+// on every dashboard/insights/savings computation. Benchmarked directly
+// against this repo before the fix: 2000 active subscriptions with
+// worst-case (uniform-length, so the length-difference short-circuit in
+// namesLikelyMatch never fires) names took 30+ seconds of blocking CPU per
+// pass, and this pass ran independently up to four times per page load —
+// reachable by any authenticated user who simply holds a large subscription
+// list, no attack tooling required.
+describe("forEachLikelyDuplicatePair (DoS bound)", () => {
+  it("still finds a duplicate pair entirely within the comparison cap", () => {
+    const pairs: Array<[string, string]> = [];
+    const subs = [sub({ id: "a", name: "Netflix" }), sub({ id: "b", name: "Netflix Premium" })];
+    forEachLikelyDuplicatePair(subs, (a, b) => pairs.push([a.id, b.id]));
+    expect(pairs).toEqual([["a", "b"]]);
+  });
+
+  it("skips a duplicate pair once both members fall beyond the comparison cap", () => {
+    // MAX_DUPLICATE_COMPARISON_SUBSCRIPTIONS distinct, non-matching filler
+    // subscriptions, then a genuinely duplicate pair appended after the
+    // cap — without the bound this pair would still be found (it's a real
+    // match); with the bound in place, it's outside the truncated window
+    // and never compared.
+    const filler = Array.from({ length: MAX_DUPLICATE_COMPARISON_SUBSCRIPTIONS }, (_, i) =>
+      sub({ id: `filler-${i}`, name: `Unrelated Service ${i}` }),
+    );
+    const subs = [...filler, sub({ id: "dup-a", name: "Netflix" }), sub({ id: "dup-b", name: "Netflix Premium" })];
+
+    const pairs: Array<[string, string]> = [];
+    forEachLikelyDuplicatePair(subs, (a, b) => pairs.push([a.id, b.id]));
+
+    // Not asserting `pairs` is empty outright — the filler names themselves
+    // may incidentally fuzzy-match each other (e.g. two short numeric
+    // suffixes within edit distance 2), which is pre-existing,
+    // unrelated-to-this-fix behavior of namesLikelyMatch. What this
+    // regression actually guards is that the real duplicate pair, placed
+    // entirely after the cap, is never reached at all.
+    expect(pairs.some(([a, b]) => (a === "dup-a" && b === "dup-b") || (a === "dup-b" && b === "dup-a"))).toBe(false);
+  });
+
+  it("stays well under a second even at 2000 active subscriptions with worst-case (uniform-length) names", () => {
+    const subs = Array.from({ length: 2000 }, (_, i) =>
+      sub({ id: `worst-${i}`, name: `Zebra Quartz Widget ${String(i).padStart(4, "0")}` }),
+    );
+    const start = performance.now();
+    computeInsights(subs);
+    const elapsedMs = performance.now() - start;
+    // Generous ceiling (real elapsed time on this bound is well under
+    // 100ms) — this is a regression guard against the cap silently being
+    // removed or raised back to "compare everything," not a tight
+    // performance assertion.
+    expect(elapsedMs).toBeLessThan(3000);
   });
 });
