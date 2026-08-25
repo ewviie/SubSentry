@@ -73,7 +73,19 @@ export const subscriptionInputSchema = z.object(baseFields).extend({
 });
 
 export type SubscriptionInput = z.infer<typeof subscriptionInputSchema>;
-export const subscriptionUpdateSchema = z.object(baseFields).partial();
+// priceHistorySource is additive to .partial()'d baseFields, not merged into
+// them — same "no .default() on a field a real partial update can omit"
+// reasoning as baseFields' own comment, and it's provenance metadata only
+// (same "client's hint, no effect on validation/authorization" precedent
+// POST /api/subscriptions' own `source` field already sets), never trusted
+// for anything but labeling which subscriptionPriceHistory row this write
+// produces. Omitted entirely by every existing caller (the manual edit
+// form, bulk status/PATCH calls) — updateSubscription defaults it to
+// "user_edit" — so this is purely additive, not a behavior change for any
+// existing write path.
+export const subscriptionUpdateSchema = z.object(baseFields).partial().extend({
+  priceHistorySource: z.enum(["user_edit", "import_update"]).optional(),
+});
 export type SubscriptionUpdate = z.infer<typeof subscriptionUpdateSchema>;
 
 // subscriptions.id is a Postgres `uuid` column — a malformed string (or
