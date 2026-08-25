@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { headers } from "next/headers";
 import { Geist, Geist_Mono, Space_Grotesk } from "next/font/google";
 import { cn } from "@/lib/utils";
 import { Toaster } from "@/components/ui/sonner";
@@ -70,9 +71,19 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  // Set by proxy.ts on every request. next-themes injects an inline
+  // (nonce-less by default) <script> before hydration to apply the
+  // system/stored theme class without a flash of the wrong theme. Under
+  // this app's strict nonce-based CSP (no 'unsafe-inline' in script-src),
+  // that script silently fails CSP and never runs without this, so the
+  // theme class is never applied at all, on every page, regardless of
+  // system preference or a stored choice. Same pattern (auth)/layout.tsx
+  // already uses for the Turnstile widget's own nonce need.
+  const nonce = (await headers()).get("x-nonce");
+
   return (
     <html
       lang="en"
@@ -91,7 +102,7 @@ export default function RootLayout({
         >
           Skip to content
         </a>
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange nonce={nonce ?? undefined}>
           <TooltipProvider>
             <MotionConfig reducedMotion="user">{children}</MotionConfig>
             <Toaster />

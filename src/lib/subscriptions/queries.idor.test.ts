@@ -79,9 +79,9 @@ describe.skipIf(!hasDb)("subscription ownership scoping (IDOR)", () => {
     expect(result?.id).toBe(subA);
   });
 
-  it("updateSubscription: user B's update against user A's id is a no-op (returns undefined, does not mutate)", async () => {
-    const result = await queries.updateSubscription(userB, subA, { name: "Hijacked" });
-    expect(result).toBeUndefined();
+  it("updateSubscription: user B's update against user A's id is a no-op (returns not_found, does not mutate)", async () => {
+    const result = await queries.updateSubscription(userB, subA, "free", { name: "Hijacked" });
+    expect(result).toEqual({ kind: "not_found" });
 
     const stillOwnedByA = await queries.getSubscription(userA, subA);
     expect(stillOwnedByA?.name).toBe("User A's Private Subscription");

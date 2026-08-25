@@ -48,6 +48,27 @@ test.describe("static public pages actually hydrate", () => {
       for (const nonce of scriptNonces) {
         expect(nonce).toBe(headerNonce);
       }
+
+      // Regression: next-themes injects its own inline (no `src`) bootstrap
+      // script to apply the system/stored theme class before paint, and
+      // only stamps it with a nonce if RootLayout explicitly passes one via
+      // the `nonce` prop — layout.tsx used to omit it entirely. With no
+      // 'unsafe-inline' in this app's script-src, that left the script
+      // silently CSP-blocked on every page: no console-visible failure (a
+      // CSP violation, easy to miss), no broken hydration elsewhere (this
+      // is the *only* inline script in the app — JSON-LD `<script>` tags
+      // carry `type="application/ld+json"`, never executed as JS, so
+      // excluded here), just a permanently-unthemed page. Checking `.nonce`
+      // (not `getAttribute`, same reasoning as above) on the one inline,
+      // untyped script tag directly targets that specific wiring instead of
+      // only inferring it from the class-application tests below.
+      const inlineScriptNonces = await page.$$eval("script:not([src]):not([type])", (nodes) =>
+        nodes.map((n) => (n as HTMLScriptElement).nonce),
+      );
+      expect(inlineScriptNonces.length).toBeGreaterThan(0);
+      for (const nonce of inlineScriptNonces) {
+        expect(nonce).toBe(headerNonce);
+      }
     });
 
     test(`${path}: React actually hydrates (not just present in server HTML)`, async ({ page }) => {
