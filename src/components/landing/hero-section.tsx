@@ -16,7 +16,7 @@ import { fadeInUp, liftOnHover, pressScale, scaleIn, springSmooth, springSnappy,
 import { cn } from "@/lib/utils";
 
 // Representative sample data for the preview panel, not a real account's
-// numbers — built from the exact same components the real dashboard uses
+// numbers. Built from the exact same components the real dashboard uses
 // (StatCard, CategorySpendBar), so this is an honest preview of the actual
 // product rather than a mocked-up image standing in for it.
 const sampleCategoryEntries = [
@@ -25,7 +25,7 @@ const sampleCategoryEntries = [
   { category: "fitness" as const, monthlyCents: 4400 },
 ];
 
-// Placement/timing only — the actual figures come from sampleCategoryEntries
+// Placement/timing only: the actual figures come from sampleCategoryEntries
 // above (zipped by index below) so the chips can never drift out of sync
 // with the totals they resolve into. One entry per sample category.
 const ghostChipLayout = [
@@ -36,10 +36,10 @@ const ghostChipLayout = [
 
 // The one deliberate "moment" on the page: the preview card doesn't just
 // fade in already-resolved, it briefly shows the same figures loose and
-// scattered — standing in for "money disappearing across a bunch of
-// separate charges" — before they converge into the card and the number
+// scattered, standing in for "money disappearing across a bunch of
+// separate charges," before they converge into the card and the number
 // underneath finishes counting up. Runs once, on mount, alongside the rest
-// of the hero's entrance choreography (staggerContainer above) — not a
+// of the hero's entrance choreography (staggerContainer above), not a
 // scroll trigger, since the hero is already the first thing on screen.
 // Reduced-motion users skip straight to the resolved card rather than
 // getting a stripped-down version of the drift: CountUp and MotionConfig
@@ -149,7 +149,7 @@ export function HeroSection() {
           className="relative rounded-2xl border border-border bg-card p-3 shadow-elevation-medium ring-1 ring-foreground/5 sm:p-4"
         >
           {/* Large-scale instance of the same signature ring used on the
-              brand mark — radiating from behind the live dashboard preview,
+              brand mark, radiating from behind the live dashboard preview,
               tying "SubSentry is watching your spend" to the actual proof
               rather than to decoration. */}
           <SentryRing className="-inset-16 sm:-inset-24" />

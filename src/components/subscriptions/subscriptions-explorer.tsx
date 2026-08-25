@@ -54,13 +54,13 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: "recently_added", label: "Recently added" },
 ];
 
-// Drives useOptimistic below — applied synchronously the instant a bulk
+// Drives useOptimistic below: applied synchronously the instant a bulk
 // action starts, before either PATCH/DELETE request has actually reached
 // the server, so status changes/removals are visible immediately instead
 // of only after bulkChangeStatus/bulkDelete's router.refresh() lands. If
 // any of the underlying requests fail, this optimistic state is discarded
 // automatically once router.refresh() re-renders with the real
-// (unchanged, for the failed ids) `subscriptions` prop — useOptimistic's
+// (unchanged, for the failed ids) `subscriptions` prop. useOptimistic's
 // own reconciliation, not manual rollback code here.
 type OptimisticSubscriptionsAction =
   | { type: "status"; ids: string[]; status: Subscription["status"] }
@@ -104,7 +104,7 @@ export function SubscriptionsExplorer({
   const statusRef = useRef<HTMLParagraphElement>(null);
   const hadSelectionRef = useRef(false);
 
-  // BulkActionBar (and whatever inside it currently has focus — the
+  // BulkActionBar (and whatever inside it currently has focus, the
   // triggering "Delete"/"Archive" button, or the alert dialog's confirm
   // button once it closes) unmounts the instant selectedIds empties out,
   // whether that's a successful bulk action or the bar's own "Clear
@@ -128,11 +128,11 @@ export function SubscriptionsExplorer({
   // worth a look"), not narrow it to only rows matching every selected
   // criterion simultaneously. AND was the original behavior here, and it
   // silently produced an empty "No matches" the moment two selected
-  // filters' id sets didn't fully overlap — e.g. two subscriptions flagged
+  // filters' id sets didn't fully overlap: e.g. two subscriptions flagged
   // "needs review" for being overdue, but not flagged "duplicate" of each
   // other, made "Needs review" + "Duplicate" together show 0 results even
   // though 2 real, relevant subscriptions existed. search/status/category
-  // stay AND'd with quick filters and with each other — those are narrowing
+  // stay AND'd with quick filters and with each other: those are narrowing
   // a list by construction (a search term, one status, one category), not a
   // multi-select "highlight anything relevant" control.
   const filtered = useMemo(() => {
@@ -236,7 +236,7 @@ export function SubscriptionsExplorer({
     } else if (status === "canceled") {
       // Same financial-consequence framing (and the same active-only,
       // single-currency-or-null honesty rule) EditSubscriptionForm's own
-      // active→canceled toast already uses — this is the bulk path that
+      // active→canceled toast already uses. This is the bulk path that
       // skipped it, landing users on a generic "N updated" for the one
       // action in this app that's actually supposed to feel like progress.
       const canceledNow = targeted.filter((s) => s.status === "active");
@@ -251,7 +251,7 @@ export function SubscriptionsExplorer({
     } else {
       toast.success(`${ids.length} subscription${ids.length === 1 ? "" : "s"} updated`);
     }
-    // Keep only the failed items selected — clearing the whole selection
+    // Keep only the failed items selected: clearing the whole selection
     // would force the user to manually find and reselect them before the
     // "Try again" the toast just told them to do.
     setSelectedIds(new Set(failedIds));
@@ -298,7 +298,7 @@ export function SubscriptionsExplorer({
   }
 
   return (
-    // pb-24 — same fix review-table.tsx's root already has for the exact
+    // pb-24: same fix review-table.tsx's root already has for the exact
     // same fixed-bottom-pill pattern (BulkActionBar here, ReviewActionBar
     // there): without it, selecting a row near the end of this list puts
     // the floating pill directly over the last row(s) and their checkboxes,

@@ -4,14 +4,14 @@ import { useState } from "react";
 import { Mail, Loader2, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-// Matches src/lib/imports/history.ts's identical formatter — same
+// Matches src/lib/imports/history.ts's identical formatter, same
 // "medium date, short time" shape used everywhere else in this app that
 // shows a timestamp to a user, not a bespoke relative-time ("3 minutes
 // ago") library added just for this one label.
 const dateTimeFormatter = new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" });
 
 // Gmail is a full-page OAuth redirect (see /api/imports/gmail/authorize
-// and .../callback), the same shape as ConnectBankStep's TrueLayer case —
+// and .../callback), the same shape as ConnectBankStep's TrueLayer case,
 // not an in-page JS modal like Plaid Link, since Google's own consent
 // screen has to be a real page the user's browser lands on.
 export function ConnectEmailStep({
@@ -90,7 +90,7 @@ export function ConnectEmailStep({
         <p className="font-medium">Connect your Google account</p>
         <p className="max-w-sm text-sm text-muted-foreground">
           You&apos;ll be redirected to Google to grant read-only access to your Gmail. SubSentry only reads
-          subscription-related emails (receipts, renewal notices) to detect charges — it can never send, delete, or
+          subscription-related emails (receipts, renewal notices) to detect charges. It can never send, delete, or
           modify anything in your inbox, and never sees your Google password.
         </p>
       </div>

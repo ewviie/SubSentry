@@ -17,7 +17,7 @@ export function ReviewActionBar({
   onConfirm,
 }: {
   selectedCount: number;
-  // null whenever the selection spans more than one currency — see
+  // null whenever the selection spans more than one currency, see
   // sumMonthlyCentsIfSingleCurrency's own comment. Omitted from the bar
   // entirely rather than shown as a wrong or misleadingly-labeled number.
   total: { totalMonthlyCents: number; currency: string } | null;
@@ -37,7 +37,7 @@ export function ReviewActionBar({
         >
           {atImportCap ? (
             <span className="rounded-full bg-popover px-3 py-1 text-xs text-muted-foreground shadow-elevation-low">
-              Max 200 per import — deselect some to add others
+              Max 200 per import, deselect some to add others
             </span>
           ) : null}
           <div className="flex items-center gap-2 rounded-full border border-border bg-popover px-3 py-2 shadow-elevation-high ring-1 ring-foreground/10">

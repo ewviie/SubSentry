@@ -5,9 +5,9 @@ import { formatCents } from "@/lib/subscriptions/money";
 import { cn } from "@/lib/utils";
 import type { RenewalMonthEntry } from "@/lib/subscriptions/analytics";
 
-// A 12-bar time series, one flat hue (emerald — this app's established "spend"
+// A 12-bar time series, one flat hue (emerald, this app's established "spend"
 // accent) since each bar's identity is its position in time, not a
-// category — a sequential ramp or per-bar hue here would wrongly imply
+// category. A sequential ramp or per-bar hue here would wrongly imply
 // each month is a different "kind" of thing. Per-bar hover tooltip, same
 // interaction pattern as the line chart's hover.
 export function RenewalsTimelineChart({ months, currency }: { months: RenewalMonthEntry[]; currency?: string }) {
@@ -25,7 +25,7 @@ export function RenewalsTimelineChart({ months, currency }: { months: RenewalMon
           return (
             // h-full on this wrapper (not `items-end` on the row above) is
             // what gives the bar below a definite height to resolve its own
-            // percentage height against — a percentage height only works
+            // percentage height against. A percentage height only works
             // against an ancestor with a real, non-auto height.
             <div key={month.monthIso} className="relative h-full flex-1">
               <div

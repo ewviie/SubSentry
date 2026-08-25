@@ -4,11 +4,11 @@ import type { Subscription } from "@/lib/db/schema";
 
 // Surfaces the same "possible duplicate" signal the subscriptions list
 // already badges (subscription-row.tsx) and computeInsights() already
-// computes — not a new detection, just a place for that existing signal to
+// computes: not a new detection, just a place for that existing signal to
 // show up again on the one screen a user is most likely to act on it from.
 // `match` is always a real subscription this user owns, resolved from the
 // same possible_overlap insight the list's badge reads (see
-// subscriptions/[id]/page.tsx) — never a guessed or invented pairing.
+// subscriptions/[id]/page.tsx), never a guessed or invented pairing.
 export function DuplicateNotice({ match }: { match: Subscription }) {
   return (
     <div className="flex items-start gap-3 rounded-lg border border-destructive/20 bg-destructive/5 p-4">

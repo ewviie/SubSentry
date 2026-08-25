@@ -26,7 +26,7 @@ export function TrustSection() {
   return (
     <section aria-labelledby="trust-heading" className="border-y border-border/60 bg-muted/30">
       <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6">
-        {/* Visually-hidden — the 3 signal cards below are self-explanatory
+        {/* Visually-hidden: the 3 signal cards below are self-explanatory
             at a glance, but a screen-reader's heading outline otherwise
             skips straight from the hero's h1 to Features' h2 with this
             whole section unlabeled. */}

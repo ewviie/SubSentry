@@ -2,7 +2,7 @@
 
 // Threads proxy.ts's per-request CSP nonce down to client components that
 // need to load a script Next.js itself doesn't know about (Turnstile's
-// widget — see turnstile-widget.tsx). Next.js auto-nonces its own
+// widget, see turnstile-widget.tsx). Next.js auto-nonces its own
 // framework-injected scripts; anything this app adds itself has to be
 // nonced by hand, and a nonce set as a static build-time constant would
 // defeat the point (proxy.ts mints a fresh one per request specifically so

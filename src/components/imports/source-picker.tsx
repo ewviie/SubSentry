@@ -14,20 +14,20 @@ interface SourceOption {
   description: string;
   icon: LucideIcon;
   enabled: boolean;
-  // Defaults to "Select" below — only overridden where the generic label
+  // Defaults to "Select" below, only overridden where the generic label
   // would misrepresent what actually happens next (see gmail/apple).
   buttonLabel?: string;
 }
 
 // Deliberately a static list, not pulled from the server-side provider
-// registry (src/lib/imports/registry.ts) — that registry exists so the
+// registry (src/lib/imports/registry.ts): that registry exists so the
 // analyze route can dispatch by source without branching, not so the UI
 // needs to introspect it. `enabled` here is kept in sync with each
-// provider's own `enabled` flag by hand — it's UI-only cosmetic metadata
+// provider's own `enabled` flag by hand: it's UI-only cosmetic metadata
 // (icons, marketing copy) the registry has no reason to expose.
 //
 // google_play (the old CSV-upload "Google" option) is deliberately absent
-// from this list — gmail (a real OAuth connection) replaced it as the
+// from this list. gmail (a real OAuth connection) replaced it as the
 // active Google option. Its provider registration and CSV-parsing code
 // are still intact (registry.ts), just not offered here anymore; see that
 // file's comment.
@@ -44,7 +44,7 @@ const SOURCES: SourceOption[] = [
     label: "Apple Data Export",
     // Explicit, upfront, rather than letting a "Connect"-shaped button
     // imply a live connection Apple doesn't actually offer: there is no
-    // public API for a user's own cross-App-Store subscription list —
+    // public API for a user's own cross-App-Store subscription list:
     // Sign in with Apple has no such scope, and the App Store Server API
     // is developer-side (an app's own transactions), not this. Exporting
     // your data yourself and uploading it here is the only real option.
@@ -58,9 +58,9 @@ const SOURCES: SourceOption[] = [
     id: "gmail",
     label: "Google (Gmail)",
     description:
-      "Connect your Google account to scan Gmail for subscription receipts and renewal emails — read-only access, nothing is sent, deleted, or modified.",
+      "Connect your Google account to scan Gmail for subscription receipts and renewal emails. Read-only access, nothing is sent, deleted, or modified.",
     icon: Mail,
-    enabled: false, // computed server-side from GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET — see gmailEnabled prop
+    enabled: false, // computed server-side from GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET, see gmailEnabled prop
     buttonLabel: "Connect Google",
   },
   {
@@ -68,7 +68,7 @@ const SOURCES: SourceOption[] = [
     label: "Bank (Plaid)",
     description: "Securely connect your bank account via Plaid to automatically detect recurring subscriptions.",
     icon: Landmark,
-    // Plaid requires PLAID_CLIENT_ID/PLAID_SECRET + TOKEN_ENCRYPTION_KEY —
+    // Plaid requires PLAID_CLIENT_ID/PLAID_SECRET + TOKEN_ENCRYPTION_KEY,
     // see plaidEnabled prop, computed server-side from those env vars.
     enabled: false,
   },
@@ -85,7 +85,7 @@ export const SOURCE_LABELS: Record<ImportSourceId, string> = {
   ...(Object.fromEntries(SOURCES.map((s) => [s.id, s.label])) as Record<ImportSourceId, string>),
   // Not offered in SOURCES (see the comment above), but still a valid
   // ImportSourceId the analyze route's dispatch table and import-history
-  // labels need to resolve — see registry.ts.
+  // labels need to resolve, see registry.ts.
   google_play: "Google Play",
 };
 
@@ -107,12 +107,12 @@ export function SourcePicker({
     return source;
   });
 
-  // Split at render time only — SOURCES' own order/content stays exactly as
+  // Split at render time only: SOURCES' own order/content stays exactly as
   // the array above defines it (that array is already hand-synced with the
   // provider registry in 3 places; this is deliberately not another one).
   // In the current deployment (no PLAID_CLIENT_ID/TRUELAYER_CLIENT_ID/
   // GOOGLE_CLIENT_ID configured), 3 of 5 cards render as permanently
-  // grayed-out "Coming soon" — same visual weight as the 2 that actually
+  // grayed-out "Coming soon", same visual weight as the 2 that actually
   // work, which reads as "half of this is broken" to a new user rather
   // than "two real options, a few more later." Collapsing the disabled
   // ones to one line does the same job (still names them, sets the same

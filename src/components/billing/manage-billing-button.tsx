@@ -18,7 +18,7 @@ export function ManageBillingButton() {
         setLoading(false);
         return;
       }
-      // Leave loading=true — the page is about to navigate away.
+      // Leave loading=true, the page is about to navigate away.
       window.location.href = data.url;
     } catch {
       toast.error("Network error. Try again.");

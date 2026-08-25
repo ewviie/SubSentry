@@ -43,8 +43,8 @@ export function HowItWorksSection() {
             const isPayoff = i === STEPS.length - 1;
             return (
             <motion.li key={step.title} variants={fadeInUp} className="relative">
-              {/* Emerald is reserved for the payoff step — the moment SubSentry
-                  actually surfaces something for you — rather than spent on
+              {/* Emerald is reserved for the payoff step, the moment SubSentry
+                  actually surfaces something for you, rather than spent on
                   every number, so it reads as a deliberate beat, not a
                   repeated bullet-point color. */}
               <span

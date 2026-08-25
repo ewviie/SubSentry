@@ -25,7 +25,7 @@ export function ForgotPasswordForm() {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Once true, stays true regardless of what's typed next — the API
+  // Once true, stays true regardless of what's typed next. The API
   // response is always the same generic message (see the route's own
   // GENERIC_RESPONSE comment on why), so there's no real "success" vs
   // "failure" state to show here beyond a request error.
@@ -56,7 +56,7 @@ export function ForgotPasswordForm() {
       setError("Network error. Try again.");
     } finally {
       setLoading(false);
-      // Turnstile tokens are single-use — see signup-form.tsx's identical
+      // Turnstile tokens are single-use, see signup-form.tsx's identical
       // reasoning.
       setCaptchaToken(null);
       turnstileRef.current?.reset();

@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { SentryRing } from "@/components/ui/sentry-ring";
 import { cn } from "@/lib/utils";
 
-// No "Pricing" entry — pricing-section.tsx exists but isn't rendered
+// No "Pricing" entry: pricing-section.tsx exists but isn't rendered
 // during the free beta (see page.tsx's showPricing gate), so a link
 // pointing at its #pricing anchor would just be dead: nothing on the page
 // for it to scroll to.
@@ -29,7 +29,7 @@ export function LandingNav() {
     menuButtonRef.current?.focus();
   }
 
-  // Track a boolean rather than binding style directly to scrollY — the nav
+  // Track a boolean rather than binding style directly to scrollY: the nav
   // should snap between two deliberate states (resting on the hero vs.
   // working chrome), not continuously interpolate every pixel of scroll.
   useMotionValueEvent(scrollY, "change", (latest) => {

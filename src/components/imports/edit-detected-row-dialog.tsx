@@ -6,8 +6,8 @@ import { SubscriptionForm, type SubscriptionFormValues } from "@/components/subs
 
 // Same reuse pattern quick-add-bar.tsx already established for its own
 // confirm dialog: wrap the existing SubscriptionForm rather than building a
-// second form. Saving only mutates the parent's local state (review-table.tsx)
-// — nothing is persisted until the review screen's final bulk confirm.
+// second form. Saving only mutates the parent's local state (review-table.tsx);
+// nothing is persisted until the review screen's final bulk confirm.
 export function EditDetectedRowDialog({
   open,
   initialValues,

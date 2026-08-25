@@ -11,7 +11,7 @@ export function ImportCompleteStep({
 }: {
   importedCount: number;
   ignoredCount: number;
-  // null whenever the imported batch spanned more than one currency — see
+  // null whenever the imported batch spanned more than one currency, see
   // sumMonthlyCentsIfSingleCurrency's own comment in lib/subscriptions/money.ts.
   // Omitted from this screen entirely rather than shown as a wrong number.
   total: { totalMonthlyCents: number; currency: string } | null;
@@ -27,7 +27,7 @@ export function ImportCompleteStep({
           Imported {importedCount} subscription{importedCount === 1 ? "" : "s"}
         </p>
         {/* The one real financial-consequence moment this screen was
-            missing — reveal-step.tsx already proved this exact number is
+            missing. reveal-step.tsx already proved this exact number is
             worth showing one screen earlier (the pre-confirm estimate);
             this is the same figure, now real and saved, not projected. */}
         {total ? (
@@ -40,7 +40,7 @@ export function ImportCompleteStep({
         </p>
       </div>
       <div className="flex flex-wrap items-center justify-center gap-3">
-        {/* /dashboard, not /subscriptions — the dashboard is where the
+        {/* /dashboard, not /subscriptions: the dashboard is where the
             total/savings/insights this import just fed into actually show
             up; a first-time import in particular may have nothing on
             /savings yet (needs a duplicate/overlap to flag), so that isn't

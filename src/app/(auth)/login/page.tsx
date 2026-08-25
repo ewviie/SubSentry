@@ -2,13 +2,13 @@ import type { Metadata } from "next";
 import { LoginForm } from "./login-form";
 import { absoluteUrl } from "@/lib/seo";
 
-// Distinct from the root layout's default "SubSentry" title/description —
+// Distinct from the root layout's default "SubSentry" title/description:
 // every page previously inherited that same pair verbatim (nothing
 // overrode it), which is exactly the kind of "every page looks identical
 // to a crawler" issue worth a real, page-specific title for a public page
 // like this one.
 //
-// canonical resolved via absoluteUrl(), not a bare relative string — this
+// canonical resolved via absoluteUrl(), not a bare relative string. This
 // whole route group is dynamically rendered (the (auth) layout calls
 // getSession() on every request), and metadataBase resolution doesn't
 // apply to a dynamic route's relative alternates.canonical the way it

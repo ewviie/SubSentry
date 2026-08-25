@@ -5,7 +5,7 @@ import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 // Catches errors from the (app) and (auth) layouts themselves (a segment's
-// own error.tsx can't catch errors thrown by its own layout — those bubble
+// own error.tsx can't catch errors thrown by its own layout: those bubble
 // up to the parent segment's boundary, which for both route groups is this
 // root-level one), plus anything from app/page.tsx.
 export default function RootSegmentError({

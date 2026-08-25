@@ -18,7 +18,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
-// Deliberately not AlertDialogAction for the destructive button below —
+// Deliberately not AlertDialogAction for the destructive button below:
 // that primitive closes the dialog on every click, including a failed
 // attempt (wrong password, network error). This needs to stay open and
 // show the real reason so the user can just retry, the same pattern every
@@ -61,7 +61,7 @@ export function DeleteAccountCard() {
         return;
       }
       toast.success("Your account has been deleted.");
-      // A full navigation, not router.push — every client-side cache/state
+      // A full navigation, not router.push: every client-side cache/state
       // this session ever built (dashboard data, settings) belongs to an
       // account that no longer exists; a hard reload is what guarantees
       // none of it survives into the logged-out /login render.
@@ -119,13 +119,13 @@ export function DeleteAccountCard() {
               ) : null}
             </div>
             <AlertDialogFooter>
-              {/* h-11 (44px) on both — the Button component's default size
+              {/* h-11 (44px) on both. The Button component's default size
                   is h-8 (32px), fine for the app's normal density but under
                   the ~44px minimum recommended touch-target height; a real
                   mobile audit measured these at ~30px tall. Overridden only
                   here, not in the shared Button component itself, since
                   this is the one irreversible, destructive confirmation in
-                  the app where a mis-tap is costliest — not a reason to
+                  the app where a mis-tap is costliest, not a reason to
                   change every button's height app-wide. */}
               <AlertDialogCancel className="h-11" disabled={submitting}>
                 Cancel

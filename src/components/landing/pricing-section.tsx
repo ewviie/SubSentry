@@ -72,7 +72,7 @@ export function PricingSection() {
           >
             {/* Reserved badge row, rendered (empty) for every tier so card
                 tops stay aligned in the grid regardless of which tier is
-                "popular" — the badge lives in normal flow here rather than
+                "popular". The badge lives in normal flow here rather than
                 floating via absolute positioning over the card, so it can
                 never collide with card content or get clipped by the
                 card's own overflow-hidden corner mask at any zoom level. */}

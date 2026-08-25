@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-// Hidden on /subscriptions/new itself — that page's own form submit button
+// Hidden on /subscriptions/new itself: that page's own form submit button
 // is already labeled "Add subscription", so showing this global shortcut
 // there duplicates the exact same action right next to the real one.
 export function HeaderQuickActions() {

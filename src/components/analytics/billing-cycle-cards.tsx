@@ -8,7 +8,7 @@ const CYCLE_LABELS: Record<BillingCycleEntry["cycle"], string> = {
   weekly: "Weekly",
 };
 
-// Identity across only 4 possible values with no ranking implied — plain
+// Identity across only 4 possible values with no ranking implied: plain
 // labeled tiles rather than a pie/donut, which the dataviz form guide
 // steers away from for anything beyond a single part-to-whole proportion.
 export function BillingCycleCards({ entries, currency }: { entries: BillingCycleEntry[]; currency?: string }) {

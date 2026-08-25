@@ -14,7 +14,7 @@ const badgeVariants = cva(
           "bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80",
         destructive:
           "bg-destructive/10 text-destructive focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:focus-visible:ring-destructive/40 [a]:hover:bg-destructive/20",
-        // Same bg-X/10 text-X shape as destructive above — a semantic
+        // Same bg-X/10 text-X shape as destructive above. A semantic
         // status triplet was missing entirely (every status badge in the
         // app previously borrowed default/secondary/outline, which convey
         // UI hierarchy, not "this is good/needs attention/informational").

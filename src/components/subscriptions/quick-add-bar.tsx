@@ -49,7 +49,7 @@ export function QuickAddBar({ isFirstSubscription = false }: { isFirstSubscripti
   const [parsedText, setParsedText] = useState("");
   // Local, not derived solely from the isFirstSubscription prop on each
   // call: that prop reflects the dashboard's state as of its last server
-  // render, and router.refresh() (below) is async — a second add started
+  // render, and router.refresh() (below) is async: a second add started
   // before that refresh lands would still see the pre-add `true` and show
   // the "first ever" toast twice. This flips permanently after the first
   // real showing, so the celebratory toast can only ever fire once per
@@ -95,9 +95,9 @@ export function QuickAddBar({ isFirstSubscription = false }: { isFirstSubscripti
 
     // A user's genuinely first subscription is the one moment this codebase's
     // own reveal-step.tsx already proves out for imports (name it, show what
-    // it costs monthly, reframe as yearly) but the manual/quick-add path —
+    // it costs monthly, reframe as yearly) but the manual/quick-add path,
     // the only guaranteed-to-happen path, since Plaid/TrueLayer/Gmail are
-    // disabled and CSV/Apple both require leaving the app first — had no
+    // disabled and CSV/Apple both require leaving the app first, had no
     // equivalent: a silent "Subscription added" toast either way. Real
     // numbers computed from what was actually just saved, not fabricated;
     // only shown once (isFirstSubscription reflects the dashboard's state
@@ -119,7 +119,7 @@ export function QuickAddBar({ isFirstSubscription = false }: { isFirstSubscripti
       const monthly = monthlyCents(amountCents, values.billingCycle);
       const yearly = annualCents(amountCents, values.billingCycle);
       toast.success(`${values.name} added`, {
-        description: `That's ${formatCents(monthly, values.currency)}/mo — ${formatCents(yearly, values.currency)}/yr.`,
+        description: `That's ${formatCents(monthly, values.currency)}/mo, ${formatCents(yearly, values.currency)}/yr.`,
       });
     } else {
       toast.success("Subscription added");

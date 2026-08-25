@@ -14,13 +14,13 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 
 // robots.ts's disallow list only stops a well-behaved crawler from
-// *fetching* these pages — it doesn't stop a URL from getting indexed with
+// *fetching* these pages. It doesn't stop a URL from getting indexed with
 // no content if it's ever linked from somewhere Google can see (a disallowed
 // page can't be crawled to discover a noindex tag on it, but Google can still
 // index the bare URL). None of these ~8 routes has any real content for a
 // crawler that never authenticates anyway (requireUser() redirects it to
 // /login), so noindex here is a correct, honest signal, not one this app
-// needs a page-by-page opt-out from — every route under this layout is
+// needs a page-by-page opt-out from: every route under this layout is
 // private by construction.
 export const metadata: Metadata = {
   robots: { index: false, follow: false },

@@ -7,7 +7,7 @@ import { toast } from "sonner";
 
 // Mounted once in the (app) layout. Stripe's Payment Link confirmation page
 // redirects to `/dashboard?checkout_session_id={CHECKOUT_SESSION_ID}` (see
-// .env.example) — this picks that up on whatever page it lands on, redeems
+// .env.example). This picks that up on whatever page it lands on, redeems
 // it, then strips the query param so a refresh doesn't re-trigger it.
 export function CheckoutActivator() {
   const router = useRouter();

@@ -3,10 +3,10 @@ import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { SentryRing } from "@/components/ui/sentry-ring";
 
-// A lighter header for standalone content/tool pages (not the homepage
+// A lighter header for standalone content/tool pages. Not the homepage
 // scroll-tracking LandingNav, whose Features/Pricing/FAQ links are same-page
-// anchors that only resolve on "/" — reusing that nav here would ship 3
-// broken links). Same logo/type treatment, no scroll listener: one less
+// anchors that only resolve on "/"; reusing that nav here would ship 3
+// broken links. Same logo/type treatment, no scroll listener: one less
 // client-side behavior on pages this SEO pass is trying to keep lightweight.
 export function MarketingNav() {
   return (

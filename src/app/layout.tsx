@@ -19,7 +19,7 @@ const spaceGrotesk = Space_Grotesk({
 // No production domain is configured anywhere in this project yet, so this
 // is deliberately read from an env var rather than a hardcoded guess. Left
 // unset, Next silently falls back to resolving og:image/twitter:image
-// against "http://localhost:3000" in production builds — a broken share
+// against "http://localhost:3000" in production builds. A broken share
 // preview is worse than an honest build-time warning, so this is not
 // papered over with a fabricated domain. Set NEXT_PUBLIC_APP_URL once a
 // real domain exists.
@@ -27,24 +27,24 @@ const SITE_TITLE = "SubSentry";
 const SITE_DESCRIPTION = "AI-powered subscription management";
 
 // generateMetadata (a function), not a static `export const metadata`
-// object — metadataBase needs process.env.NEXT_PUBLIC_APP_URL read fresh
+// object: metadataBase needs process.env.NEXT_PUBLIC_APP_URL read fresh
 // per render, not once at module-import time. Verified empirically
 // (against a real production build) that a module-scope read of that env
 // var produces `undefined` for metadataBase on every dynamically-rendered
-// page (/, /login, /signup, /forgot-password, /subscription-tracker —
+// page (/, /login, /signup, /forgot-password, /subscription-tracker,
 // anything that calls getSession(), which makes it dynamic), even with the
-// var genuinely set for the running process — see lib/seo.ts's own comment
+// var genuinely set for the running process. See lib/seo.ts's own comment
 // for the fuller story and why absoluteUrl() below has the same
 // read-inside-the-function shape.
 export async function generateMetadata(): Promise<Metadata> {
   return {
     // title.template applies to every page under this layout that sets its
-    // own `title` (e.g. login/signup) without repeating "SubSentry" —
+    // own `title` (e.g. login/signup) without repeating "SubSentry".
     // `default` is what renders on pages (like the landing page) that
     // don't override title at all.
     title: { default: SITE_TITLE, template: `%s | ${SITE_TITLE}` },
     description: SITE_DESCRIPTION,
-    // getAppUrl() (not a raw `new URL(process.env.NEXT_PUBLIC_APP_URL)`) —
+    // getAppUrl() (not a raw `new URL(process.env.NEXT_PUBLIC_APP_URL)`):
     // a malformed value is treated as unset instead of throwing here and
     // crashing metadata generation for every page; see lib/seo.ts's own
     // comment.
@@ -53,7 +53,7 @@ export async function generateMetadata(): Promise<Metadata> {
       return appUrl ? new URL(appUrl) : undefined;
     })(),
     // Explicit absolute URLs via absoluteUrl(), not left as bare relative
-    // strings for metadataBase to resolve — this is the fallback every
+    // strings for metadataBase to resolve. This is the fallback every
     // page that doesn't set its own canonical/openGraph inherits.
     alternates: { canonical: absoluteUrl("/") ?? "/" },
     openGraph: {

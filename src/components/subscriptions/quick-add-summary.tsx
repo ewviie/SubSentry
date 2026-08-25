@@ -8,7 +8,7 @@ import { fadeInUp, staggerContainer } from "@/lib/motion";
 import type { SubscriptionFormValues } from "@/components/subscriptions/subscription-form";
 
 // The gap this closes: the confirm dialog used to jump straight to a bare
-// edit form with no visible connection back to what was typed — "confirm
+// edit form with no visible connection back to what was typed. "Confirm
 // subscription" over a generic form doesn't communicate that anything was
 // understood, just that a form exists. This states what was actually
 // extracted, in the exact words a person would use to check it themselves
@@ -65,7 +65,7 @@ export function QuickAddSummary({
         >
           <AlertCircle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
           {!dateProvided
-            ? "Couldn't tell when this renews — pick a date below."
+            ? "Couldn't tell when this renews. Pick a date below."
             : "Worth a quick check against the fields below."}
         </motion.p>
       ) : null}

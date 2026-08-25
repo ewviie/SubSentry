@@ -85,7 +85,7 @@ function ResetPasswordContent() {
           <CardTitle as="h1" className="font-heading mt-3 text-2xl">
             Password reset
           </CardTitle>
-          {/* Deliberately no auto-login/redirect here — see
+          {/* Deliberately no auto-login/redirect here. See
               api/auth/reset-password/route.ts's comment on why every
               existing session (including this one) was just revoked, and
               why signing back in with the new password is the safer,

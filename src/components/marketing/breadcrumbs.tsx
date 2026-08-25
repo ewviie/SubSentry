@@ -9,15 +9,15 @@ export interface BreadcrumbItem {
 }
 
 // Visual trail + the JSON-LD it represents kept in one component so they
-// can't drift apart — same principle as page.tsx's FAQPage schema being
+// can't drift apart, same principle as page.tsx's FAQPage schema being
 // built from the same FAQS array the accordion renders.
 export function Breadcrumbs({ items }: { items: BreadcrumbItem[] }) {
-  // schema.org wants absolute URLs in `item` — same NEXT_PUBLIC_APP_URL gate
+  // schema.org wants absolute URLs in `item`, same NEXT_PUBLIC_APP_URL gate
   // every other absolute-URL field in this app already uses (metadataBase,
   // sitemap.ts, robots.ts, the SoftwareApplication `url` field). Omitted
   // entirely rather than resolved against localhost when unset.
   //
-  // getAppUrl(), not a raw process.env read — a malformed (but non-empty)
+  // getAppUrl(), not a raw process.env read: a malformed (but non-empty)
   // NEXT_PUBLIC_APP_URL would otherwise reach `new URL(item.href, appUrl)`
   // below unvalidated and throw, crashing every page that renders
   // breadcrumbs. getAppUrl() already treats malformed the same as unset;
@@ -42,7 +42,7 @@ export function Breadcrumbs({ items }: { items: BreadcrumbItem[] }) {
           <li key={item.label} className="flex items-center gap-1.5">
             {i > 0 ? <ChevronRight className="size-3.5 shrink-0" aria-hidden="true" /> : null}
             {item.href ? (
-              // Caller-supplied, not a literal here — same escape hatch
+              // Caller-supplied, not a literal here, same escape hatch
               // import-center-page.tsx already uses for this exact
               // typedRoutes limitation (a route string built/passed at
               // runtime rather than written as a literal at the call site).

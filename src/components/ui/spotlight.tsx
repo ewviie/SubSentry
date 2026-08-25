@@ -3,8 +3,8 @@
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 
-// Adapted from the Aceternity UI "Spotlight" pattern (21st.dev, @manuarora700)
-// — same ellipse/blur geometry, but recolored to pull from our design tokens
+// Adapted from the Aceternity UI "Spotlight" pattern (21st.dev, @manuarora700):
+// same ellipse/blur geometry, but recolored to pull from our design tokens
 // via `currentColor` (set a `text-*` utility on the consumer) instead of a
 // hardcoded fill, and animated through Framer Motion so it automatically
 // respects the app's global `reducedMotion="user"` setting rather than a

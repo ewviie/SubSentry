@@ -4,7 +4,7 @@ import { CheckCircle2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 
-// Deliberately outside the (auth) route group — that layout redirects any
+// Deliberately outside the (auth) route group: that layout redirects any
 // signed-in visitor straight to /dashboard before this content would ever
 // render (see (auth)/layout.tsx), which would break the common case of a
 // user clicking this link from their email while still logged in elsewhere

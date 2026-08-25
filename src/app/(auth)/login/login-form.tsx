@@ -24,7 +24,7 @@ export function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  // Stays false through every normal login — the server only ever responds
+  // Stays false through every normal login. The server only ever responds
   // with captcha_required once an account has already failed a couple of
   // logins in a row (see api/auth/login/route.ts). Progressive disclosure,
   // not a permanent fixture on this form: a first-time correct login never
@@ -59,7 +59,7 @@ export function LoginForm() {
           setCaptchaRequired(true);
         }
         // The API deliberately never says whether the email or the password
-        // was wrong (see login/route.ts's DUMMY_HASH comment — that's an
+        // was wrong (see login/route.ts's DUMMY_HASH comment, that's an
         // anti-enumeration measure, not an oversight), so there's no single
         // field to send focus to; the error banner is the right landing
         // spot for both keyboard and screen-reader users here.

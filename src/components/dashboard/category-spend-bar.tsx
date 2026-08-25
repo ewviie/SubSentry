@@ -7,7 +7,7 @@ import { formatCents } from "@/lib/subscriptions/money";
 import { springSmooth } from "@/lib/motion";
 import type { CategoryBreakdownEntry } from "@/lib/subscriptions/queries";
 
-// Bar width is relative to the largest category, not the monthly total —
+// Bar width is relative to the largest category, not the monthly total:
 // the point is comparing categories against each other (the actual
 // question this card answers), not showing what fraction of a whole pie
 // each one is.

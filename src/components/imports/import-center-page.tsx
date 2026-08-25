@@ -64,7 +64,7 @@ const GMAIL_ERROR_MESSAGES: Record<string, string> = {
 
 // The confirm endpoint's `source` enum (subscriptions.source's provenance
 // tag) is distinct from the wizard's ImportSourceId (which providers the
-// analyze route dispatches by) — see src/lib/imports/validation.ts.
+// analyze route dispatches by). See src/lib/imports/validation.ts.
 const CONFIRM_SOURCE_MAP: Record<
   ImportSourceId,
   "csv_import" | "apple_import" | "google_play_import" | "plaid_import" | "truelayer_import" | "gmail_import"
@@ -78,7 +78,7 @@ const CONFIRM_SOURCE_MAP: Record<
 };
 
 // Numbered-circle/check stepper (Stripe-checkout anatomy: circle + label +
-// connecting line, active/completed/inactive states) — adapted from the
+// connecting line, active/completed/inactive states), adapted from the
 // 21st.dev Stepper primitive's visual language, driven directly by the
 // wizard's own Step state rather than that component's generic
 // context-provider API, which this single-owner state doesn't need.
@@ -86,7 +86,7 @@ function StepProgress({ step }: { step: Step }) {
   // "connect" stands in for "upload" in the progress bar (a source is
   // either file-based or connect-based, never both), and "reveal" stands in
   // for "analyzing" (it's the tail end of the same wait, not a new stage
-  // worth its own dot) — neither gets a dedicated position.
+  // worth its own dot), neither gets a dedicated position.
   const mapped = step === "connect" ? "upload" : step === "reveal" ? "analyzing" : step;
   const currentIndex = STEP_ORDER.indexOf(mapped);
   return (
@@ -112,7 +112,7 @@ function StepProgress({ step }: { step: Step }) {
               >
                 {completed ? <Check className="size-3.5" aria-hidden="true" /> : i + 1}
               </span>
-              {/* Labels hide below sm — 5 circle+label+connector groups
+              {/* Labels hide below sm: 5 circle+label+connector groups
                   don't fit a phone-width screen without either wrapping
                   (breaks the horizontal progress metaphor) or overflowing
                   (cut off "Done" entirely, a real bug this pass caught).
@@ -160,7 +160,7 @@ export function ImportCenterPage({
   const [busy, setBusy] = useState(false);
   const [importedCount, setImportedCount] = useState(0);
   const [completedIgnoredCount, setCompletedIgnoredCount] = useState(0);
-  // null whenever the confirmed batch spans more than one currency — see
+  // null whenever the confirmed batch spans more than one currency, see
   // sumMonthlyCentsIfSingleCurrency's own comment in lib/subscriptions/money.ts.
   const [importedTotal, setImportedTotal] = useState<{ totalMonthlyCents: number; currency: string } | null>(null);
   const handledRedirect = useRef(false);
@@ -179,7 +179,7 @@ export function ImportCenterPage({
     setImportedTotal(null);
   }
 
-  // Recovery action for a zero-result Review step — narrower than reset():
+  // Recovery action for a zero-result Review step, narrower than reset():
   // keeps the already-chosen source (there's no reason to make someone
   // re-pick "Bank CSV" just because their first file didn't have anything
   // recurring in it) and only clears the detection output. For a file-based
@@ -210,7 +210,7 @@ export function ImportCenterPage({
       setDetected(data.detected ?? []);
       setWarnings(data.warnings ?? []);
       setSkippedRowCount(data.skippedRowCount ?? 0);
-      // Skip the reveal beat when there's nothing to reveal — "0 charges
+      // Skip the reveal beat when there's nothing to reveal: "0 charges
       // found, $0.00/mo!" isn't a payoff, it's an anti-climax. "review"
       // already renders its own "nothing detected" message for this case.
       setStep((data.detected ?? []).length > 0 ? "reveal" : "review");
@@ -233,7 +233,7 @@ export function ImportCenterPage({
   // TrueLayer's OAuth flow is a full-page redirect (see
   // /api/imports/truelayer/authorize and .../callback), so it can't hand
   // results back via a fetch() response the way Plaid's in-page Link modal
-  // does — it lands back here as a query param on a fresh page load
+  // does. It lands back here as a query param on a fresh page load
   // instead. Same pattern as CheckoutActivator picking up
   // ?checkout_session_id after Stripe's redirect. Gmail's OAuth flow is
   // architecturally identical (see /api/imports/gmail/authorize
@@ -263,14 +263,14 @@ export function ImportCenterPage({
       return;
     }
 
-    // Deferred a tick rather than called synchronously in the effect body —
+    // Deferred a tick rather than called synchronously in the effect body:
     // react-hooks/set-state-in-effect flags direct setState calls here, and
     // this genuinely is "subscribe to an external system (the URL), react
     // to it once it settles" rather than a render-time state derivation.
     if (trueLayerConnected) queueMicrotask(connectFromTrueLayerRedirect);
     if (gmailConnected) queueMicrotask(connectFromGmailRedirect);
     // runSync/connectFrom*Redirect are stable enough for this one-shot
-    // redirect-landing effect — re-running it on every render would refetch
+    // redirect-landing effect: re-running it on every render would refetch
     // on unrelated re-renders.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, router]);
@@ -328,7 +328,7 @@ export function ImportCenterPage({
 
       setImportedCount(data.subscriptions?.length ?? rows.length);
       setCompletedIgnoredCount(ignoredCount);
-      // From the rows actually submitted, not the server response — same
+      // From the rows actually submitted, not the server response: same
       // shape sumMonthlyCentsIfSingleCurrency already expects, and this is
       // exactly what was just confirmed (the server echoes it back
       // 1:1 on success, so there's no reason to wait for/re-derive from
@@ -359,11 +359,11 @@ export function ImportCenterPage({
           </CardTitle>
           <CardDescription>
             {step === "source" && "Pick where SubSentry should look for your subscriptions."}
-            {step === "upload" && "We only read what's needed to detect subscriptions — the file itself is never stored."}
+            {step === "upload" && "We only read what's needed to detect subscriptions. The file itself is never stored."}
             {step === "connect" && source === "gmail" && "Nothing is scanned until you finish connecting your Google account."}
             {step === "connect" && source !== "gmail" && "Nothing is fetched until you finish connecting your bank."}
             {step === "analyzing" && "This only takes a moment."}
-            {step === "reveal" && "Nothing has been added yet — you'll confirm each one on the next screen."}
+            {step === "reveal" && "Nothing has been added yet. You'll confirm each one on the next screen."}
             {step === "review" &&
               "Only high-confidence matches are pre-selected. Nothing is imported until you confirm."}
             {step === "complete" && "You can review everything on your subscriptions page."}
@@ -432,7 +432,7 @@ export function ImportCenterPage({
                         </p>
                       ) : null}
                       {/* Non-skip warnings (e.g. "no currency column found;
-                          assumed USD") previously had nowhere to render —
+                          assumed USD") previously had nowhere to render:
                           this block only ever showed the skipped-row count,
                           silently dropping every other warning message. */}
                       {Array.from(new Set(warnings)).map((warning) => (

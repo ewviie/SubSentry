@@ -3,7 +3,7 @@ import Image from "next/image";
 
 // Where the 3 SEO pages actually live in the nav hierarchy: not the primary
 // header (those anchors are homepage-only sections, these are separate
-// routes), but a real, crawlable, site-wide link — one click from every
+// routes), but a real, crawlable, site-wide link, one click from every
 // page, including the homepage. That's "reachable in a small number of
 // clicks," not "buried," without competing with Features/Pricing/FAQ for
 // primary-nav space.

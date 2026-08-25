@@ -9,7 +9,7 @@ import { SentryRing } from "@/components/ui/sentry-ring";
 import { NonceProvider } from "@/components/security/nonce-context";
 
 export default async function AuthLayout({ children }: { children: React.ReactNode }) {
-  // Authoritative check (not proxy.ts's cookie-presence check) — see the
+  // Authoritative check (not proxy.ts's cookie-presence check). See the
   // comment in src/proxy.ts for why: a stale/invalid cookie must not
   // bounce the user away from the login page they're trying to reach.
   const session = await getSession();
@@ -17,7 +17,7 @@ export default async function AuthLayout({ children }: { children: React.ReactNo
 
   // Set by proxy.ts on every request; read here (a Server Component) and
   // handed to client components several layers below (the signup/login
-  // pages' Turnstile widget) via context — see nonce-context.tsx for why
+  // pages' Turnstile widget) via context. See nonce-context.tsx for why
   // this can't just be a prop or a build-time constant.
   const nonce = (await headers()).get("x-nonce");
 
@@ -33,7 +33,7 @@ export default async function AuthLayout({ children }: { children: React.ReactNo
         </Link>
         {/* w-full max-w-sm here (not just on AuthShell) is load-bearing: `main`
             has no width of its own otherwise, so AuthShell's `w-full` had
-            nothing meaningful to be 100% of — it was resolving against
+            nothing meaningful to be 100% of. It was resolving against
             whatever `main`'s shrink-to-fit content width happened to be
             (as little as ~120px on the signup confirmation screen, verified
             in a real browser), not the intended 384px, causing real text

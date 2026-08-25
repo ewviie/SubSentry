@@ -18,7 +18,7 @@ export function VerifyEmailContent() {
   useEffect(() => {
     const token = searchParams.get("token");
     if (!token) {
-      // Deferred a tick — react-hooks/set-state-in-effect flags a direct
+      // Deferred a tick: react-hooks/set-state-in-effect flags a direct
       // setState call here, same pattern already used for the TrueLayer
       // redirect-landing effect in import-center-page.tsx.
       queueMicrotask(() => {
@@ -60,7 +60,7 @@ export function VerifyEmailContent() {
       cancelled = true;
       clearTimeout(redirectTimer);
     };
-    // Runs once per mount against the token in the URL at load time —
+    // Runs once per mount against the token in the URL at load time:
     // re-running on searchParams identity churn would re-consume an
     // already-used token and always fail the second time.
     // eslint-disable-next-line react-hooks/exhaustive-deps

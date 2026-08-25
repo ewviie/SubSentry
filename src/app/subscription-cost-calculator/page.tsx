@@ -5,22 +5,22 @@ import { LandingFooter } from "@/components/landing/landing-footer";
 import { CostCalculator } from "@/components/subscription-cost-calculator/calculator";
 import { absoluteUrl } from "@/lib/seo";
 
-// canonical/openGraph.images resolved via absoluteUrl() — see
+// canonical/openGraph.images resolved via absoluteUrl(). See
 // subscription-tracker/page.tsx's identical comment.
 //
-// force-dynamic — required for a correct per-request CSP nonce on this
+// force-dynamic: required for a correct per-request CSP nonce on this
 // page's scripts. See terms/page.tsx's identical export for the full
 // explanation. This page in particular has a genuinely interactive
 // client component (CostCalculator below) that silently never hydrated
-// under static rendering — every script on the page was blocked by CSP,
+// under static rendering: every script on the page was blocked by CSP,
 // not just next-themes'; the calculator looked normal but typing into it
 // did nothing, confirmed against a real production build.
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Subscription Cost Calculator — See Your Real Monthly & Yearly Total",
+  title: "Subscription Cost Calculator: See Your Real Monthly & Yearly Total",
   description:
-    "Add your subscriptions and see the real monthly and yearly total instantly. Free, no signup, nothing saved — runs entirely in your browser.",
+    "Add your subscriptions and see the real monthly and yearly total instantly. Free, no signup, nothing saved. Runs entirely in your browser.",
   alternates: { canonical: absoluteUrl("/subscription-cost-calculator") ?? "/subscription-cost-calculator" },
   openGraph: {
     title: "Subscription Cost Calculator | SubSentry",
@@ -28,7 +28,7 @@ export const metadata: Metadata = {
     images: [absoluteUrl("/logo-mark.png") ?? "/logo-mark.png"],
     type: "website",
   },
-  // See subscription-tracker/page.tsx's identical comment — without this,
+  // See subscription-tracker/page.tsx's identical comment. Without this,
   // Twitter/X specifically fell back to the root layout's generic title/
   // description instead of this page's own, while openGraph already had it
   // right.
@@ -51,7 +51,7 @@ export default function SubscriptionCostCalculatorPage() {
             What are your subscriptions really costing you?
           </h1>
           <p className="mt-5 text-lg text-muted-foreground">
-            Add each one below. Nothing is saved or sent anywhere — this runs entirely in your browser, no
+            Add each one below. Nothing is saved or sent anywhere. This runs entirely in your browser, no
             account required.
           </p>
         </section>

@@ -6,7 +6,7 @@ import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 // Shared by every "connected account" row in Settings (Gmail, Plaid,
-// TrueLayer) — each just supplies its own disconnectUrl. Success just
+// TrueLayer): each just supplies its own disconnectUrl. Success just
 // refreshes the Server Component tree (this page re-fetches connection
 // status server-side) rather than tracking removed-state locally, so this
 // can't drift from what's actually in the database after the call.

@@ -24,11 +24,11 @@ import {
 import { amountStringToCents, formatCents, monthlyCents } from "@/lib/subscriptions/money";
 import type { Subscription } from "@/lib/db/schema";
 
-// A real, always-working search link — never a claimed direct cancellation
+// A real, always-working search link, never a claimed direct cancellation
 // URL. This app has no maintained per-merchant cancel-page database (see
 // lib/imports/merchant-normalizer.ts's own KNOWN_MERCHANTS table: display
-// name + category only, no URLs), and fabricating one — a guessed
-// netflix.com/cancel-style link per subscription — would risk sending a
+// name + category only, no URLs), and fabricating one (a guessed
+// netflix.com/cancel-style link per subscription) would risk sending a
 // user to a wrong or dead page for something as consequential as "am I
 // still being charged." A search query is honest about what SubSentry
 // actually knows (the subscription's name, nothing more) and always
@@ -45,12 +45,12 @@ export function EditSubscriptionForm({ subscription }: { subscription: Subscript
   const [deleting, setDeleting] = useState(false);
   const [canceling, setCanceling] = useState(false);
 
-  // A status-only PATCH — the same partial update SubscriptionsExplorer's
+  // A status-only PATCH: the same partial update SubscriptionsExplorer's
   // own bulk "Change status" already sends, and the same toast copy
   // handleSubmit's active→canceled branch below gives. Before this, acting
   // on this exact page's own "Recommended: cancel this" line meant opening
   // the full edit form, finding the Status field among 7 others, and
-  // saving — real friction on the one action this page exists to drive.
+  // saving: real friction on the one action this page exists to drive.
   async function handleQuickCancel() {
     setCanceling(true);
     try {
@@ -90,12 +90,12 @@ export function EditSubscriptionForm({ subscription }: { subscription: Subscript
     }
 
     // Financial-consequence feedback, gated strictly to a genuine
-    // active-to-canceled transition — not paused (suspended, not actually
+    // active-to-canceled transition, not paused (suspended, not actually
     // saved yet) and not any other edit. A subscription's own already-
     // persisted amount/currency/billingCycle at the moment of *this* save
     // is unambiguous here, unlike the delete flow below where the same
     // action could just as easily be correcting a duplicate/data-entry
-    // mistake rather than a real cancellation — see handleDelete's own
+    // mistake rather than a real cancellation. See handleDelete's own
     // comment for why that one stays a neutral toast.
     if (subscription.status === "active" && values.status === "canceled") {
       const monthly = monthlyCents(amountStringToCents(values.amount), values.billingCycle);
@@ -111,7 +111,7 @@ export function EditSubscriptionForm({ subscription }: { subscription: Subscript
   }
 
   // Deliberately no "you'll save $X/mo" framing here, unlike the
-  // active→canceled case above — a delete is genuinely ambiguous about
+  // active→canceled case above. A delete is genuinely ambiguous about
   // whether real-world spend actually changed (it could just as easily be
   // removing a duplicate row or fixing a data-entry mistake as ending a
   // real subscription), and claiming a saving that may not be true would
@@ -143,20 +143,20 @@ export function EditSubscriptionForm({ subscription }: { subscription: Subscript
         submitLabel="Save changes"
         onSubmit={handleSubmit}
       />
-      {/* Only while still active — once status is already paused/canceled
+      {/* Only while still active: once status is already paused/canceled
           here, the user has presumably already dealt with the real-world
           side of it (or never needs to; this is the moment that decision
           is actually being made). Every "review this subscription" path in
           the app (Savings, Quick wins, the renewal-reminder email) lands
           here, and until now none of them offered anything beyond editing
-          this app's own record of it — SubSentry has no cancellation
+          this app's own record of it. SubSentry has no cancellation
           integration with any merchant, so a real, honest search link is
           the most useful thing this screen can offer instead of nothing. */}
       {subscription.status === "active" ? (
         <div className="rounded-lg border border-border bg-muted/30 p-4">
           <p className="text-sm font-medium">Canceling {subscription.name}?</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            SubSentry only tracks what you tell it — it can&apos;t cancel this for you. Marking it canceled here just
+            SubSentry only tracks what you tell it; it can&apos;t cancel this for you. Marking it canceled here just
             updates your own record; you&apos;ll still need to cancel with {subscription.name} directly to actually
             stop being charged.
           </p>
@@ -197,7 +197,7 @@ export function EditSubscriptionForm({ subscription }: { subscription: Subscript
                 This removes it and its history permanently. This can&apos;t be undone.
                 {/* "Money saved so far" on /savings (see savings.ts's
                     computeRealizedSavings) is a live total over currently-
-                    canceled rows, not a ledger — deleting one lowers that
+                    canceled rows, not a ledger. Deleting one lowers that
                     total the same way it removes everything else about this
                     row. Only shown for a subscription that's already
                     canceled (the only case where this delete actually

@@ -5,9 +5,9 @@ import { Landmark, Loader2 } from "lucide-react";
 import { usePlaidLink, type PlaidLinkOnSuccess } from "react-plaid-link";
 import { Button } from "@/components/ui/button";
 
-// The two live-API providers connect very differently — Plaid Link is an
+// The two live-API providers connect very differently: Plaid Link is an
 // in-page JS modal (usePlaidLink), TrueLayer is a full-page OAuth redirect
-// (see /api/imports/truelayer/authorize) — so this dispatches to a
+// (see /api/imports/truelayer/authorize), so this dispatches to a
 // dedicated subcomponent per provider rather than branching mid-render,
 // keeping usePlaidLink's unconditional-hook-call requirement satisfied.
 export function ConnectBankStep({
@@ -78,7 +78,7 @@ function ConnectPlaid({
     return () => {
       cancelled = true;
     };
-    // Runs once per mount only — re-running on onError identity churn would
+    // Runs once per mount only: re-running on onError identity churn would
     // spend another rate-limited /link-token call for no reason.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

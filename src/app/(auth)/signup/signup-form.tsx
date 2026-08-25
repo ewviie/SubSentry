@@ -21,7 +21,7 @@ import {
 
 // TurnstileWidget itself renders nothing when this is unset (see its own
 // file), but the submit button needs to know whether to wait on a token at
-// all — without this, a captcha-configured deployment would let the form
+// all. Without this, a captcha-configured deployment would let the form
 // submit before the widget produces a token, and an unconfigured one would
 // otherwise permanently disable the button waiting for a token that will
 // never arrive.
@@ -47,7 +47,7 @@ export function SignupForm() {
   const turnstileRef = useRef<TurnstileWidgetHandle>(null);
 
   // Runs after the fields' disabled={loading} attribute has actually
-  // cleared from the DOM — calling .focus() synchronously inside
+  // cleared from the DOM. Calling .focus() synchronously inside
   // handleSubmit races that: loading is still true (fields still disabled)
   // at that point in the same tick, so a disabled input silently swallows
   // the focus call. An effect keyed on the error only fires post-commit.
@@ -86,7 +86,7 @@ export function SignupForm() {
       }
 
       // Signup creates a session directly now (no email-verification step
-      // in the active flow — see api/auth/signup/route.ts's comment), so
+      // in the active flow, see api/auth/signup/route.ts's comment), so
       // this lands the user straight in the app, the same way login does.
       router.push("/dashboard");
       router.refresh();
@@ -95,7 +95,7 @@ export function SignupForm() {
       setErrorField(null);
     } finally {
       setLoading(false);
-      // Turnstile tokens are single-use — Cloudflare rejects a second
+      // Turnstile tokens are single-use: Cloudflare rejects a second
       // verification attempt with the same token, so every submit
       // (successful or not) needs a fresh one queued up before the next
       // attempt, not just after a captcha-specific failure.
@@ -163,7 +163,7 @@ export function SignupForm() {
           ) : null}
           {/* Not a flex row: an icon + running text that includes an inline
               <Link> used to sit in a `flex items-start` container, which
-              made each text run and the Link its own flex item — with no
+              made each text run and the Link its own flex item, with no
               flex-wrap, that squeezed the Link's own box down and broke
               "Terms of Service" across three separate lines even with room
               to spare beside it. An inline-block icon nudged onto the text
@@ -173,7 +173,7 @@ export function SignupForm() {
           <p className="text-xs text-muted-foreground">
             <Sparkles className="mr-1.5 inline-block size-3.5 -translate-y-px align-middle text-ai" aria-hidden="true" />
             SubSentry uses AI (Anthropic&apos;s Claude) to power optional features like quick-add and AI
-            insight summaries — see our{" "}
+            insight summaries. See our{" "}
             <Link href="/terms" className="underline underline-offset-4 hover:text-foreground">
               Terms of Service
             </Link>{" "}

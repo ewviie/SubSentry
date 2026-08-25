@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 
 // Only fires for errors thrown by the root layout itself (font loading,
-// providers, etc.) — everything else is caught by app/error.tsx or
+// providers, etc.). Everything else is caught by app/error.tsx or
 // (app)/error.tsx. Must render its own <html>/<body> since it replaces the
 // root layout when active.
 export default function GlobalError({

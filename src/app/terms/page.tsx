@@ -5,7 +5,7 @@ import { Breadcrumbs } from "@/components/marketing/breadcrumbs";
 import { LandingFooter } from "@/components/landing/landing-footer";
 import { absoluteUrl } from "@/lib/seo";
 
-// force-dynamic — this page must be rendered fresh per request, not
+// force-dynamic: this page must be rendered fresh per request, not
 // statically cached. proxy.ts issues a brand-new CSP nonce on every
 // request and stamps it onto every <script> tag Next.js renders, but only
 // for a render that actually happens in that request's own context; a
@@ -13,11 +13,11 @@ import { absoluteUrl } from "@/lib/seo";
 // carry no nonce at all or a stale one from whenever the page was last
 // generated, which can never match a real visitor's own fresh per-request
 // header nonce. Since this app's CSP has no 'unsafe-inline' fallback, the
-// browser then silently refuses to run every script on the page — this
+// browser then silently refuses to run every script on the page. This
 // page never actually hydrates, confirmed via a real production build
 // (no React fiber on any element, globalThis.TURBOPACK never populated).
 // force-dynamic is the standard, documented fix for this exact nonce/
-// static-caching tension (see Next's own CSP guide) — there is no partial
+// static-caching tension (see Next's own CSP guide). There is no partial
 // or ISR-cached alternative that keeps a *correct* per-request nonce,
 // since caching the HTML at all necessarily means baking in one nonce
 // value and replaying it to many different requests, each with their own
@@ -30,7 +30,7 @@ export const metadata: Metadata = {
   alternates: { canonical: absoluteUrl("/terms") ?? "/terms" },
 };
 
-// Same reasoning as privacy/page.tsx's LAST_UPDATED — a fixed literal, not
+// Same reasoning as privacy/page.tsx's LAST_UPDATED: a fixed literal, not
 // new Date(), so it only moves when this text actually changes.
 const LAST_UPDATED = "August 8, 2026";
 
@@ -60,7 +60,7 @@ export default function TermsOfServicePage() {
               <h2 className="text-h2 font-semibold">Acceptance of terms</h2>
               <p className="mt-2 text-muted-foreground">
                 By creating an account or otherwise using SubSentry, you agree to these Terms. If you don&apos;t
-                agree, don&apos;t use the service. We may update these Terms from time to time — see
+                agree, don&apos;t use the service. We may update these Terms from time to time; see
                 &quot;Changes to these Terms&quot; below.
               </p>
             </section>
@@ -71,7 +71,7 @@ export default function TermsOfServicePage() {
                 SubSentry helps you track recurring subscriptions, surface duplicate or forgotten ones, and
                 identify potential savings opportunities. You can add subscriptions manually, import them from
                 a CSV file, or connect a bank account or your Gmail inbox to have them detected automatically.
-                SubSentry is a tracking and organization tool — it does not hold your money, place orders,
+                SubSentry is a tracking and organization tool; it does not hold your money, place orders,
                 or cancel anything on your behalf.
               </p>
               <p className="mt-2 text-muted-foreground">
@@ -98,12 +98,12 @@ export default function TermsOfServicePage() {
               <h2 className="text-h2 font-semibold">User responsibilities</h2>
               <ul className="mt-3 list-disc space-y-2 pl-5 text-muted-foreground">
                 <li>You&apos;re responsible for reviewing anything an automated import (CSV, bank connection,
-                  or Gmail scan) detects before confirming it — SubSentry shows you a review step for exactly
+                  or Gmail scan) detects before confirming it; SubSentry shows you a review step for exactly
                   this reason, and detection can be wrong.</li>
                 <li>You&apos;re responsible for only connecting bank accounts or email inboxes that you own or
                   are authorized to access.</li>
                 <li>You&apos;re responsible for actually canceling any subscription you decide to cancel with
-                  the underlying provider — SubSentry does not do this for you.</li>
+                  the underlying provider; SubSentry does not do this for you.</li>
               </ul>
             </section>
 
@@ -121,7 +121,7 @@ export default function TermsOfServicePage() {
                 <li>Use another person&apos;s bank account or email inbox connection without their authorization.</li>
               </ul>
               <p className="mt-3 text-muted-foreground">
-                We may suspend or terminate accounts that violate this section — see &quot;Termination&quot;
+                We may suspend or terminate accounts that violate this section; see &quot;Termination&quot;
                 below.
               </p>
             </section>
@@ -135,7 +135,7 @@ export default function TermsOfServicePage() {
                 choose to use them, and always show you the result to review before anything is saved.
               </p>
               <p className="mt-2 text-muted-foreground">
-                AI-generated output can be incomplete or wrong — a misread price, wrong currency, or wrong
+                AI-generated output can be incomplete or wrong: a misread price, wrong currency, or wrong
                 renewal date. You&apos;re responsible for reviewing and correcting anything an AI feature
                 produces before relying on it. Automated subscription detection from a bank connection, CSV, or
                 Gmail scan uses rule-based matching, not AI, but carries the same caveat: it&apos;s a starting
@@ -147,8 +147,8 @@ export default function TermsOfServicePage() {
               <h2 className="text-h2 font-semibold">Financial disclaimer</h2>
               <p className="mt-2 text-muted-foreground">
                 SubSentry is not a bank, a payment processor, a financial advisor, or a fiduciary. Nothing in
-                the app — including totals, savings estimates, a &quot;health score,&quot; or any other
-                figure or recommendation — is financial, investment, tax, or legal advice. Savings estimates
+                the app, including totals, savings estimates, a &quot;health score,&quot; or any other
+                figure or recommendation, is financial, investment, tax, or legal advice. Savings estimates
                 are calculated from the data you&apos;ve entered or imported and are illustrative only; they
                 are not a guarantee that you will save that amount, or anything at all, if you act on them.
                 Any decision to cancel, downgrade, or keep a subscription is yours alone, and you&apos;re
@@ -176,11 +176,11 @@ export default function TermsOfServicePage() {
                 particular purpose, or non-infringement. To the maximum extent permitted by law, SubSentry and
                 its operators will not be liable for any indirect, incidental, special, consequential, or
                 punitive damages, or for any loss of data, revenue, or profits, arising from your use of (or
-                inability to use) the service — including any decision you make based on a subscription total,
+                inability to use) the service, including any decision you make based on a subscription total,
                 savings estimate, or other figure the app shows you. Nothing in these Terms excludes or limits
                 liability that cannot lawfully be excluded or limited under the law that applies to you. These
                 Terms, and any dispute arising from them, are governed by the laws of{" "}
-                <span className="italic">[governing-law jurisdiction — not yet specified]</span>, without
+                <span className="italic">[governing-law jurisdiction, not yet specified]</span>, without
                 regard to conflict-of-law principles.
               </p>
             </section>
@@ -191,7 +191,7 @@ export default function TermsOfServicePage() {
                 <li>
                   You may stop using SubSentry at any time. You can permanently delete your own account and
                   all its data yourself from Settings, or email us to request account closure and deletion of
-                  your data — see our{" "}
+                  your data. See our{" "}
                   <Link href="/privacy#account-deletion" className="text-foreground underline underline-offset-4">
                     Privacy Policy
                   </Link>{" "}

@@ -7,7 +7,7 @@ import { springSmooth } from "@/lib/motion";
 import type { SpendBySourceEntry } from "@/lib/subscriptions/analytics";
 
 // Same mark language as dashboard/category-spend-bar.tsx (bar width
-// relative to the largest entry, spring fill animation, rounded track) —
+// relative to the largest entry, spring fill animation, rounded track),
 // deliberately reused rather than a different chart style, so "a ranked
 // breakdown" reads the same way everywhere in the app.
 export function SpendBySourceBars({ entries, currency }: { entries: SpendBySourceEntry[]; currency?: string }) {

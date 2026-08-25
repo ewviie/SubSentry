@@ -4,7 +4,7 @@ import { BILLING_CYCLE_LABELS } from "@/lib/subscriptions/labels";
 import { computeLatestPriceChange } from "@/lib/subscriptions/price-history";
 import type { SubscriptionPriceHistory } from "@/lib/db/schema";
 
-// Phase 9 — the detail-page half of price-history capture (see schema.ts's
+// Phase 9. The detail-page half of price-history capture (see schema.ts's
 // subscriptionPriceHistory comment for the write side). Two honest states,
 // same "say what's actually known, not what would be nice to know"
 // discipline as every other empty state in this app: a subscription with
@@ -36,7 +36,7 @@ export function PriceHistoryNote({
   const Icon = increased ? TrendingUp : TrendingDown;
   const cycleChanged = change.fromBillingCycle !== change.toBillingCycle;
   // Only annotate each price with its billing cadence when the cadence
-  // actually differs between the two — the common case (same cycle,
+  // actually differs between the two. The common case (same cycle,
   // different amount) reads better as a plain "$10.00 → $12.00" than a
   // redundant "$10.00 (billed monthly) → $12.00 (billed monthly)".
   const fromLabel = cycleChanged
@@ -62,8 +62,8 @@ export function PriceHistoryNote({
         <p className="mt-0.5 text-muted-foreground">
           {fromLabel} → {toLabel} on {change.observedAtIso}
           {increased
-            ? ` — that's an additional ${formatCents(change.annualDeltaCents, change.currency)}/year.`
-            : ` — that's ${formatCents(Math.abs(change.annualDeltaCents), change.currency)}/year less.`}
+            ? `. That's an additional ${formatCents(change.annualDeltaCents, change.currency)}/year.`
+            : `. That's ${formatCents(Math.abs(change.annualDeltaCents), change.currency)}/year less.`}
         </p>
       </div>
     </div>

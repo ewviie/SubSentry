@@ -28,7 +28,7 @@ function emptyRow(id: string): Row {
 }
 
 // Client-side only, on purpose: nothing here is sent anywhere or saved
-// anywhere (no fetch, no localStorage) — the brief's own "client-side only,
+// anywhere (no fetch, no localStorage), the brief's own "client-side only,
 // do not save user data" constraint, and it means anyone can use this
 // without an account. Reuses the app's own money math (monthlyCents,
 // formatCents) so "$X/year" here is computed exactly the same way the real
@@ -157,7 +157,7 @@ export function CostCalculator() {
             <div className="mt-6 border-t border-border pt-6">
               <p className="text-sm text-muted-foreground">
                 That&apos;s <span className="font-medium text-foreground">{formatCents(yearlyTotalCents)}/year</span> across{" "}
-                {activeCount} subscription{activeCount === 1 ? "" : "s"} — SubSentry keeps this list for you, flags
+                {activeCount} subscription{activeCount === 1 ? "" : "s"}. SubSentry keeps this list for you, flags
                 duplicates, and tracks it automatically as prices change.
               </p>
               <Button className="mt-4 w-fit" render={<Link href="/signup" />} nativeButton={false}>

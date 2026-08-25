@@ -14,17 +14,17 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { absoluteUrl } from "@/lib/seo";
 
 // canonical/openGraph.images resolved via absoluteUrl(), not bare relative
-// strings — this page calls getSession() below (to redirect an
+// strings. This page calls getSession() below (to redirect an
 // already-logged-in visitor to /dashboard, same as the homepage), which
 // makes it dynamically rendered; metadataBase resolution doesn't apply to
 // a dynamic route's relative metadata fields. See lib/seo.ts.
 export const metadata: Metadata = {
-  title: "Subscription Tracker — Track Every Recurring Charge",
+  title: "Subscription Tracker: Track Every Recurring Charge",
   description:
-    "A subscription tracker that doesn't need your bank login. Add subscriptions by typing them in plain English, see monthly and annual totals, and catch duplicates — free during the beta.",
+    "A subscription tracker that doesn't need your bank login. Add subscriptions by typing them in plain English, see monthly and annual totals, and catch duplicates, free during the beta.",
   alternates: { canonical: absoluteUrl("/subscription-tracker") ?? "/subscription-tracker" },
   openGraph: {
-    title: "Subscription Tracker — Track Every Recurring Charge | SubSentry",
+    title: "Subscription Tracker: Track Every Recurring Charge | SubSentry",
     description: "Track what you're actually paying for, no bank connection required.",
     images: [absoluteUrl("/logo-mark.png") ?? "/logo-mark.png"],
     type: "website",
@@ -33,19 +33,19 @@ export const metadata: Metadata = {
   // layout's generic "SubSentry" / "AI-powered subscription management"
   // pair on Twitter/X specifically, while openGraph above (Facebook,
   // LinkedIn, Slack, iMessage…) already correctly showed this page's own
-  // title/description — Next only inherits fields a page doesn't set
+  // title/description. Next only inherits fields a page doesn't set
   // itself, it doesn't derive `twitter` from a sibling `openGraph`. Mirrors
   // openGraph's values, same as the homepage's metadata already does.
   twitter: {
     card: "summary",
-    title: "Subscription Tracker — Track Every Recurring Charge | SubSentry",
+    title: "Subscription Tracker: Track Every Recurring Charge | SubSentry",
     description: "Track what you're actually paying for, no bank connection required.",
     images: [absoluteUrl("/logo-mark.png") ?? "/logo-mark.png"],
   },
 };
 
 // Distinct from "/" on purpose: the homepage pitches the whole product,
-// this page answers the specific query "subscription tracker" — what one
+// this page answers the specific query "subscription tracker": what one
 // is, how this one specifically works, and why it doesn't ask for a bank
 // login. Shares real components (TrustSection, FinalCtaSection) rather than
 // re-describing the same trust/CTA copy a second time; everything else here
@@ -64,7 +64,7 @@ const TRACKING_METHODS = [
   {
     icon: CreditCard,
     title: "Add it by hand",
-    description: "A plain form with name, amount, billing cycle, and category — no AI step required if you'd rather not use it.",
+    description: "A plain form with name, amount, billing cycle, and category. No AI step required if you'd rather not use it.",
   },
 ];
 
@@ -72,12 +72,12 @@ const FAQS = [
   {
     question: "What is a subscription tracker?",
     answer:
-      "A subscription tracker is a tool that keeps a running record of your recurring charges — streaming, software, memberships — so you can see the total cost and catch anything you're paying for but no longer use.",
+      "A subscription tracker is a tool that keeps a running record of your recurring charges (streaming, software, memberships) so you can see the total cost and catch anything you're paying for but no longer use.",
   },
   {
     question: "Do I have to connect my bank account?",
     answer:
-      "No. SubSentry doesn't link to your bank or card by default. You add subscriptions yourself — by typing them, importing a CSV, or entering them by hand — so your account credentials never leave your control.",
+      "No. SubSentry doesn't link to your bank or card by default. You add subscriptions yourself, by typing them, importing a CSV, or entering them by hand, so your account credentials never leave your control.",
   },
   {
     question: "Can I import subscriptions I already have?",
@@ -87,7 +87,7 @@ const FAQS = [
   {
     question: "How does SubSentry calculate monthly vs. annual cost?",
     answer:
-      "Every subscription is normalized to a monthly figure regardless of its billing cycle — yearly, quarterly, and weekly charges are converted using the same math, so totals and comparisons are apples-to-apples.",
+      "Every subscription is normalized to a monthly figure regardless of its billing cycle. Yearly, quarterly, and weekly charges are converted using the same math, so totals and comparisons are apples-to-apples.",
   },
 ];
 
@@ -145,7 +145,7 @@ export default async function SubscriptionTrackerPage() {
         <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
           <h2 className="text-h2 font-semibold">What a subscription tracker actually does</h2>
           <p className="mt-3 max-w-2xl text-muted-foreground">
-            Subscriptions renew quietly, in small amounts, on different days of the month — which is exactly
+            Subscriptions renew quietly, in small amounts, on different days of the month, which is exactly
             why they&apos;re easy to lose track of. A tracker&apos;s job is narrow but real: hold one list of everything
             recurring, show what it adds up to monthly and per year, and surface the ones worth a second look
             (duplicates, price hikes, things you forgot you signed up for).
@@ -173,8 +173,8 @@ export default async function SubscriptionTrackerPage() {
             , or add up what you find with the{" "}
             <Link href="/subscription-cost-calculator" className="font-medium text-foreground underline underline-offset-4">
               free subscription cost calculator
-            </Link>{" "}
-            — no signup required for either.
+            </Link>
+            , no signup required for either.
           </p>
         </section>
 

@@ -45,7 +45,7 @@ export function FileUploadStep({
   return (
     <div className="space-y-3">
       {/* A <label> wrapping a visually-hidden file input, not a div with a
-          click handler — the whole area is natively clickable and keyboard
+          click handler: the whole area is natively clickable and keyboard
           accessible (Tab focuses the input, Enter/Space opens the file
           picker) without needing role="button" or a nested interactive
           control, which a separate "Choose file" button inside a clickable

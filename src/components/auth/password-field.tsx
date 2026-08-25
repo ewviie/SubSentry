@@ -5,7 +5,7 @@ import { Eye, EyeOff } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-// Shared by login and signup — identical label + input + show/hide toggle +
+// Shared by login and signup: identical label + input + show/hide toggle +
 // aria wiring, with just the autocomplete hint, validation attributes, and
 // optional hint text differing per page.
 export function PasswordField({

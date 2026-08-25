@@ -17,7 +17,7 @@ function Card({
         // Named "highlight" treatment so every place that wants to call out
         // a card as premium/upgraded (the Pro plan card today; a featured
         // insight tomorrow) composes one primitive instead of re-deriving
-        // the same border/shadow/ring combination per usage — this exact
+        // the same border/shadow/ring combination per usage. This exact
         // class list used to be hand-assembled inline in Settings.
         highlight && "border border-emerald/30 shadow-elevation-glow ring-1 ring-emerald/20",
         className
@@ -40,12 +40,12 @@ function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
-// Renders a real heading element, not a <div> — every CardTitle across the
+// Renders a real heading element, not a <div>. Every CardTitle across the
 // app used to render a <div>, which meant dozens of visually-heading-styled
 // card titles were invisible to a screen reader's heading-navigation list
 // entirely. Defaults to h3: in every audited page (dashboard, settings,
 // subscriptions), a CardTitle sits under the page's own <h1> and, where the
-// page groups cards into named sections, under an <h2> section header — h3
+// page groups cards into named sections, under an <h2> section header, h3
 // is the correct next level with no skip. Pages where a CardTitle is the
 // *only* heading (the auth pages' "Welcome back" / "Create your account")
 // pass `as="h1"` explicitly rather than relying on this default. Tailwind's

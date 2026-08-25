@@ -7,7 +7,7 @@ import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { NAV_ITEMS, SECONDARY_NAV_ITEMS, isNavItemActive, type NavItem } from "@/components/app-shell/nav-items";
 
-// Persistent left sidebar, lg+ only — below that, MobileNav's drawer covers
+// Persistent left sidebar, lg+ only. Below that, MobileNav's drawer covers
 // the same NAV_ITEMS/SECONDARY_NAV_ITEMS list. Fixed rather than sticky:
 // AppLayout offsets <main> by the same width (lg:pl-64) so this never
 // scrolls with page content, matching Linear/Stripe-style dashboard shells.

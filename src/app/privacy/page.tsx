@@ -5,7 +5,7 @@ import { Breadcrumbs } from "@/components/marketing/breadcrumbs";
 import { LandingFooter } from "@/components/landing/landing-footer";
 import { absoluteUrl } from "@/lib/seo";
 
-// force-dynamic — required for a correct per-request CSP nonce on this
+// force-dynamic: required for a correct per-request CSP nonce on this
 // page's scripts. See terms/page.tsx's identical export for the full
 // explanation (statically-cached HTML can't carry a matching nonce for
 // any individual visitor's own fresh header nonce, so the browser
@@ -19,7 +19,7 @@ export const metadata: Metadata = {
 };
 
 // Kept as a single literal rather than new Date() (unlike the guide page's
-// PUBLISHED constant) — a legal document's "last updated" date must only
+// PUBLISHED constant): a legal document's "last updated" date must only
 // change when its actual text changes, never on every rebuild.
 const LAST_UPDATED = "August 8, 2026";
 
@@ -51,7 +51,7 @@ export default function PrivacyPolicyPage() {
               <ul className="mt-3 list-disc space-y-2 pl-5 text-muted-foreground">
                 <li>
                   <strong className="text-foreground">Account data:</strong> your email address, your password
-                  (see &quot;Authentication data&quot; below — we never store this in readable form), an
+                  (see &quot;Authentication data&quot; below; we never store this in readable form), an
                   optional display name, and your plan (free or Pro).
                 </li>
                 <li>
@@ -59,7 +59,7 @@ export default function PrivacyPolicyPage() {
                   billing cycle, category, renewal date, status, and any notes you add for each subscription
                   you track, plus how it was added (typed manually, uploaded via CSV, or detected from a
                   connected bank account or Gmail inbox). This is data <em>about the other services you pay
-                  for</em> — it is not payment data for SubSentry itself.
+                  for</em>; it is not payment data for SubSentry itself.
                 </li>
                 <li>
                   <strong className="text-foreground">Session data:</strong> a record that you&apos;re logged
@@ -68,9 +68,9 @@ export default function PrivacyPolicyPage() {
                 </li>
                 <li>
                   <strong className="text-foreground">Import history:</strong> a short summary of each import
-                  you run — how many items were detected, imported, or skipped, and a bounded list of any
+                  you run: how many items were detected, imported, or skipped, and a bounded list of any
                   errors. We do not store the uploaded file, or the raw bank transactions or email content
-                  behind an automated import — only this summary and whatever subscriptions you review and
+                  behind an automated import, only this summary and whatever subscriptions you review and
                   confirm.
                 </li>
                 <li>
@@ -82,7 +82,7 @@ export default function PrivacyPolicyPage() {
                 <li>
                   <strong className="text-foreground">Billing records:</strong> if you upgrade to Pro, we
                   record that a checkout happened and its status (pending, completed, activated). We never see
-                  or store your card number — Stripe handles that directly.
+                  or store your card number; Stripe handles that directly.
                 </li>
                 <li>
                   <strong className="text-foreground">Login-security data:</strong> a count of recent failed
@@ -104,8 +104,8 @@ export default function PrivacyPolicyPage() {
                 <li>To authenticate you and keep your account secure (sessions, lockouts, and, where enabled,
                   a CAPTCHA check on signup).</li>
                 <li>To process payments and manage your plan, via Stripe.</li>
-                <li>To detect subscriptions in data you choose to import — a CSV, a connected bank account, or
-                  a connected Gmail inbox — which may involve a one-time call to Anthropic&apos;s API. See
+                <li>To detect subscriptions in data you choose to import (a CSV, a connected bank account, or
+                  a connected Gmail inbox), which may involve a one-time call to Anthropic&apos;s API. See
                   &quot;Third-party services&quot; and &quot;OAuth integrations&quot; below.</li>
                 <li>To send you account-related email, such as email verification and password-reset links.</li>
               </ul>
@@ -130,12 +130,12 @@ export default function PrivacyPolicyPage() {
                 <li>
                   For a Gmail connection, SubSentry runs a narrow, read-only search for likely receipt or
                   renewal emails, reads only the matching messages, and extracts subscription-like details from
-                  them. As with a bank connection, only the entries you confirm are stored — we do not store
+                  them. As with a bank connection, only the entries you confirm are stored; we do not store
                   the content of your emails.
                 </li>
                 <li>
                   None of these integrations can move money, place an order, or cancel a subscription on your
-                  behalf — every connection SubSentry makes to a bank or your inbox is read-only.
+                  behalf. Every connection SubSentry makes to a bank or your inbox is read-only.
                 </li>
               </ul>
             </section>
@@ -145,10 +145,10 @@ export default function PrivacyPolicyPage() {
               <ul className="mt-3 list-disc space-y-2 pl-5 text-muted-foreground">
                 <li>
                   Passwords are hashed with argon2id before storage. We never store or log your password in
-                  plain text, and we cannot recover it if you forget it — only reset it.
+                  plain text, and we cannot recover it if you forget it, only reset it.
                 </li>
                 <li>
-                  Your signed-in state is represented by a session token in an HttpOnly cookie — inaccessible
+                  Your signed-in state is represented by a session token in an HttpOnly cookie, inaccessible
                   to page JavaScript, marked <code className="rounded bg-muted px-1 py-0.5 text-sm">Secure</code>{" "}
                   in production (sent only over HTTPS), and <code className="rounded bg-muted px-1 py-0.5 text-sm">SameSite=Lax</code>.
                   The database stores only a one-way hash of that token, never the token itself, so a database
@@ -176,7 +176,7 @@ export default function PrivacyPolicyPage() {
               <ul className="mt-3 list-disc space-y-2 pl-5 text-muted-foreground">
                 <li>
                   <strong className="text-foreground">Stripe</strong>, for billing. If you upgrade to Pro,
-                  Stripe handles your payment details directly — we never see or store your card number.{" "}
+                  Stripe handles your payment details directly. We never see or store your card number.{" "}
                   <a href="https://stripe.com/privacy" className="underline underline-offset-4 hover:text-foreground" target="_blank" rel="noopener noreferrer">
                     Stripe&apos;s privacy policy
                   </a>
@@ -212,7 +212,7 @@ export default function PrivacyPolicyPage() {
                 </li>
                 <li>
                   <strong className="text-foreground">Upstash</strong>, optionally, for shared rate-limiting
-                  infrastructure across servers — it briefly sees the identifier (such as your IP address or
+                  infrastructure across servers. It briefly sees the identifier (such as your IP address or
                   email) being rate-limited, not your account data.
                 </li>
               </ul>
@@ -226,7 +226,7 @@ export default function PrivacyPolicyPage() {
             <section>
               <h2 className="text-h2 font-semibold">OAuth integrations</h2>
               <p className="mt-2 text-muted-foreground">
-                Connecting a bank account or your Gmail inbox uses OAuth — you authorize access directly with
+                Connecting a bank account or your Gmail inbox uses OAuth: you authorize access directly with
                 the provider (Plaid, TrueLayer, or Google); SubSentry never sees or stores your bank or Google
                 password.
               </p>
@@ -234,18 +234,18 @@ export default function PrivacyPolicyPage() {
                 <li>
                   <strong className="text-foreground">Gmail:</strong> we request read-only access to your
                   mailbox (the <code className="rounded bg-muted px-1 py-0.5 text-sm">gmail.readonly</code>{" "}
-                  scope) plus your Google account email address — never send, delete, or modify permissions.
+                  scope) plus your Google account email address. Never send, delete, or modify permissions.
                   You can disconnect a Gmail connection at any time from the import screen.
                 </li>
                 <li>
                   <strong className="text-foreground">Plaid / TrueLayer:</strong> we request read-only access
                   to account and transaction information for the institution you link. There is currently no
-                  self-service &quot;disconnect&quot; button for a bank connection in the app — contact us
+                  self-service &quot;disconnect&quot; button for a bank connection in the app. Contact us
                   (below) and we&apos;ll remove it and revoke the underlying token.
                 </li>
                 <li>
                   Access and refresh tokens for every connected provider are encrypted at rest (AES-256-GCM)
-                  before storage — they are never stored or logged in plain text.
+                  before storage. They are never stored or logged in plain text.
                 </li>
               </ul>
             </section>
@@ -291,7 +291,7 @@ export default function PrivacyPolicyPage() {
                 You can permanently delete your account yourself at any time from Settings → Danger zone
                 → Delete account, after confirming your password. This immediately and permanently deletes
                 your account, subscriptions, imports, insights, connected bank/email accounts (revoking
-                those connections at the provider first), and every active session — it can&apos;t be
+                those connections at the provider first), and every active session. It can&apos;t be
                 undone. If you&apos;re unable to sign in to do this yourself, email us (below) from your
                 account&apos;s email address and we will action the request manually; we aim to respond
                 within 30 days.
@@ -303,8 +303,8 @@ export default function PrivacyPolicyPage() {
               <p className="mt-2 text-muted-foreground">Regardless of where you live, you can ask us to:</p>
               <ul className="mt-3 list-disc space-y-1.5 pl-5 text-muted-foreground">
                 <li><strong className="text-foreground">Access</strong> a copy of the personal data we hold about you.</li>
-                <li><strong className="text-foreground">Correct</strong> inaccurate data — or edit it yourself in the app for subscription data and your account name.</li>
-                <li><strong className="text-foreground">Delete</strong> your account and associated data — see
+                <li><strong className="text-foreground">Correct</strong> inaccurate data, or edit it yourself in the app for subscription data and your account name.</li>
+                <li><strong className="text-foreground">Delete</strong> your account and associated data. See
                   &quot;Account deletion&quot; above for the self-service option.</li>
                 <li><strong className="text-foreground">Export</strong> your data in a portable format.</li>
                 <li><strong className="text-foreground">Object to or restrict</strong> certain processing.</li>
@@ -324,7 +324,7 @@ export default function PrivacyPolicyPage() {
                   action (choosing to use that specific feature) as the basis for that processing. Anthropic,
                   Stripe, Plaid, TrueLayer, and Google may process data outside the EEA/UK. We have not yet
                   finalized the specific transfer safeguard relied on for each provider, or identified a lead
-                  supervisory authority — this section will be updated once that work is complete. You may
+                  supervisory authority; this section will be updated once that work is complete. You may
                   lodge a complaint with your local data protection authority at any time.
                 </p>
               </div>

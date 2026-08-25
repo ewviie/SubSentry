@@ -7,9 +7,9 @@ import { fadeInUp, revealViewport, staggerContainer } from "@/lib/motion";
 
 // Replaces the old icon-card grid: an icon and a sentence don't prove a
 // product exists or works. A real screenshot does. This is an actual
-// dashboard render — a real test account with real subscriptions entered,
+// dashboard render: a real test account with real subscriptions entered,
 // screenshotted directly from the running app (see the commit that added
-// this file for exactly how) — not a mockup, not a Figma comp. Every
+// this file for exactly how), not a mockup, not a Figma comp. Every
 // number in it (the $146.97, the 83/100 health score, the insight text)
 // is the app's own deterministic engine computing real input, the same
 // "never fabricate a number" rule the product itself follows applied to
@@ -80,7 +80,7 @@ export function FeaturesSection() {
         >
           {POINTS.map((point) => (
             <motion.div key={point.title} variants={fadeInUp}>
-              {/* Was a <p> — visually a sub-point already, but semantically
+              {/* Was a <p>: visually a sub-point already, but semantically
                   invisible as a heading, leaving this H2's section with no
                   H3s under it at all. Tailwind Preflight zeroes default
                   heading margins, so this is a pure semantics fix: pixel-

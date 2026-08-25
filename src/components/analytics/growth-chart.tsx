@@ -9,7 +9,7 @@ const CHART_HEIGHT = 40; // viewBox units
 const TOP_PADDING = 4;
 const BOTTOM_PADDING = 2;
 
-// A single-series line/area chart — one hue (emerald, this app's established
+// A single-series line/area chart. One hue (emerald, this app's established
 // "spend" accent, see the dashboard's Monthly spend stat card and
 // SavingsCard), no legend needed per the dataviz single-series rule. Percent
 // coordinate space (viewBox="0 0 100 40") lets hover hit-targets be plain
@@ -104,7 +104,7 @@ export function GrowthChart({ points, currency }: { points: GrowthPoint[]; curre
         <span>{points[0].monthLabel}</span>
         <span>{points[points.length - 1].monthLabel}</span>
       </div>
-      {/* Screen-reader-only data table — the chart above is a visual summary
+      {/* Screen-reader-only data table. The chart above is a visual summary
           of the same values, not the only way to access them. */}
       <table className="sr-only">
         <caption>Cumulative monthly spend by month added</caption>

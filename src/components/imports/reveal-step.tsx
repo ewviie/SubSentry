@@ -13,14 +13,14 @@ import { cn } from "@/lib/utils";
 import type { DetectedSubscription } from "@/lib/imports/types";
 
 // The actual sequence this earns: data arrived → SubSentry looked through
-// it → specific things were found (named, one at a time — not a total
+// it → specific things were found (named, one at a time, not a total
 // dropped on screen) → what they cost monthly → what that really is once
 // annualized (the same CountUp instance re-targeted, not two separate
-// numbers — the counter continuing from where it left off IS the "this
+// numbers: the counter continuing from where it left off IS the "this
 // monthly amount becomes this yearly amount" statement). No new chrome:
 // same card, same typography scale, same tokens as the rest of the wizard.
 // Ghost-pill → resolved-pill is the same "unresolved becomes real" move
-// hero-section.tsx's GhostCharges already uses on the marketing page —
+// hero-section.tsx's GhostCharges already uses on the marketing page,
 // reused on purpose, so it reads as a SubSentry technique, not a one-off.
 type Phase = "searching" | "discovering" | "monthly" | "yearly";
 
@@ -29,7 +29,7 @@ const SEARCH_MS = 650;
 const POST_DISCOVERY_PAUSE_MS = 450;
 const MONTHLY_HOLD_MS = 900;
 const SPRING: Transition = springSmooth;
-// Same cap AllSubscriptionsList already uses for its dashboard preview —
+// Same cap AllSubscriptionsList already uses for its dashboard preview,
 // reusing that number rather than picking a new one. Past it, individually
 // staggering every merchant would make the sequence drag for exactly the
 // power users who imported the most (the opposite of who should wait
@@ -73,7 +73,7 @@ export function RevealStep({
   // prefersReducedMotion directly: framer-motion's hook can resolve *after*
   // first mount (it reads the media query in an effect internally), so a
   // useState initializer reading it would sometimes capture a stale
-  // "false" and lock in the wrong starting phase for good — this bit
+  // "false" and lock in the wrong starting phase for good. This bit
   // GhostCharges' simpler (render-time-only) reduced-motion check wouldn't
   // have caught, since this component's state persists across renders in a
   // way that one didn't need to. Reduced motion is instead an effect
@@ -84,8 +84,8 @@ export function RevealStep({
 
   useEffect(() => {
     if (prefersReducedMotion) {
-      // Deferred a tick rather than called synchronously in the effect body
-      // — react-hooks/set-state-in-effect flags direct setState calls here,
+      // Deferred a tick rather than called synchronously in the effect body:
+      // react-hooks/set-state-in-effect flags direct setState calls here,
       // same fix import-center-page.tsx's own redirect-handling effect
       // already uses for the same reason.
       queueMicrotask(() => {
@@ -103,7 +103,7 @@ export function RevealStep({
     visibleMerchants.forEach((_, i) => {
       // The last visible tick jumps straight to the true total (folding in
       // any merchants beyond MAX_INDIVIDUAL_REVEALS at once) rather than
-      // stopping at visibleMerchants.length — nothing found is left
+      // stopping at visibleMerchants.length. Nothing found is left
       // uncounted, it's just not each individually staggered.
       const isLastVisible = i === visibleMerchants.length - 1;
       schedule(() => setRevealedCount(isLastVisible ? merchants.length : i + 1), t + i * MERCHANT_STAGGER_MS);
@@ -118,7 +118,7 @@ export function RevealStep({
       timers.current = [];
     };
     // merchants is stable for the life of this screen (one analyze result,
-    // never refetched in place) — only prefersReducedMotion resolving is a
+    // never refetched in place); only prefersReducedMotion resolving is a
     // real reason to re-run this.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefersReducedMotion]);
@@ -126,7 +126,7 @@ export function RevealStep({
   const showTotal = phase === "monthly" || phase === "yearly";
   const isYearly = phase === "yearly";
   // Explicit zero-duration override, not just trusting the root
-  // MotionConfig(reducedMotion="user") to cover every animated property —
+  // MotionConfig(reducedMotion="user") to cover every animated property:
   // CountUp in this same codebase already doesn't rely on that alone (it
   // checks useReducedMotion() itself), and the one property that mattered
   // here (a fade-in's opacity) isn't a transform, which is what

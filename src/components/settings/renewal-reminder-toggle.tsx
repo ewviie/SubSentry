@@ -8,11 +8,11 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 
 // Saves immediately on toggle (no separate edit/save/cancel state, unlike
-// EditNameForm) — a checkbox's own checked state already IS the save
+// EditNameForm): a checkbox's own checked state already IS the save
 // intent, there's nothing a confirm step would add here. Same "at least
 // one legitimate control to turn this off" this preference exists for in
 // the first place is also reachable from here, not only from the email's
-// unsubscribe link — see renewal-reminders.ts's own comment on why the
+// unsubscribe link. See renewal-reminders.ts's own comment on why the
 // default is `true`.
 export function RenewalReminderToggle({ initialEnabled }: { initialEnabled: boolean }) {
   const router = useRouter();
@@ -21,7 +21,7 @@ export function RenewalReminderToggle({ initialEnabled }: { initialEnabled: bool
 
   async function handleChange(next: boolean) {
     const previous = checked;
-    setChecked(next); // optimistic — reverted below on failure
+    setChecked(next); // optimistic, reverted below on failure
     setSaving(true);
     try {
       const res = await fetch("/api/me", {

@@ -6,11 +6,11 @@ import { useTheme } from "next-themes";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { useNonce } from "@/components/security/nonce-context";
 
-// Cloudflare Turnstile — see src/lib/security/captcha.ts for why this
+// Cloudflare Turnstile. See src/lib/security/captcha.ts for why this
 // provider was chosen over hCaptcha/reCAPTCHA. Rendered explicitly (not
 // via the implicit data-sitekey auto-render) so this component has a real
 // handle on the widget: resetting it after every submit attempt (tokens
-// are single-use — a retry after a *different* failure, like "email
+// are single-use, a retry after a *different* failure, like "email
 // already taken", would otherwise carry an already-spent token) and
 // surfacing load/error states instead of a silent blank box.
 const SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js";
@@ -36,7 +36,7 @@ declare global {
 }
 
 export interface TurnstileWidgetHandle {
-  // Called after every submit attempt (success or failure) — see the
+  // Called after every submit attempt (success or failure). See the
   // file-header comment on why a fresh token is needed before any retry.
   reset: () => void;
 }
@@ -47,7 +47,7 @@ interface TurnstileWidgetProps {
   onExpire?: () => void;
 }
 
-// Returns null (renders nothing) when CAPTCHA isn't configured — the same
+// Returns null (renders nothing) when CAPTCHA isn't configured, the same
 // "absent env, feature quietly absent" convention as every other optional
 // integration in this app. The signup/login pages don't need their own
 // isCaptchaConfigured() check because of this; they just always render
@@ -79,7 +79,7 @@ export const TurnstileWidget = forwardRef<TurnstileWidgetHandle, TurnstileWidget
         sitekey: siteKey,
         action,
         // "auto" would ask the OS, independent of the app's own
-        // light/dark toggle (next-themes) — explicit resolvedTheme keeps
+        // light/dark toggle (next-themes). Explicit resolvedTheme keeps
         // the widget visually consistent with whatever the user actually
         // has the app set to, including a manual override away from
         // system preference.
@@ -98,7 +98,7 @@ export const TurnstileWidget = forwardRef<TurnstileWidgetHandle, TurnstileWidget
     if (!siteKey) return;
     // The script may already be loaded and window.turnstile already
     // available (e.g. React StrictMode's double-invoke in dev, or this
-    // component remounting) — render immediately rather than waiting on
+    // component remounting). Render immediately rather than waiting on
     // next/script's onLoad, which only fires once per actual script load.
     if (window.turnstile) {
       renderWidget();

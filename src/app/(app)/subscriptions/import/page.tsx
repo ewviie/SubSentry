@@ -9,14 +9,14 @@ import { requireUser } from "@/lib/auth/session";
 
 // requireUser() (not just the (app) layout's own gate) because this page
 // now needs session.user.id itself, to look up an existing Gmail
-// connection — every other page under this route group already follows
+// connection. Every other page under this route group already follows
 // this same pattern (see dashboard/page.tsx).
 export default async function ImportPage() {
   const user = await requireUser();
 
   // Computed here, server-side, since only the server can read
   // PLAID_CLIENT_ID/PLAID_SECRET, TRUELAYER_CLIENT_ID/TRUELAYER_CLIENT_SECRET,
-  // and GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET — the client component below
+  // and GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET. The client component below
   // only ever sees the resulting booleans (and, for Gmail, the already-
   // connected account's email/last-synced-at, never a token).
   const plaidEnabled = isPlaidConfigured();
@@ -42,7 +42,7 @@ export default async function ImportPage() {
       </div>
       {/* ImportCenterPage reads useSearchParams() to pick up TrueLayer's
           OAuth redirect landing (see connect-bank-step.tsx / the callback
-          route) — Suspense boundary matches the same requirement
+          route). Suspense boundary matches the same requirement
           CheckoutActivator already satisfies in the (app) layout. */}
       <Suspense fallback={null}>
         <ImportCenterPage
