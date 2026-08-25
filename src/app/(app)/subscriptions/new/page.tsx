@@ -37,7 +37,7 @@ export default function NewSubscriptionPage() {
       </Link>
       <Card>
         <CardHeader>
-          <CardTitle className="font-heading text-2xl">Add a subscription</CardTitle>
+          <CardTitle as="h1" className="font-heading text-2xl">Add a subscription</CardTitle>
           <CardDescription>
             Enter the details manually, or use the quick-add bar on your dashboard.
           </CardDescription>
