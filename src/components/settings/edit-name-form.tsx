@@ -55,10 +55,15 @@ export function EditNameForm({ initialName }: { initialName: string }) {
 
   if (!editing) {
     return (
-      <div className="flex items-center justify-between">
-        <span className="text-muted-foreground">Name</span>
-        <div className="flex items-center gap-1.5">
-          <span>{initialName || "—"}</span>
+      // min-w-0 + truncate: same "a user-entered string has no natural
+      // break point" fix as the Email row right below this one — a name
+      // can run up to 120 characters (see the input's maxLength further
+      // down), and nothing here previously stopped a long one from
+      // pushing this row past a phone-width screen.
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <span className="shrink-0 text-muted-foreground">Name</span>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate" title={initialName || undefined}>{initialName || "Not set"}</span>
           <Tooltip>
             <TooltipTrigger
               render={

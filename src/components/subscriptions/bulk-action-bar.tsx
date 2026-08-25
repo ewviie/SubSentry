@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Archive, ChevronDown, Loader2, Trash2, X } from "lucide-react";
+import { ChevronDown, Loader2, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -56,25 +56,24 @@ export function BulkActionBar({
           transition={springSmooth}
           className="fixed inset-x-0 bottom-[calc(--spacing(4)+env(safe-area-inset-bottom))] z-40 flex justify-center px-4"
         >
-          <div className="flex items-center gap-2 rounded-full border border-border bg-popover px-3 py-2 shadow-elevation-high ring-1 ring-foreground/10">
-            <span className="px-2 text-sm font-medium tabular-nums">
+          {/* overflow-x-auto + max-w-full: this pill's own safety valve if
+              it ever doesn't fit a narrow phone screen, rather than
+              silently forcing the whole page wider or wrapping a
+              rounded-full pill into a broken two-line shape. Also dropped
+              the standalone "Archive" button that used to sit here: it was
+              a plain shortcut for onChangeStatus("paused"), which "Change
+              status" already offers as one of its own options — the same
+              action reachable two ways on a bar that's supposed to be the
+              compact, fast path. */}
+          <div className="flex max-w-full items-center gap-2 overflow-x-auto rounded-full border border-border bg-popover px-3 py-2 shadow-elevation-high ring-1 ring-foreground/10">
+            <span className="shrink-0 px-2 text-sm font-medium tabular-nums">
               {selectedCount} selected
             </span>
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => onChangeStatus("paused")}
-              disabled={busy}
-            >
-              <Archive className="size-3.5" aria-hidden="true" />
-              Archive
-            </Button>
 
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={
-                  <Button variant="outline" size="sm" disabled={busy}>
+                  <Button variant="outline" size="sm" className="shrink-0" disabled={busy}>
                     Change status
                     <ChevronDown className="size-3.5" aria-hidden="true" />
                   </Button>
@@ -92,7 +91,7 @@ export function BulkActionBar({
             <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
               <AlertDialogTrigger
                 render={
-                  <Button variant="destructive" size="sm" disabled={busy}>
+                  <Button variant="destructive" size="sm" className="shrink-0" disabled={busy}>
                     <Trash2 className="size-3.5" aria-hidden="true" />
                     Delete
                   </Button>
@@ -127,7 +126,7 @@ export function BulkActionBar({
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <Button variant="ghost" size="icon-sm" onClick={onClear} aria-label="Clear selection" disabled={busy}>
+                  <Button variant="ghost" size="icon-sm" className="shrink-0" onClick={onClear} aria-label="Clear selection" disabled={busy}>
                     <X className="size-4" />
                   </Button>
                 }

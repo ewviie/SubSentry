@@ -13,18 +13,20 @@ import { fadeInUp, liftOnHover, springSnappy } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import type { Subscription } from "@/lib/db/schema";
 
-// Exported for dashboard/renewals-list.tsx — the dashboard's own upcoming-
-// renewals list used to show only a raw ISO date with no urgency signal;
-// this is the exact tiering logic already established and tested here
-// (overdue/≤3 days/≤7 days), reused rather than re-derived a second time
-// with its own thresholds that could quietly drift from this one.
-export function RenewalBadge({ subscription }: { subscription: Subscription }) {
+// Local to this file now: the dashboard's own upcoming-renewals list used
+// to be a separate component (dashboard/renewals-list.tsx) that imported
+// this for the same overdue/≤3 days/≤7 days urgency tiering, reused rather
+// than re-derived with its own thresholds that could quietly drift from
+// this one. That component was retired in favor of reusing SubscriptionRow
+// itself (see all-subscriptions-list.tsx), which already renders this
+// badge internally, so nothing outside this file needs it directly anymore.
+function RenewalBadge({ subscription }: { subscription: Subscription }) {
   const days = daysUntilRenewal(subscription);
   if (subscription.status !== "active") {
     return <span className="text-sm text-muted-foreground">{subscription.nextRenewalDate}</span>;
   }
   // Renewal urgency is the one honest "trend" signal we actually have data
-  // for — we don't store price history, so this deliberately isn't a
+  // for: we don't store price history, so this deliberately isn't a
   // fabricated price-trend arrow.
   if (days < 0) {
     return (
@@ -56,7 +58,7 @@ export function SubscriptionRow({
 }: {
   subscription: Subscription;
   selected?: boolean;
-  // Optional — omit entirely for a read-only context (the dashboard's "All
+  // Optional: omit entirely for a read-only context (the dashboard's "All
   // subscriptions" preview) to drop the checkbox rather than wiring a
   // no-op handler. SubscriptionsExplorer (bulk actions) still passes both.
   onToggleSelected?: (id: string) => void;
@@ -130,7 +132,7 @@ export function SubscriptionRow({
         </div>
       </div>
 
-      {/* Mobile-only badge row — the desktop version lives inline with the
+      {/* Mobile-only badge row: the desktop version lives inline with the
           name above instead, since there's horizontal room for it there. */}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 sm:hidden">
         <Badge variant="secondary" className={cn("relative z-10", CATEGORY_BADGE_CLASSES[subscription.category])}>

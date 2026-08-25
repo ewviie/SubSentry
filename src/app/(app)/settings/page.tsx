@@ -17,7 +17,8 @@ import { RenewalReminderToggle } from "@/components/settings/renewal-reminder-to
 import { ManageBillingButton } from "@/components/billing/manage-billing-button";
 import { ConnectedAccountRow } from "@/components/settings/connected-account-row";
 import { DeleteAccountCard } from "@/components/settings/delete-account-card";
-import { FadeInSection } from "@/components/dashboard/fade-in-section";
+import { MotionCard } from "@/components/dashboard/motion-card";
+import { StaggerSection } from "@/components/dashboard/stagger-section";
 
 const PRO_BENEFITS = [
   "Unlimited active subscriptions",
@@ -34,7 +35,7 @@ export default async function SettingsPage() {
   const portalConfigured = isBillingPortalConfigured();
   const beta = isBetaAllAccess();
 
-  // Self-service disconnect surface for every live-API import connection —
+  // Self-service disconnect surface for every live-API import connection.
   // see api/imports/{gmail,plaid,truelayer}/disconnect. Fetched here
   // (Server Component) rather than client-side so a disconnect's
   // router.refresh() (see ConnectedAccountRow) re-derives this from the
@@ -55,7 +56,7 @@ export default async function SettingsPage() {
             {initials(user.name, user.email)}
           </AvatarFallback>
         </Avatar>
-        {/* min-w-0 + break-words — same fix and reasoning as
+        {/* min-w-0 + break-words: same fix and reasoning as
             dashboard/page.tsx's identical header row: a flex item's
             automatic minimum width defaults to its content's min-content
             size, and a name-less account's email (no natural break
@@ -70,148 +71,161 @@ export default async function SettingsPage() {
         </div>
       </div>
 
-      <FadeInSection className="mt-6 space-y-6">
-        <Card className="shadow-elevation-low">
-          <CardHeader>
-            <CardTitle>Account</CardTitle>
-            <CardDescription>Your account details.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <EditNameForm initialName={user.name ?? ""} />
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Email</span>
-              <span>{user.email}</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="shadow-elevation-low">
-          <CardHeader>
-            <CardTitle>Notifications</CardTitle>
-            <CardDescription>What SubSentry emails you about.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <RenewalReminderToggle initialEnabled={user.renewalRemindersEnabled} />
-          </CardContent>
-        </Card>
-
-        <Card highlight={isPaid} className={isPaid ? undefined : "shadow-elevation-low"}>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              Plan &amp; billing
-              <Badge className={isPaid ? "bg-emerald text-emerald-foreground" : undefined} variant={isPaid ? undefined : "secondary"}>
-                {beta ? "Beta — full access" : user.plan === "pro" ? "Pro" : "Free"}
-              </Badge>
-            </CardTitle>
-            <CardDescription>
-              {isPaid
-                ? "You have unlimited subscriptions."
-                : `Up to ${FREE_PLAN_SUBSCRIPTION_LIMIT} active subscriptions.`}
-            </CardDescription>
-          </CardHeader>
-          {user.plan === "pro" && portalConfigured && user.stripeCustomerId ? (
-            <CardContent>
-              <ManageBillingButton />
-            </CardContent>
-          ) : null}
-          {!isPaid ? (
-            <CardContent className="space-y-4">
-              <div>
-                <div className="mb-1.5 flex items-baseline justify-between text-sm">
-                  <span className="text-muted-foreground">Active subscriptions</span>
-                  <span className="font-mono tabular-nums">
-                    {activeCount} / {FREE_PLAN_SUBSCRIPTION_LIMIT}
-                  </span>
-                </div>
-                <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full rounded-full bg-emerald"
-                    style={{
-                      width: `${Math.min((activeCount / FREE_PLAN_SUBSCRIPTION_LIMIT) * 100, 100)}%`,
-                    }}
-                  />
-                </div>
-              </div>
-              {upgradeUrl ? (
-                <div className="rounded-lg border border-emerald/20 bg-emerald-muted/40 p-4">
-                  <p className="text-sm font-medium">Upgrade to Pro: £4.99/mo</p>
-                  <ul className="mt-2 space-y-1.5">
-                    {PRO_BENEFITS.map((benefit) => (
-                      <li key={benefit} className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <Check className="size-3.5 shrink-0 text-emerald" aria-hidden="true" />
-                        {benefit}
-                      </li>
-                    ))}
-                  </ul>
-                  <Button className="mt-3" render={<a href={upgradeUrl} />} nativeButton={false}>
-                    Upgrade to Pro
-                  </Button>
-                </div>
-              ) : null}
-            </CardContent>
-          ) : null}
-        </Card>
-
-        <Card className="shadow-elevation-low">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Sparkles className="size-4 text-ai" />
-              AI
-            </CardTitle>
-            <CardDescription>
-              {aiConfigured
-                ? "Quick-add and insight narration are powered by Claude."
-                : "AI features aren't fully enabled yet. Quick-add and insight narration return realistic canned responses in the meantime."}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Badge variant={aiConfigured ? "default" : "secondary"}>
-              {aiConfigured ? "Live" : "Demo mode"}
-            </Badge>
-          </CardContent>
-        </Card>
-
-        {hasConnectedAccounts ? (
+      <StaggerSection className="mt-6 space-y-5" staggerChildren={0.06}>
+        {/* Notifications folded into Account rather than its own full card:
+            a whole card's worth of header/title/description chrome spent
+            on a single toggle read as more "settings page" than the one
+            line of actual content underneath it warranted. Same section,
+            a divider instead of a second card border. */}
+        <MotionCard>
           <Card className="shadow-elevation-low">
             <CardHeader>
-              <CardTitle>Connected accounts</CardTitle>
-              <CardDescription>Bank and email connections used to detect subscriptions automatically.</CardDescription>
+              <CardTitle>Account</CardTitle>
+              <CardDescription>Your account details.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              {emailConnection ? (
-                <ConnectedAccountRow
-                  label="Google (Gmail)"
-                  detail={`Connected as ${emailConnection.emailAddress}`}
-                  disconnectUrl="/api/imports/gmail/disconnect"
-                />
-              ) : null}
-              {plaidConnections.length > 0 ? (
-                <ConnectedAccountRow
-                  label="Plaid"
-                  detail={
-                    plaidConnections.length === 1
-                      ? (plaidConnections[0].institutionName ?? "1 bank connected")
-                      : `${plaidConnections.length} banks connected`
-                  }
-                  disconnectUrl="/api/imports/plaid/disconnect"
-                />
-              ) : null}
-              {truelayerConnections.length > 0 ? (
-                <ConnectedAccountRow
-                  label="TrueLayer"
-                  detail={
-                    truelayerConnections.length === 1
-                      ? (truelayerConnections[0].institutionName ?? "1 bank connected")
-                      : `${truelayerConnections.length} banks connected`
-                  }
-                  disconnectUrl="/api/imports/truelayer/disconnect"
-                />
-              ) : null}
+            <CardContent className="space-y-2 text-sm">
+              <EditNameForm initialName={user.name ?? ""} />
+              {/* min-w-0 on the row + truncate on the value: same fix as
+                  this page's own header (see the h1 above), applied here
+                  too. An email has no natural break point, and this row
+                  had nothing stopping a long one from forcing the whole
+                  row (and the page) wider than a phone screen. */}
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                <span className="shrink-0 text-muted-foreground">Email</span>
+                <span className="truncate" title={user.email}>{user.email}</span>
+              </div>
+            </CardContent>
+            <CardContent className="border-t border-border pt-4">
+              <RenewalReminderToggle initialEnabled={user.renewalRemindersEnabled} />
             </CardContent>
           </Card>
+        </MotionCard>
+
+        <MotionCard>
+          <Card highlight={isPaid} className={isPaid ? undefined : "shadow-elevation-low"}>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                Plan &amp; billing
+                <Badge className={isPaid ? "bg-emerald text-emerald-foreground" : undefined} variant={isPaid ? undefined : "secondary"}>
+                  {beta ? "Beta: full access" : user.plan === "pro" ? "Pro" : "Free"}
+                </Badge>
+              </CardTitle>
+              <CardDescription>
+                {isPaid
+                  ? "You have unlimited subscriptions."
+                  : `Up to ${FREE_PLAN_SUBSCRIPTION_LIMIT} active subscriptions.`}
+              </CardDescription>
+            </CardHeader>
+            {user.plan === "pro" && portalConfigured && user.stripeCustomerId ? (
+              <CardContent>
+                <ManageBillingButton />
+              </CardContent>
+            ) : null}
+            {!isPaid ? (
+              <CardContent className="space-y-4">
+                <div>
+                  <div className="mb-1.5 flex items-baseline justify-between text-sm">
+                    <span className="text-muted-foreground">Active subscriptions</span>
+                    <span className="font-mono tabular-nums">
+                      {activeCount} / {FREE_PLAN_SUBSCRIPTION_LIMIT}
+                    </span>
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full bg-emerald"
+                      style={{
+                        width: `${Math.min((activeCount / FREE_PLAN_SUBSCRIPTION_LIMIT) * 100, 100)}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+                {upgradeUrl ? (
+                  <div className="rounded-lg border border-emerald/20 bg-emerald-muted/40 p-4">
+                    <p className="text-sm font-medium">Upgrade to Pro: £4.99/mo</p>
+                    <ul className="mt-2 space-y-1.5">
+                      {PRO_BENEFITS.map((benefit) => (
+                        <li key={benefit} className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <Check className="size-3.5 shrink-0 text-emerald" aria-hidden="true" />
+                          {benefit}
+                        </li>
+                      ))}
+                    </ul>
+                    <Button className="mt-3" render={<a href={upgradeUrl} />} nativeButton={false}>
+                      Upgrade to Pro
+                    </Button>
+                  </div>
+                ) : null}
+              </CardContent>
+            ) : null}
+          </Card>
+        </MotionCard>
+
+        <MotionCard>
+          <Card className="shadow-elevation-low">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Sparkles className="size-4 text-ai" />
+                AI
+              </CardTitle>
+              <CardDescription>
+                {aiConfigured
+                  ? "Quick-add and insight narration are powered by Claude."
+                  : "AI features aren't fully enabled yet. Quick-add and insight narration return realistic canned responses in the meantime."}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Badge variant={aiConfigured ? "default" : "secondary"}>
+                {aiConfigured ? "Live" : "Demo mode"}
+              </Badge>
+            </CardContent>
+          </Card>
+        </MotionCard>
+
+        {hasConnectedAccounts ? (
+          <MotionCard>
+            <Card className="shadow-elevation-low">
+              <CardHeader>
+                <CardTitle>Connected accounts</CardTitle>
+                <CardDescription>Bank and email connections used to detect subscriptions automatically.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {emailConnection ? (
+                  <ConnectedAccountRow
+                    label="Google (Gmail)"
+                    detail={`Connected as ${emailConnection.emailAddress}`}
+                    disconnectUrl="/api/imports/gmail/disconnect"
+                  />
+                ) : null}
+                {plaidConnections.length > 0 ? (
+                  <ConnectedAccountRow
+                    label="Plaid"
+                    detail={
+                      plaidConnections.length === 1
+                        ? (plaidConnections[0].institutionName ?? "1 bank connected")
+                        : `${plaidConnections.length} banks connected`
+                    }
+                    disconnectUrl="/api/imports/plaid/disconnect"
+                  />
+                ) : null}
+                {truelayerConnections.length > 0 ? (
+                  <ConnectedAccountRow
+                    label="TrueLayer"
+                    detail={
+                      truelayerConnections.length === 1
+                        ? (truelayerConnections[0].institutionName ?? "1 bank connected")
+                        : `${truelayerConnections.length} banks connected`
+                    }
+                    disconnectUrl="/api/imports/truelayer/disconnect"
+                  />
+                ) : null}
+              </CardContent>
+            </Card>
+          </MotionCard>
         ) : null}
 
-        <DeleteAccountCard />
+        <MotionCard>
+          <DeleteAccountCard />
+        </MotionCard>
 
         <div className="flex items-center justify-between">
           <Link href="/dashboard" className="text-sm text-muted-foreground underline underline-offset-4">
@@ -224,7 +238,7 @@ export default async function SettingsPage() {
           <Link href="/privacy" className="hover:text-foreground hover:underline">Privacy Policy</Link>
           <Link href="/terms" className="hover:text-foreground hover:underline">Terms of Service</Link>
         </nav>
-      </FadeInSection>
+      </StaggerSection>
     </div>
   );
 }
