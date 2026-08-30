@@ -6,40 +6,48 @@ import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { FREE_PLAN_SUBSCRIPTION_LIMIT } from "@/lib/billing/plan";
+import { FREE_PLAN_SUBSCRIPTION_LIMIT, isBetaAllAccess } from "@/lib/billing/plan";
+import { PRO_MONTHLY_PRICE, PRO_FEATURES } from "@/lib/billing/pro-features";
 import { fadeInUp, liftOnHover, revealViewport, springSnappy, staggerContainer } from "@/lib/motion";
 
+// The one, permanent pricing component — not a beta-only stand-in. Both
+// tiers render unconditionally, always side by side: there is never a state
+// where a visitor sees only one card. isBetaAllAccess() only ever changes
+// the Pro card's price framing and CTA copy below, never which cards exist
+// or what either one lists. When the beta ends, this same component reverts
+// to plain paid messaging with no structural change required anywhere else.
 const TIERS = [
   {
-    name: "Free",
-    price: "Free",
-    cadence: "",
-    description: `Track up to ${FREE_PLAN_SUBSCRIPTION_LIMIT} active subscriptions.`,
+    name: "SubSentry Free",
+    price: "£0",
+    cadence: "/month",
+    description: "Everything you need to see what you're actually paying for.",
     features: [
       `Up to ${FREE_PLAN_SUBSCRIPTION_LIMIT} active subscriptions`,
-      "AI quick-add (demo or live)",
-      "Deterministic spend insights",
-      "Dashboard + category breakdown",
+      "AI quick-add — 5/day",
+      "Spend insights and category breakdown",
+      "Dashboard with monthly and annual costs",
+      "Every confirmed duplicate",
     ],
     cta: "Start free",
     popular: false,
   },
   {
-    name: "Pro",
-    price: "£4.99",
-    cadence: "/mo",
-    description: "Unlimited subscriptions, same clarity.",
-    features: [
-      "Unlimited active subscriptions",
-      "Everything in Free",
-      "Priority support",
-    ],
+    name: "SubSentry Pro",
+    price: PRO_MONTHLY_PRICE,
+    cadence: "/month",
+    description: "Everything. One subscription.",
+    // PRO_FEATURES (lib/billing/pro-features.ts) is the same shared list
+    // Settings and this list both read from — no separate copy to drift.
+    features: PRO_FEATURES,
     cta: "Upgrade to Pro",
     popular: true,
   },
 ];
 
 export function PricingSection() {
+  const beta = isBetaAllAccess();
+
   return (
     <section id="pricing" className="mx-auto max-w-6xl px-4 py-20 sm:px-6 sm:py-24">
       <motion.div
@@ -49,10 +57,8 @@ export function PricingSection() {
         viewport={revealViewport}
         className="mx-auto max-w-2xl text-center"
       >
-        <h2 className="text-h2 font-semibold">Simple, honest pricing</h2>
-        <p className="mt-3 text-lg text-muted-foreground">
-          Start free. Upgrade only if you actually need it.
-        </p>
+        <h2 className="text-h2 font-semibold">Choose your level of control.</h2>
+        <p className="mt-3 text-lg text-muted-foreground">Start free. Upgrade when you need more.</p>
       </motion.div>
 
       <motion.div
@@ -78,14 +84,14 @@ export function PricingSection() {
                 card's own overflow-hidden corner mask at any zoom level. */}
             <div className="mb-3 flex h-5 items-center justify-center">
               {tier.popular ? (
-                <Badge className="bg-emerald text-emerald-foreground">Most popular</Badge>
+                <Badge className="bg-emerald text-emerald-foreground uppercase tracking-wide">Most popular</Badge>
               ) : null}
             </div>
             <Card
               className={
                 tier.popular
-                  ? "border-emerald/40 shadow-elevation-glow ring-1 ring-emerald/30 transition-shadow duration-200"
-                  : "shadow-elevation-low transition-shadow duration-200 hover:shadow-elevation-medium"
+                  ? "flex grow flex-col border-emerald/40 shadow-elevation-glow ring-1 ring-emerald/30 transition-shadow duration-200"
+                  : "flex grow flex-col shadow-elevation-low transition-shadow duration-200 hover:shadow-elevation-medium"
               }
             >
               <CardHeader>
@@ -93,12 +99,10 @@ export function PricingSection() {
                 <p className="text-sm text-muted-foreground">{tier.description}</p>
                 <p className="mt-2">
                   <span className="font-mono text-3xl font-semibold tabular-nums">{tier.price}</span>
-                  {tier.cadence ? (
-                    <span className="text-sm text-muted-foreground">{tier.cadence}</span>
-                  ) : null}
+                  <span className="text-sm text-muted-foreground">{tier.cadence}</span>
                 </p>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="flex grow flex-col space-y-4">
                 <ul className="space-y-2 text-sm">
                   {tier.features.map((feature) => (
                     <li key={feature} className="flex items-start gap-2">
@@ -107,14 +111,42 @@ export function PricingSection() {
                     </li>
                   ))}
                 </ul>
-                <Button
-                  className="w-full"
-                  variant={tier.popular ? "default" : "outline"}
-                  render={<Link href="/signup" />}
-                  nativeButton={false}
-                >
-                  {tier.cta}
-                </Button>
+
+                {/* Grows to push the CTA block to the same baseline in both
+                    cards regardless of feature-list length. */}
+                <div className="grow" />
+
+                {/* Beta pricing psychology, Pro card only: the real price
+                    stays visible and honest (£4.99/month, never hidden or
+                    replaced), with "free during beta" as the qualifier
+                    underneath it — the same hierarchy a premium SaaS uses
+                    for an introductory offer, not a discount, countdown, or
+                    scarcity claim. No card is ever taken because none is
+                    ever required during the beta. Once isBetaAllAccess()
+                    goes false, this whole block disappears and the tier's
+                    plain `cta` below takes over with zero other changes. */}
+                {tier.popular && beta ? (
+                  <div className="space-y-1 border-t border-border pt-4">
+                    <p className="text-sm font-medium text-emerald">Free during beta</p>
+                    <p className="text-xs text-muted-foreground">
+                      £0 today · {tier.price}
+                      {tier.cadence} after beta
+                    </p>
+                    <p className="text-xs text-muted-foreground">No card required.</p>
+                    <Button className="mt-3 w-full" render={<Link href="/signup" />} nativeButton={false}>
+                      Get Pro — Free During Beta
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    className="w-full"
+                    variant={tier.popular ? "default" : "outline"}
+                    render={<Link href="/signup" />}
+                    nativeButton={false}
+                  >
+                    {tier.cta}
+                  </Button>
+                )}
               </CardContent>
             </Card>
           </motion.div>

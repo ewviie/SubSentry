@@ -132,10 +132,10 @@ export default async function SubscriptionTrackerPage() {
 
           <div className="mx-auto mt-14 max-w-4xl overflow-hidden rounded-xl border border-border/60 shadow-elevation-medium">
             <Image
-              src="/dashboard-screenshot.jpg"
-              alt="SubSentry dashboard showing monthly spend of $146.97 across 6 active subscriptions, an 83/100 subscription health score, and real cost-saving insights"
-              width={1456}
-              height={821}
+              src="/dashboard-screenshot-v2.jpg"
+              alt="SubSentry dashboard showing monthly spend of £107.96 across 4 active subscriptions, an 84/100 subscription health score, and the biggest cost-saving opportunity"
+              width={1512}
+              height={794}
               className="w-full"
               sizes="(min-width: 1024px) 60vw, 100vw"
             />

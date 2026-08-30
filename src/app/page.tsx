@@ -12,7 +12,6 @@ import { FaqSection } from "@/components/landing/faq-section";
 import { FAQS } from "@/components/landing/faq-data";
 import { FinalCtaSection } from "@/components/landing/final-cta-section";
 import { LandingFooter } from "@/components/landing/landing-footer";
-import { isBetaAllAccess } from "@/lib/billing/plan";
 import { absoluteUrl } from "@/lib/seo";
 
 // Previously unset: this page inherited the root layout's bare
@@ -74,17 +73,12 @@ export default async function Home() {
   const session = await getSession();
   if (session) redirect("/dashboard");
 
-  // Pricing stays fully built (see pricing-section.tsx), just not rendered
-  // during the free beta. Flip isBetaAllAccess() off in lib/billing/plan.ts
-  // and this section reappears with no other change needed.
-  const showPricing = !isBetaAllAccess();
-
   // Deliberately minimal: name/description/category only. No
   // aggregateRating, no review count, no offers/price block: this app has
-  // no real reviews to cite and pricing is hidden during the beta (see
-  // showPricing above), so none of those fields have real data to back
-  // them. Fabricating any of that to make the rich-result snippet look
-  // more complete would violate this app's own "never fabricate a number"
+  // no real reviews to cite, and Pro's price is currently waived for the
+  // beta (see pricing-section.tsx), so neither field has real data to back
+  // it. Fabricating either to make the rich-result snippet look more
+  // complete would violate this app's own "never fabricate a number"
   // principle applied to itself.
   // Same NEXT_PUBLIC_APP_URL gate as metadataBase/sitemap.ts/robots.ts. An
   // absolute `url` field pointing at localhost would be worse than omitting
@@ -126,9 +120,9 @@ export default async function Home() {
       <main id="main-content">
         <HeroSection />
         <TrustSection />
+        <PricingSection />
         <FeaturesSection />
         <HowItWorksSection />
-        {showPricing ? <PricingSection /> : null}
         <FaqSection />
         <FinalCtaSection />
       </main>

@@ -8,12 +8,21 @@ import { fadeInUp, revealViewport, staggerContainer } from "@/lib/motion";
 // Replaces the old icon-card grid: an icon and a sentence don't prove a
 // product exists or works. A real screenshot does. This is an actual
 // dashboard render: a real test account with real subscriptions entered,
-// screenshotted directly from the running app (see the commit that added
-// this file for exactly how), not a mockup, not a Figma comp. Every
-// number in it (the $146.97, the 83/100 health score, the insight text)
-// is the app's own deterministic engine computing real input, the same
-// "never fabricate a number" rule the product itself follows applied to
-// its own marketing.
+// screenshotted directly from the running app, not a mockup, not a Figma
+// comp. Every number in it (the £107.96, the 84/100 health score, the
+// "biggest opportunity" callout) is the app's own deterministic engine
+// computing real input, the same "never fabricate a number" rule the
+// product itself follows applied to its own marketing.
+//
+// Filename is versioned (-v2, not a bare "dashboard-screenshot.jpg") on
+// purpose: a same-path overwrite of a public asset with a long-lived,
+// query-free URL left a real browser serving stale cached bytes for this
+// exact image indefinitely (confirmed via a byte-identical curl vs. a
+// stale rendered <img>, surviving a full dev-server restart and a
+// deleted Next image-optimizer cache — a genuine HTTP-cache trap, not a
+// one-off). Bump the suffix (-v3, -v4, ...) every time this image is
+// replaced instead of overwriting the same filename, and update it here
+// and in subscription-tracker/page.tsx together.
 const POINTS = [
   {
     title: "Add subscriptions by typing them",
@@ -22,7 +31,11 @@ const POINTS = [
   },
   {
     title: "Catch duplicates and overlap",
-    description: "Two streaming services covering the same shows? SubSentry flags it before the next renewal.",
+    description: "Two streaming services covering the same shows? SubSentry flags it as a savings opportunity, with the real dollar amount, before the next renewal.",
+  },
+  {
+    title: "A Health Score built from 5 real factors",
+    description: "Spending, overlap, growth, upcoming renewals, and how well you're tracking things. One number, never a guess.",
   },
   {
     title: "See spend by category",
@@ -61,10 +74,10 @@ export function FeaturesSection() {
         >
           <div className="overflow-hidden rounded-xl border border-border/60 shadow-elevation-medium">
             <Image
-              src="/dashboard-screenshot.jpg"
-              alt="SubSentry dashboard showing monthly spend of $146.97 across 6 active subscriptions, an 83/100 subscription health score, and real cost-saving insights"
-              width={1456}
-              height={821}
+              src="/dashboard-screenshot-v2.jpg"
+              alt="SubSentry dashboard showing monthly spend of £107.96 across 4 active subscriptions, an 84/100 subscription health score, and the biggest cost-saving opportunity"
+              width={1512}
+              height={794}
               className="w-full"
               sizes="(min-width: 1024px) 60vw, 100vw"
             />
