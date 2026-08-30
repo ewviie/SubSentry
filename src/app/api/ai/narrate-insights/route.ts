@@ -19,7 +19,7 @@ export async function POST() {
   // MAX_DUPLICATE_COMPARISON_SUBSCRIPTIONS — is real, non-trivial CPU work,
   // not free. Doesn't consume a slot itself, so it can't double-charge
   // against the real check below.
-  if (!checkNarrateInsightsRateLimit.peek(session.user.id).allowed) {
+  if (!(await checkNarrateInsightsRateLimit.peek(session.user.id, session.user.plan)).allowed) {
     return NextResponse.json(
       { error: "rate_limited", message: "You've hit your AI usage limit for now. Try again in a few hours." },
       { status: 429 },
@@ -39,7 +39,7 @@ export async function POST() {
   // means this request still pays for its own computeInsights call before
   // finding out it's rate-limited, same as before this change — the peek
   // only closes the "already known to be exhausted" case cheaply.
-  const rateLimit = checkNarrateInsightsRateLimit(session.user.id);
+  const rateLimit = await checkNarrateInsightsRateLimit(session.user.id, session.user.plan);
   if (!rateLimit.allowed) {
     return NextResponse.json(
       { error: "rate_limited", message: "You've hit your AI usage limit for now. Try again in a few hours." },

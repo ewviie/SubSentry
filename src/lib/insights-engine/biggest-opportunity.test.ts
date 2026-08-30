@@ -50,6 +50,7 @@ function savingsRec(overrides: Partial<SavingsRecommendation>): SavingsRecommend
     description: "These look like the same service.",
     actionLabel: "Review Netflix Premium",
     monthlySavingsCents: 0,
+    annualSavingsCents: 0,
     impactCents: 0,
     evidenceTier: "confirmed",
     urgencyDays: 10,

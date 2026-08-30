@@ -222,14 +222,27 @@ const riskExpensiveDuplicate: InsightRule = {
   category: "usage",
   premium: true,
   evaluate(ctx: EngineContext) {
-    const total = monthlyTotalCents(ctx.active);
+    // Restricted to active's primary currency, same reasoning as
+    // annualSwitchSavings/riskHighConcentration above: a duplicate pair's
+    // monthlySavingsCents is denominated in one specific currency (the
+    // redundant subscription's own), so comparing it against a `total`
+    // that also includes other currencies' spend would divide by a
+    // fabricated cross-currency denominator — it could suppress a real
+    // finding (an inflated total makes 20% harder to reach) or overstate
+    // one (a deflated total, if the account is mostly non-primary-currency)
+    // (release-review finding #3). findDuplicates itself is also restricted
+    // to primaryActive so a pair straddling two currencies never surfaces
+    // here as if it shared one.
+    const { currency, included: primaryActive } = splitByPrimaryCurrency(ctx.active);
+    if (!currency) return null;
+    const total = monthlyTotalCents(primaryActive);
     if (total === 0) return null;
-    const expensive = findDuplicates(ctx.active).find((p) => p.monthlySavingsCents / total >= 0.2);
+    const expensive = findDuplicates(primaryActive).find((p) => p.monthlySavingsCents / total >= 0.2);
     if (!expensive) return null;
     return riskResult(
       riskExpensiveDuplicate,
       `${expensive.redundant.name} is an expensive, likely-unused subscription`,
-      `Its ${formatCents(expensive.monthlySavingsCents)}/mo alone is over 20% of your total monthly spend.`,
+      `Its ${formatCents(expensive.monthlySavingsCents, currency)}/mo alone is over 20% of your total monthly spend.`,
       "critical",
       [expensive.redundant.id],
     );

@@ -12,6 +12,57 @@ import { logSecurityEvent } from "@/lib/observability/log-security-event";
 const PROTECTED_PREFIXES = ["/dashboard", "/subscriptions", "/settings", "/analytics", "/savings"];
 const STATE_CHANGING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
+// Kill switch: one env var, checked before anything else in this file runs
+// (no DB, no other module) so it still works during exactly the kind of
+// incident that would make a normal page 500 instead. Off by default —
+// MAINTENANCE_MODE has to be explicitly set to "true" to take the whole
+// app down, never a side effect of some other var being unset. Read fresh
+// inside the function (same reasoning as buildCsp's own isDev below), not
+// hoisted into a module-scope constant: this module is loaded once per
+// server process, so a module-scope read would only ever see whatever the
+// var was at boot, defeating the point of a switch meant to be flippable
+// without a restart.
+function isMaintenanceMode(): boolean {
+  return process.env.MAINTENANCE_MODE === "true";
+}
+
+// Stripe retries a failed webhook delivery on its own schedule, but every
+// hour this app can't reach it is an hour a real payment doesn't get
+// recorded (see lib/billing/stripe-webhook.ts's own idempotency comment).
+// A maintenance window is for the product UI, not for money that's already
+// changed hands, so the webhook keeps working straight through one.
+const MAINTENANCE_EXEMPT_PATHS = ["/api/stripe/webhook"];
+
+const MAINTENANCE_HTML = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SubSentry is down for maintenance</title>
+<style>
+  body { margin: 0; min-height: 100svh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; padding: 1.5rem; text-align: center; font-family: system-ui, sans-serif; background: #0a0a0a; color: #fafafa; }
+  p.detail { font-size: 0.875rem; color: #a3a3a3; max-width: 26rem; }
+</style>
+</head>
+<body>
+  <p style="font-weight: 600; font-size: 1.125rem;">SubSentry is down for maintenance</p>
+  <p class="detail">We are making a short, planned update. Your data is not affected. Try again in a few minutes.</p>
+</body>
+</html>`;
+
+function maintenanceResponse(request: NextRequest): NextResponse {
+  if (request.nextUrl.pathname.startsWith("/api/")) {
+    return NextResponse.json(
+      { error: "maintenance", message: "SubSentry is temporarily down for maintenance. Try again shortly." },
+      { status: 503, headers: { "Retry-After": "300" } },
+    );
+  }
+  return new NextResponse(MAINTENANCE_HTML, {
+    status: 503,
+    headers: { "Content-Type": "text/html; charset=utf-8", "Retry-After": "300" },
+  });
+}
+
 // A path-segment match, not a raw string prefix — plain `startsWith` would
 // treat "/dashboard-screenshot.jpg" (a public asset that really exists —
 // see landing/features-section.tsx) as under the protected "/dashboard"
@@ -135,6 +186,10 @@ function isCrossOriginMutation(request: NextRequest): boolean {
 }
 
 export function proxy(request: NextRequest) {
+  if (isMaintenanceMode() && !MAINTENANCE_EXEMPT_PATHS.includes(request.nextUrl.pathname)) {
+    return maintenanceResponse(request);
+  }
+
   if (isCrossOriginMutation(request)) {
     logSecurityEvent("csrf_rejected", {
       path: request.nextUrl.pathname,

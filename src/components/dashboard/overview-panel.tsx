@@ -9,7 +9,7 @@ import { CountUp } from "@/components/ui/count-up";
 import { SentryRing } from "@/components/ui/sentry-ring";
 import { HealthScoreGauge } from "@/components/dashboard/health-score-gauge";
 import { formatCents } from "@/lib/subscriptions/money";
-import { fadeInUp, revealViewport } from "@/lib/motion";
+import { fadeInUp } from "@/lib/motion";
 import type { ComputedInsight } from "@/lib/subscriptions/insights";
 import type { HealthScoreResult } from "@/lib/insights-engine";
 
@@ -68,8 +68,13 @@ export function OverviewPanel({
   const hasSavings = potentialYearlySavingsCents > 0;
   const firstDuplicateSubscriptionId = duplicateInsights[0]?.subscriptionIds[1];
 
+  // Launch-readiness audit finding #7: whileInView (scroll-observer
+  // triggered) on the very first thing the dashboard renders, already on
+  // screen at mount, meant the observer's async callback — not the actual
+  // paint — decided when this became visible. animate fires on mount
+  // instead; same fadeInUp motion, no observer round-trip.
   return (
-    <motion.div variants={fadeInUp} initial="hidden" whileInView="visible" viewport={revealViewport}>
+    <motion.div variants={fadeInUp} initial="hidden" animate="visible">
       <Card highlight={hasSavings} className="p-5 sm:p-6">
         <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr] lg:gap-8">
           {/* Left: the number this whole page exists to answer. */}
@@ -77,7 +82,7 @@ export function OverviewPanel({
             <div>
               <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Monthly spend</p>
               <p className="mt-1.5 font-financial text-4xl leading-none font-semibold">
-                <CountUp value={monthlyTotalCents} format="currency" currency={currency} duration={0.9} />
+                <CountUp value={monthlyTotalCents} format="currency" currency={currency} duration={0.9} animateOnMount={false} />
               </p>
               <p className="mt-2 text-sm text-muted-foreground">
                 Across {activeCount - otherCurrencyActiveCount} active subscription
@@ -133,7 +138,7 @@ export function OverviewPanel({
             {hasSavings ? (
               <>
                 <p className="font-financial text-2xl leading-none font-semibold text-emerald">
-                  <CountUp value={potentialYearlySavingsCents} format="currency" currency={currency} />
+                  <CountUp value={potentialYearlySavingsCents} format="currency" currency={currency} animateOnMount={false} />
                 </p>
                 <p className="text-sm text-muted-foreground">
                   {duplicateInsights.length === 1

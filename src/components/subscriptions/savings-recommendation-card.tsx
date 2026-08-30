@@ -77,10 +77,20 @@ export function SavingsRecommendationCard({ recommendation }: { recommendation: 
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="font-medium">{recommendation.title}</p>
                   <Badge variant={PRIORITY_BADGE_VARIANT[priority]}>{PRIORITY_LABEL[priority]}</Badge>
+                  {/* Audit fix #7: this used to be a second, redundant
+                      colored badge — the priority badge already flags this
+                      as "High impact"/etc, so a same-weight pill repeating
+                      the dollar figure read as two badges competing for the
+                      same glance. Same "money as plain emphasized text, not
+                      a badge" convention BiggestOpportunityCard/OverviewPanel
+                      already use elsewhere on this dashboard — kept, not
+                      dropped, since this is the only place on this row the
+                      actual $ figure appears (the description sentence never
+                      states it). */}
                   {hasSavings ? (
-                    <Badge className="bg-emerald text-emerald-foreground">
+                    <span className="text-sm font-semibold text-emerald">
                       {formatCents(recommendation.monthlySavingsCents, recommendation.currency)}/mo
-                    </Badge>
+                    </span>
                   ) : null}
                   {/* Same plain-text-plus-icon treatment subscription-row.tsx
                       already uses for a secondary qualifier ("Possible

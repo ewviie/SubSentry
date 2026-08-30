@@ -357,22 +357,26 @@ describe("price-change proposal (import reconciliation)", () => {
     expect(detected[0].priceChangeProposal).toBeUndefined();
   });
 
-  // Regression (CodeRabbit review): clustering groups purely by merchant
-  // name, with no currency partitioning — a mixed-currency cluster is
-  // possible (a multi-currency account, a mis-tagged CSV column). Using
-  // just one transaction's currency as "the" cluster currency while
-  // representativeAmount (a median across ALL of them) silently ignores
-  // that mix would be exactly the kind of "assumed safe, wasn't" write this
-  // feature's trust requirements exist to prevent.
-  it("never proposes a price change when the cluster's own transactions don't all share one currency", () => {
+  // Regression (release-review finding #2, superseding a CodeRabbit-review
+  // test of the same name): clustering now partitions by [merchant,
+  // currency] before this point (see "currency partitioning" describe
+  // block below), so a detected cluster's own transactions can no longer
+  // mix currencies at all. What's still a real, live risk is a detected
+  // cluster (single-currency by construction) matching, by name, an
+  // existing subscription stored in a *different* currency —
+  // computePriceChangeIfMeaningful (price-history.ts) is the guard that
+  // must reject that pairing rather than comparing raw cents across
+  // currencies.
+  it("never proposes a price change when the existing subscription's currency differs from the detected cluster's own currency", () => {
     const existing = sub({ name: "Netflix", amountCents: 1599, billingCycle: "monthly", currency: "usd" });
     const detected = detectRecurringSubscriptions(
       [
-        tx({ description: "NETFLIX.COM", date: "2026-01-01", amountCents: 1999, currency: "usd" }),
-        tx({ description: "NETFLIX.COM", date: addDaysISO("2026-01-01", 31), amountCents: 1999, currency: "eur" }),
+        tx({ description: "NETFLIX.COM", date: "2026-01-01", amountCents: 1799, currency: "eur" }),
+        tx({ description: "NETFLIX.COM", date: addDaysISO("2026-01-01", 31), amountCents: 1799, currency: "eur" }),
       ],
       [existing],
     );
+    expect(detected).toHaveLength(1);
     expect(detected[0].isDuplicateOfExistingId).toBe(existing.id);
     expect(detected[0].priceChangeProposal).toBeUndefined();
   });
@@ -550,5 +554,56 @@ describe("widened quarterly/yearly tolerance", () => {
       [],
     );
     expect(detected[0].confidenceSignals).toContain("irregular_interval");
+  });
+});
+
+// Regression: release-review finding #2. Clustering used to group purely by
+// merchant name, so a merchant charging in two different currencies (a user
+// who moved countries, or linked accounts in different currencies) produced
+// one blended cluster: representativeAmount was a median across every
+// transaction regardless of currency, while detectedToFormValues
+// (review-table.tsx) separately read currency from only the earliest
+// transaction — amount and currency could silently disagree.
+describe("currency partitioning", () => {
+  it("splits a same-merchant, mixed-currency cluster into one detection per currency", () => {
+    const detected = detectRecurringSubscriptions(
+      [
+        tx({ description: "NETFLIX.COM", date: "2025-11-01", amountCents: 1599, currency: "usd" }),
+        tx({ description: "NETFLIX.COM", date: "2025-12-01", amountCents: 1599, currency: "usd" }),
+        tx({ description: "NETFLIX.COM", date: "2026-01-01", amountCents: 1799, currency: "eur" }),
+        tx({ description: "NETFLIX.COM", date: "2026-02-01", amountCents: 1799, currency: "eur" }),
+      ],
+      [],
+    );
+
+    expect(detected).toHaveLength(2);
+    const byCurrency = new Map(detected.map((d) => [d.transactions[0].currency, d]));
+
+    const usd = byCurrency.get("usd");
+    expect(usd?.amountCents).toBe(1599);
+    expect(usd?.transactions.every((t) => t.currency === "usd")).toBe(true);
+
+    const eur = byCurrency.get("eur");
+    expect(eur?.amountCents).toBe(1799);
+    expect(eur?.transactions.every((t) => t.currency === "eur")).toBe(true);
+  });
+
+  it("does not let a single stray-currency charge drag down the other currency's amount", () => {
+    // A cross-currency median (the pre-fix behavior) would have pulled the
+    // usd cluster's representativeAmount toward this one gbp outlier;
+    // partitioning means it never enters the usd cluster's calculation at
+    // all.
+    const detected = detectRecurringSubscriptions(
+      [
+        tx({ description: "SPOTIFY", date: "2025-11-01", amountCents: 999, currency: "usd" }),
+        tx({ description: "SPOTIFY", date: "2025-12-01", amountCents: 999, currency: "usd" }),
+        tx({ description: "SPOTIFY", date: "2026-01-01", amountCents: 999, currency: "usd" }),
+        tx({ description: "SPOTIFY", date: "2026-01-15", amountCents: 500, currency: "gbp" }),
+      ],
+      [],
+    );
+
+    const usd = detected.find((d) => d.transactions[0].currency === "usd");
+    expect(usd?.amountCents).toBe(999);
   });
 });

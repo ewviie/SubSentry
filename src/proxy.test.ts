@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { buildCsp, resolveRequestId, isProtectedPath } from "./proxy";
+import { NextRequest } from "next/server";
+import { buildCsp, resolveRequestId, isProtectedPath, proxy } from "./proxy";
 
 // CSP correctness is security-sensitive and easy to silently regress with
 // no visible error (a browser only logs a CSP violation to a console
@@ -82,6 +83,43 @@ describe("resolveRequestId", () => {
   });
 });
 
+// MAINTENANCE_MODE is a kill switch: a real incident that needs it is
+// exactly when a subtle regression here (e.g. accidentally exempting a
+// page, or blocking the Stripe webhook it's meant to keep alive) would be
+// most costly to discover for the first time in production.
+describe("proxy — maintenance mode", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("passes requests through untouched when MAINTENANCE_MODE is unset", async () => {
+    const response = proxy(new NextRequest("http://localhost/dashboard"));
+    expect(response.status).not.toBe(503);
+  });
+
+  it("returns 503 JSON for an API route when enabled", async () => {
+    vi.stubEnv("MAINTENANCE_MODE", "true");
+    const response = proxy(new NextRequest("http://localhost/api/subscriptions"));
+    expect(response.status).toBe(503);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    const body = await response.json();
+    expect(body.error).toBe("maintenance");
+  });
+
+  it("returns a 503 HTML page for a normal page route when enabled", async () => {
+    vi.stubEnv("MAINTENANCE_MODE", "true");
+    const response = proxy(new NextRequest("http://localhost/dashboard"));
+    expect(response.status).toBe(503);
+    expect(response.headers.get("content-type")).toContain("text/html");
+  });
+
+  it("still lets the Stripe webhook through so real payment events keep being recorded", async () => {
+    vi.stubEnv("MAINTENANCE_MODE", "true");
+    const response = proxy(new NextRequest("http://localhost/api/stripe/webhook", { method: "POST" }));
+    expect(response.status).not.toBe(503);
+  });
+});
+
 describe("isProtectedPath", () => {
   it("matches a protected route exactly and its sub-paths", () => {
     expect(isProtectedPath("/dashboard")).toBe(true);
@@ -97,6 +135,11 @@ describe("isProtectedPath", () => {
   // that string as protected.
   it("does not match a public path that only shares a text prefix with a protected route", () => {
     expect(isProtectedPath("/dashboard-screenshot.jpg")).toBe(false);
+    // Current filename (see features-section.tsx's own comment on why it's
+    // versioned) — kept alongside the original literal above since this
+    // test's whole point is the general prefix-collision class, not one
+    // specific asset name.
+    expect(isProtectedPath("/dashboard-screenshot-v2.jpg")).toBe(false);
     expect(isProtectedPath("/settings-page-marketing-copy")).toBe(false);
     expect(isProtectedPath("/savingsaccountguide")).toBe(false);
   });

@@ -29,7 +29,7 @@ const CAPTCHA_REQUIRED = Boolean(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY);
 
 type FormField = "name" | "email" | "password";
 
-export function SignupForm() {
+export function SignupForm({ isBetaAllAccess }: { isBetaAllAccess: boolean }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -109,6 +109,18 @@ export function SignupForm() {
       <CardHeader>
         <CardTitle as="h1" className="font-heading text-2xl">Create your account</CardTitle>
         <CardDescription>Start tracking what you&apos;re actually paying for.</CardDescription>
+        {/* One honest line, not a feature list: what Free/Pro each include
+            has a real home on the pricing page, and repeating it here would
+            turn a signup form into a checkout page. Beta-aware the same way
+            hero-section.tsx/final-cta-section.tsx already are — claiming
+            "upgrade anytime" while every account is actually unlocked for
+            free right now would be the exact kind of dishonest copy this
+            app avoids everywhere else. */}
+        <p className="text-sm text-muted-foreground">
+          {isBetaAllAccess
+            ? "Free during the beta — no card required, everything unlocked."
+            : "Free to start, no card required. Upgrade anytime for unlimited subscriptions and the complete toolkit."}
+        </p>
       </CardHeader>
       <form onSubmit={handleSubmit}>
         <CardContent className="space-y-4">
@@ -157,7 +169,7 @@ export function SignupForm() {
             }
           />
           {error ? (
-            <p ref={errorRef} id="auth-error" role="alert" tabIndex={-1} className="text-sm text-destructive outline-none">
+            <p ref={errorRef} id="auth-error" role="alert" tabIndex={-1} className="rounded-sm text-sm text-destructive outline-none focus-visible:ring-3 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40">
               {error}
             </p>
           ) : null}

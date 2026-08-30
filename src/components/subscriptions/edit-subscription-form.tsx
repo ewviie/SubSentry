@@ -176,7 +176,7 @@ export function EditSubscriptionForm({ subscription }: { subscription: Subscript
               nativeButton={false}
             >
               <ExternalLink className="size-3.5" aria-hidden="true" />
-              Search how to cancel
+              Search how to cancel {subscription.name}
             </Button>
           </div>
         </div>

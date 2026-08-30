@@ -8,7 +8,12 @@ import {
   type BillingCycleEntry,
   type TopMerchantEntry,
 } from "@/lib/subscriptions/analytics";
-import { computeSavingsRecommendations, computeTotalPotentialSavingsMonthlyCents, type SavingsRecommendation } from "@/lib/subscriptions/savings";
+import {
+  computeSavingsRecommendations,
+  computeTotalPotentialSavingsMonthlyCents,
+  computeTotalPotentialSavingsYearlyCents,
+  type SavingsRecommendation,
+} from "@/lib/subscriptions/savings";
 import type { EngineContext, HealthScoreResult, InsightResult } from "./types";
 import { HEALTH_RULES } from "./rules/health";
 import { FREE_RULES } from "./rules/free";
@@ -18,7 +23,57 @@ import { computeOptimizationScore } from "./optimization-score";
 import { monthlyTotalCents, annualTotalCents, recentGrowthCount } from "./signals";
 import { splitByPrimaryCurrency } from "@/lib/subscriptions/money";
 
-export type { EngineContext, InsightResult, HealthScoreResult, InsightRule, HealthBreakdownEntry, HealthRating } from "./types";
+export type {
+  EngineContext,
+  InsightResult,
+  HealthScoreResult,
+  InsightRule,
+  HealthBreakdownEntry,
+  HealthRating,
+  HealthDimensionStatus,
+  HealthDimensionResult,
+} from "./types";
+
+// A consumer that wants to render more than one of this module's own output
+// buckets together (e.g. a subscription detail page's "What SubSentry
+// noticed" list, which wants every positive/warning/premium finding that
+// mentions this one subscription) cannot safely `[...a, ...b, ...c]`
+// concatenate them directly: severity and the premium flag are independent
+// axes on an InsightResult, not mutually exclusive categories. `warnings`
+// (severity "warning" | "critical") and `premiumInsights` (premium: true)
+// in particular overlap for real, shipped rules — every one of
+// rules/premium.ts's "risk_*" rules is both `critical` and `premium: true`
+// — so a naive concatenation includes the exact same InsightResult object
+// twice, which is what produced a real React "two children with the same
+// key" crash on the subscription detail page (premium.risk_high_spend_
+// concentration, but any risk_* rule can trigger the same bug for a
+// premium user). `positive` (severity "positive") never overlaps with the
+// other two — no rule in this codebase is both positive and premium/
+// warning/critical — so this only ever needs to drop true duplicates, not
+// reconcile two independently-computed findings that happen to share a
+// ruleId.
+//
+// Keeps the FIRST occurrence encountered across the provided arrays, in
+// call order. Every duplicate this function will ever see is the literal
+// same object reference (not two separately-evaluated results that happen
+// to coincide), since every one of this engine's output arrays is built by
+// `.filter()`-ing the same single `results` array HEALTH_RULES/FREE_RULES/
+// PREMIUM_RULES were each evaluated into exactly once — `.filter` never
+// clones elements. So "first wins" never discards different information;
+// it only ever removes an identical copy. See engine.test.ts for the
+// reproduction this was built against.
+export function mergeInsightResults(...resultArrays: InsightResult[][]): InsightResult[] {
+  const seenRuleIds = new Set<string>();
+  const merged: InsightResult[] = [];
+  for (const results of resultArrays) {
+    for (const result of results) {
+      if (seenRuleIds.has(result.ruleId)) continue;
+      seenRuleIds.add(result.ruleId);
+      merged.push(result);
+    }
+  }
+  return merged;
+}
 
 export interface RenewalForecast {
   // nextRenewal/largestUpcomingPayment are single-item picks across ALL
@@ -118,17 +173,20 @@ export function runInsightsEngine(
   subscriptions: Subscription[],
   isPremium: boolean,
   priceHistoryBySubscriptionId?: Map<string, SubscriptionPriceHistory[]>,
+  dismissedRecommendationIds?: Set<string>,
 ): EngineOutput {
   const active = subscriptions.filter((s) => s.status === "active");
   const today = todayIso();
-  const ctx: EngineContext = { subscriptions, active, todayIso: today, isPremium, priceHistoryBySubscriptionId };
+  const ctx: EngineContext = { subscriptions, active, todayIso: today, isPremium, priceHistoryBySubscriptionId, dismissedRecommendationIds };
 
-  // HEALTH_RULES are also evaluated independently by computeHealthScore()
-  // below (for its own score/breakdown) — evaluating them a second time
-  // here, rather than threading their results through, keeps this a pure
-  // additive change with zero risk to computeHealthScore's existing
-  // behavior/tests. Both evaluations are cheap, pure functions over a
-  // handful of rule objects; the duplication costs nothing measurable.
+  // Evaluated once, here, and threaded into computeHealthScore below via
+  // its precomputedHealthResults parameter — not re-evaluated a second
+  // time inside it (release-review finding #8: this used to run the full
+  // HEALTH_RULES set, including its O(n^2) duplicate/overlap passes,
+  // twice per request via two independently-maintained call sites, which
+  // also meant a future edit to one exclusion filter without the other
+  // could make the health-score breakdown and the displayed insights list
+  // silently disagree on which findings apply).
   //
   // Before this, HEALTH_RULES' own findings (e.g. "3 renewals land the
   // same week", "No duplicate subscriptions") only ever fed the health
@@ -146,16 +204,16 @@ export function runInsightsEngine(
   // and including it here too would reproduce the exact "same finding
   // rendered twice on one page" bug dashboard/page.tsx's own comment
   // already documents fixing once for possible_overlap. Its *positive*
-  // branch ("No duplicate subscriptions") stays in, deliberately — Savings
-  // opportunities only ever renders when there's something to flag
-  // (savingsForecast.recommendations.length > 0), so it's silent in
-  // exactly the case that branch fires, meaning there was never a
-  // collision to avoid for it. Filtering out the whole rule by ruleId
-  // alone would silently drop that positive finding too, leaving a real
-  // gap: computeHealthScore (health-score.ts) still credits it in the
-  // score breakdown, but no card would ever say why.
-  const healthResults = HEALTH_RULES.map((rule) => rule.evaluate(ctx)).filter(
-    (r): r is InsightResult => r !== null && !(r.ruleId === "health.duplicates" && r.severity === "warning"),
+  // branch ("No duplicate subscriptions") stays in `healthResults`/`results`
+  // deliberately — computeHealthScore (health-score.ts) still needs it
+  // credited in the score breakdown regardless of which card, if any, also
+  // shows it. See the `positive` filter below for the one place this
+  // branch IS excluded from a UI-facing array, and why.
+  const allHealthResults = HEALTH_RULES.map((rule) => rule.evaluate(ctx)).filter(
+    (r): r is InsightResult => r !== null,
+  );
+  const healthResults = allHealthResults.filter(
+    (r) => !(r.ruleId === "health.duplicates" && r.severity === "warning"),
   );
 
   const nonHealthRules = [...FREE_RULES, ...(isPremium ? PREMIUM_RULES : [])];
@@ -164,7 +222,23 @@ export function runInsightsEngine(
     ...healthResults,
   ];
 
-  const positive = results.filter((r) => r.severity === "positive");
+  // health.duplicates' positive branch is excluded here specifically (UI
+  // audit finding, not the same collision the healthResults filter above
+  // already handles): its title/description ("No confirmed duplicates" /
+  // "Nothing looks redundant, you're not paying twice for the same thing.")
+  // restates OverviewPanel's own "Duplicate check" callout on
+  // dashboard/page.tsx near-verbatim ("Nothing here looks redundant.
+  // You're not paying twice for the same thing."), which reads from this
+  // same shared duplicate-pair detection (forEachLikelyDuplicatePair) and
+  // is always rendered, more prominently, whenever this dashboard has any
+  // active subscriptions at all. That earlier "there was never a collision
+  // to avoid for it" reasoning only checked Savings opportunities (silent
+  // exactly when this branch fires) — it didn't account for OverviewPanel,
+  // which is the real, always-present collision. computeHealthScore still
+  // credits this finding in the score breakdown regardless (it reads
+  // `healthResults`, not `positive`), so nothing here changes what "Good"
+  // status a clean redundancy dimension gets or why.
+  const positive = results.filter((r) => r.severity === "positive" && r.ruleId !== "health.duplicates");
   const warnings = results.filter((r) => r.severity === "warning" || r.severity === "critical");
   const optimization = results.filter((r) => r.category === "optimization");
   const premiumInsights = results.filter((r) => r.premium);
@@ -183,6 +257,9 @@ export function runInsightsEngine(
 
   const savingsRecommendations = computeSavingsRecommendations(subscriptions, today);
   const monthlySavingsCents = computeTotalPotentialSavingsMonthlyCents(savingsRecommendations);
+  // Not monthlySavingsCents * 12 — see computeTotalPotentialSavingsYearlyCents's
+  // own comment (release-review finding #4) for why that double-rounds.
+  const yearlySavingsCents = computeTotalPotentialSavingsYearlyCents(savingsRecommendations);
 
   // The score's own job is "unrealized savings as a share of spend" — that's
   // strictly broader than "confirmed duplicates," so it needs every
@@ -197,7 +274,7 @@ export function runInsightsEngine(
   const optimizationRuleSavingsCents = optimization.reduce((sum, r) => sum + (r.monthlySavingsCents ?? 0), 0);
   const totalUnrealizedMonthlyCents = monthlySavingsCents + optimizationRuleSavingsCents;
 
-  const healthScore = computeHealthScore(ctx);
+  const healthScore = computeHealthScore(ctx, allHealthResults);
   const optimizationScore = computeOptimizationScore(ctx, totalUnrealizedMonthlyCents * 12);
 
   // Restricted to active's primary currency (splitByPrimaryCurrency) — see
@@ -245,9 +322,9 @@ export function runInsightsEngine(
     savingsForecast: {
       recommendations: savingsRecommendations,
       monthlySavingsCents,
-      yearlySavingsCents: monthlySavingsCents * 12,
+      yearlySavingsCents,
     },
-    estimatedYearlySavingsCents: monthlySavingsCents * 12,
+    estimatedYearlySavingsCents: yearlySavingsCents,
   };
 }
 

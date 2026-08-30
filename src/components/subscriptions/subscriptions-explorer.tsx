@@ -384,7 +384,7 @@ export function SubscriptionsExplorer({
         <p
           ref={statusRef}
           tabIndex={-1}
-          className="text-sm text-muted-foreground outline-none"
+          className="rounded-sm text-sm text-muted-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
           role="status"
           aria-live="polite"
         >

@@ -177,12 +177,39 @@ export function detectRecurringSubscriptions(
 ): DetectedSubscription[] {
   const debits = transactions.filter((t) => t.direction === "debit");
 
-  const clusters = new Map<string, RawTransaction[]>();
+  // Partitioned by merchant AND currency, not merchant alone (release-review
+  // finding: a genuinely mixed-currency cluster — e.g. a user who moved
+  // countries, or linked accounts in different currencies, with the same
+  // merchant charging in both — used to compute one representativeAmount as
+  // a median across every transaction regardless of currency, then pair it
+  // with a currency label read independently from just the earliest
+  // transaction in detectedToFormValues. Amount and currency could silently
+  // disagree: a real €20.00/mo charge stored/shown as "$20.00/mo". Grouping
+  // by [merchant, currency] up front means every downstream calculation in
+  // this function (representativeAmount, billing-cycle estimate,
+  // duplicate/price-change matching) already operates over a single-currency
+  // set of transactions by construction, the same guarantee
+  // hasSingleClusterCurrency below used to have to check for after the fact
+  // for the price-change path specifically. A nested Map (not a
+  // string-concatenated key) avoids any risk of two distinct merchant names
+  // colliding onto the same key through a separator character.
+  const clusters = new Map<string, Map<string, RawTransaction[]>>();
   for (const transaction of debits) {
     const merchant = normalizeMerchant(transaction.description);
-    const existing = clusters.get(merchant.displayName);
+    let byCurrency = clusters.get(merchant.displayName);
+    if (!byCurrency) {
+      byCurrency = new Map();
+      clusters.set(merchant.displayName, byCurrency);
+    }
+    const existing = byCurrency.get(transaction.currency);
     if (existing) existing.push(transaction);
-    else clusters.set(merchant.displayName, [transaction]);
+    else byCurrency.set(transaction.currency, [transaction]);
+  }
+  const flatClusters: RawTransaction[][] = [];
+  for (const byCurrency of clusters.values()) {
+    for (const clusterTransactions of byCurrency.values()) {
+      flatClusters.push(clusterTransactions);
+    }
   }
 
   // Only active existing subscriptions are candidates for a duplicate
@@ -206,7 +233,7 @@ export function detectRecurringSubscriptions(
 
   const detected: DetectedSubscription[] = [];
 
-  for (const [, clusterTransactions] of clusters) {
+  for (const clusterTransactions of flatClusters) {
     // A single charge is never a "detected subscription" candidate at all —
     // never assume every payment is a subscription.
     if (clusterTransactions.length < 2) continue;
@@ -302,16 +329,15 @@ export function detectRecurringSubscriptions(
     // it were the real recurring price.
     // representativeAmount is a median across every transaction in this
     // cluster, computed with no regard to each transaction's own currency —
-    // safe only when the whole cluster genuinely shares one. Clustering
-    // itself groups purely by merchant name (no currency partitioning), so
-    // a multi-currency account/CSV could in principle produce a mixed-
-    // currency cluster; using just sorted[0].currency as "the" cluster
-    // currency in that case could pair a same-currency-by-coincidence label
-    // with a representativeAmount that's actually a meaningless cross-
-    // currency median (CodeRabbit review). Requiring every transaction in
-    // the cluster to agree before ever proposing a change is the safe
-    // direction — same "only propose when it's actually safe" bar this
-    // whole feature is held to.
+    // safe only when the whole cluster genuinely shares one. Clustering now
+    // partitions by [merchant, currency] up front (see the clusters/
+    // flatClusters comment above this function's loop), so every
+    // transaction in `sorted` is guaranteed to share sorted[0].currency by
+    // construction; this check is kept anyway as a defense-in-depth
+    // assertion rather than removed outright, in case clustering ever
+    // changes again without this comparison being updated to match
+    // (originally added per CodeRabbit review, back when clustering was
+    // still merchant-name-only and a mixed-currency cluster was possible).
     const hasSingleClusterCurrency = sorted.every((t) => t.currency === sorted[0].currency);
     const priceChangeCandidate =
       duplicateMatch && confidence !== "low" && !isAmbiguousMatch && hasSingleClusterCurrency

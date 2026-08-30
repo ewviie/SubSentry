@@ -75,7 +75,7 @@ export function HealthScoreGauge({
           className={cn("font-mono leading-none font-semibold tabular-nums", text)}
           style={{ fontSize: size * 0.29 }}
         >
-          <CountUp value={result.score} format="integer" />
+          <CountUp value={result.score} format="integer" animateOnMount={false} />
         </span>
         <span className="text-muted-foreground" style={{ fontSize: Math.max(8, size * 0.11), lineHeight: 1 }}>
           /100

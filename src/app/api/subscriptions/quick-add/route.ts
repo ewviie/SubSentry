@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { quickAddSubscription } from "@/lib/ai/parse-subscription";
-import { checkQuickAddRateLimit } from "@/lib/ai/rate-limit";
+import { checkQuickAddRateLimit, quickAddRateLimitMessage } from "@/lib/ai/rate-limit";
+import { getUpgradeUrl, isBetaAllAccess } from "@/lib/billing/plan";
+import { resolveHasPaidAccess } from "@/lib/dev/plan-preview";
 import { readJsonBody, MAX_JSON_BODY_BYTES } from "@/lib/http/request-size";
 
 // Capped well above any real "Netflix £10.99 monthly"-style input, but far
@@ -28,10 +30,28 @@ export async function POST(request: Request) {
     );
   }
 
-  const rateLimit = checkQuickAddRateLimit(session.user.id);
+  const rateLimit = await checkQuickAddRateLimit(session.user.id, session.user.plan);
   if (!rateLimit.allowed) {
+    // Monetization pass, section 8: the free ceiling itself is unchanged
+    // (FREE_QUICK_ADD_DAILY_LIMIT, still real and still enforced above,
+    // regardless of what this response says) — what's new is telling the
+    // caller the real Pro number right here, at the exact moment they hit
+    // it, instead of a generic "try again later" with no path forward.
+    // isPremium is only used to pick which limit to name in the message
+    // (a real Pro caller who somehow still exhausted their own, much
+    // higher ceiling shouldn't be told to upgrade to what they already
+    // have) — resolveHasPaidAccess already decided which bucket
+    // checkQuickAddRateLimit just checked, this just asks the same
+    // question again to phrase the message correctly.
+    const isPremium = await resolveHasPaidAccess(session.user.plan);
     return NextResponse.json(
-      { error: "rate_limited", message: "You've hit your AI usage limit for now. Try again in a few hours, or enter it manually." },
+      {
+        error: "rate_limited",
+        message: quickAddRateLimitMessage(isPremium),
+        isPremium,
+        beta: isBetaAllAccess(),
+        upgradeUrl: isPremium ? null : getUpgradeUrl(session.user.id),
+      },
       { status: 429 },
     );
   }

@@ -116,12 +116,24 @@ const CANONICAL_MERCHANTS: CanonicalMerchant[] = [
   { displayName: "Substack", category: "news", aliases: ["substack"] },
   { displayName: "PlayStation Plus", category: "gaming", aliases: ["playstation", "playstationplus"], overlapGroup: "gaming_subscription" },
   { displayName: "Xbox Game Pass", category: "gaming", aliases: ["xbox", "xboxgamepass", "gamepass"], overlapGroup: "gaming_subscription" },
+  // Missing entirely before this fix — "GYMPASS INC" (a real, common bank
+  // descriptor for this corporate-wellness benefit) had no exact/word-match
+  // entry to resolve against, so it fell all the way through to the fuzzy
+  // fallback below and false-positive-matched "gamepass" (Xbox Game Pass) —
+  // "gympass" and "gamepass" are only edit-distance 2 apart. Adding the real
+  // merchant here is the actual fix for this specific report: an exact-key
+  // match is tried long before the fuzzy fallback ever runs (see
+  // normalizeMerchant), so "gympass" now resolves correctly before fuzzy
+  // matching gets a chance to misfire. See the fuzzy fallback's own comment
+  // for the general hardening that stops this false-positive *shape*
+  // (an unrelated word that happens to sit within edit-distance 2 of a
+  // known alias) from recurring for any other merchant, known or not.
+  { displayName: "GymPass", category: "fitness", aliases: ["gympass"] },
 ];
 
-export const KNOWN_MERCHANTS: Record<
-  string,
-  { displayName: string; category: Subscription["category"]; overlapGroup?: OverlapGroup }
-> = Object.fromEntries(
+type MerchantInfo = { displayName: string; category: Subscription["category"]; overlapGroup?: OverlapGroup };
+
+export const KNOWN_MERCHANTS: Record<string, MerchantInfo> = Object.fromEntries(
   CANONICAL_MERCHANTS.flatMap((merchant) =>
     merchant.aliases.map((alias) => [
       alias,
@@ -190,29 +202,108 @@ const FUZZY_MAX_DISTANCE = 2;
 // 1-5 characters long) — short keys only ever match via the exact or
 // substring paths above, never fuzzily.
 const FUZZY_MIN_KEY_LENGTH = 4;
+// Confirmed bug (GymPass -> Xbox Game Pass): "gympass" and the known alias
+// "gamepass" are the same length ± 1 and only edit-distance 2 apart (one
+// substitution, one insertion), which used to be enough to clear
+// FUZZY_MAX_DISTANCE outright. Scanning KNOWN_MERCHANTS turned up more
+// pairs with the identical shape — "gamepad" (a game controller, nothing to
+// do with a subscription) also collided with "gamepass", and "notation"
+// collided with "notion" — so this isn't a one-off, it's a real gap in the
+// fuzzy fallback's tolerance whenever a length change is involved.
+//
+// A genuine same-length typo ("NETFILX" for "netflix") is two adjacent
+// letters transposed, which plain (non-Damerau) Levenshtein always scores
+// as 2 substitutions — that shape is exactly what this fallback exists to
+// catch, and doesn't involve any length change at all. Every false-positive
+// case found above, by contrast, only reaches distance 2 by ALSO changing
+// the string's length (an insertion or deletion alongside a substitution) —
+// a strictly bigger, less typo-like edit that's far more likely to be a
+// genuinely different word. Requiring exact-length candidates to still meet
+// the full FUZZY_MAX_DISTANCE, but capping anything with a length
+// difference at 1, keeps the transposition-typo case working while closing
+// off this whole class of collision — a structural distinction (same
+// principle as isPrefixExtension below: judge a fuzzy match by the *shape*
+// of the edit, not just its raw distance), not a hardcoded exception for
+// "gympass" specifically.
+const FUZZY_MAX_DISTANCE_WITH_LENGTH_CHANGE = 1;
 
-function findKnownMerchant(key: string): { displayName: string; category: Subscription["category"] } | null {
+function findKnownMerchant(key: string): MerchantInfo | null {
   return key && KNOWN_MERCHANTS[key] ? KNOWN_MERCHANTS[key] : null;
 }
 
-// Substring containment, gated to keys >= 4 chars so short keys ("max")
-// can't accidentally match as a substring of an unrelated longer word.
-function findKnownMerchantBySubstring(key: string): { displayName: string; category: Subscription["category"] } | null {
-  for (const [candidate, info] of Object.entries(KNOWN_MERCHANTS)) {
-    if (candidate.length >= 4 && key.includes(candidate)) return info;
+// Lowercases and splits on any run of non-alphanumeric characters,
+// preserving word boundaries — unlike normalizeName's alphanumeric squash
+// (used for the exact-match keys above), which destroys them entirely.
+// "SNAPPLE VENDING" stays two distinct words here; normalizeName would
+// have already collapsed it to "snapplevending" with no signal left that
+// "snapple" and "vending" were ever separate.
+function toWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean);
+}
+
+// Longest known alias by word count is "xboxgamepass" (xbox + game + pass,
+// 3 words) — 4 gives a one-word safety margin for any future addition
+// without meaningfully widening what a false match could look like.
+const MAX_ALIAS_WORD_SPAN = 4;
+
+// Release-review finding #6: the substring version this replaced
+// (`key.includes(candidate)`) matched a known alias anywhere inside a
+// longer, unrelated single word — "SNAPPLE VENDING" false-positive-matched
+// "apple" (⊂ "snapple"), "CANVAS" matched "canva", "SLACKER RADIO" matched
+// "slack" (⊂ "slacker") — and iterated KNOWN_MERCHANTS in insertion order
+// with no preference for a more specific alias, so "APPLE MUSIC
+// MEMBERSHIP" matched the earlier-inserted "apple" before ever reaching
+// the more specific "applemusic".
+//
+// This checks every contiguous run of 1..MAX_ALIAS_WORD_SPAN whole words
+// for an EXACT match against a known alias — never a substring inside a
+// longer word — which fixes both problems in one pass: "snapple"/"canvas"/
+// "slacker" are themselves single whole words that simply aren't equal to
+// "apple"/"canva"/"slack", so none of them match here (CANVAS still needs
+// its own separate fix below, in the fuzzy fallback — a plain
+// word-boundary check doesn't stop "canvas" from being a distance-1 fuzzy
+// "typo" of "canva"); a genuine compound alias ("applemusic", "hbomax",
+// "xboxgamepass") still matches whether the source text has it as one
+// already-glued word ("APPLEMUSIC", a real payment-processor descriptor
+// shape) or as separate ones ("APPLE MUSIC MEMBERSHIP") — and among
+// overlapping matches at the same starting word, the longest (most
+// specific) span wins, exactly the "applemusic" over "apple" preference
+// the old insertion-order iteration didn't have.
+function findKnownMerchantByWords(text: string): MerchantInfo | null {
+  const words = toWords(text);
+  let best: { displayName: string; category: Subscription["category"] } | null = null;
+  let bestSpan = 0;
+  for (let start = 0; start < words.length; start++) {
+    let joined = "";
+    for (let span = 1; span <= MAX_ALIAS_WORD_SPAN && start + span <= words.length; span++) {
+      joined += words[start + span - 1];
+      if (joined.length < 4) continue; // same short-alias guard the old version had ("max" alone)
+      const info = KNOWN_MERCHANTS[joined];
+      if (info && span > bestSpan) {
+        best = info;
+        bestSpan = span;
+      }
+    }
   }
-  return null;
+  return best;
 }
 
 export function normalizeMerchant(raw: string): MerchantMatch {
   const lightlyStripped = stripProcessorAndDomainNoise(raw);
   const lightKey = normalizeName(lightlyStripped);
-  const rawKey = normalizeName(raw);
 
   // Tried before the aggressive trailing-code strip runs, so a real
   // merchant name ending in a short product word ("Google ONE", "HBO MAX")
   // is matched here first — see stripPaymentProcessorNoise's comment.
-  const lightMatch = findKnownMerchant(lightKey) ?? findKnownMerchantBySubstring(lightKey);
+  // findKnownMerchantByWords takes the pre-squash text (lightlyStripped),
+  // not lightKey — it needs the original word boundaries normalizeName's
+  // squash destroys.
+  const lightMatch = findKnownMerchant(lightKey) ?? findKnownMerchantByWords(lightlyStripped);
   if (lightMatch) return { ...lightMatch, isKnownSubscriptionMerchant: true };
 
   const stripped = stripPaymentProcessorNoise(raw);
@@ -220,12 +311,12 @@ export function normalizeMerchant(raw: string): MerchantMatch {
 
   const strippedMatch =
     findKnownMerchant(strippedKey) ??
-    findKnownMerchantBySubstring(strippedKey) ??
-    // Substring against the essentially-raw (only alphanumeric-normalized)
-    // form too — catches cases where the light/aggressive stripping missed
-    // noise the substring check alone still cuts through, e.g.
-    // "NETFLIX.COM AMSTERDAM" -> "netflixcomamsterdam".includes("netflix").
-    findKnownMerchantBySubstring(rawKey);
+    findKnownMerchantByWords(stripped) ??
+    // Against the essentially-raw form too (only stripProcessorAndDomainNoise
+    // never ran) — catches cases where the light/aggressive stripping
+    // missed noise findKnownMerchantByWords alone still cuts through, e.g.
+    // "NETFLIX.COM AMSTERDAM" tokenizing to ["netflix", "com", "amsterdam"].
+    findKnownMerchantByWords(raw);
   if (strippedMatch) return { ...strippedMatch, isKnownSubscriptionMerchant: true };
 
   // Fuzzy fallback, only against the fully-stripped form — the raw form is
@@ -235,7 +326,26 @@ export function normalizeMerchant(raw: string): MerchantMatch {
     for (const [key, info] of Object.entries(KNOWN_MERCHANTS)) {
       if (key.length < FUZZY_MIN_KEY_LENGTH) continue;
       if (Math.abs(strippedKey.length - key.length) > FUZZY_MAX_LENGTH_DELTA) continue;
-      if (levenshtein(strippedKey, key) <= FUZZY_MAX_DISTANCE) {
+      // A strict prefix relationship (one is the other plus a short
+      // trailing extension, e.g. "canvas" vs. "canva") is a different real
+      // word, not a typo of the same one — the same false-positive shape
+      // release-review finding #6 named for findKnownMerchantByWords above,
+      // reached independently through this separate fuzzy path (a plain
+      // edit-distance check doesn't distinguish "one transposed letter in
+      // the middle" from "a whole different suffix appended"). Excluded
+      // here rather than tightening FUZZY_MAX_DISTANCE globally, which
+      // would also lose genuine mid-word typos ("NETFILX") this fallback
+      // exists to catch.
+      const isPrefixExtension = strippedKey !== key && (strippedKey.startsWith(key) || key.startsWith(strippedKey));
+      if (isPrefixExtension) continue;
+      // See FUZZY_MAX_DISTANCE_WITH_LENGTH_CHANGE's own comment: a same-length
+      // candidate can still use the full tolerance (catches a transposed-letter
+      // typo like "NETFILX"), but any candidate whose length differs at all is
+      // held to a stricter distance-1 cap — the false-positive shape this
+      // guards against (e.g. "gympass" vs. "gamepass") only reaches distance 2
+      // by combining a substitution with an insertion/deletion.
+      const maxDistance = strippedKey.length === key.length ? FUZZY_MAX_DISTANCE : FUZZY_MAX_DISTANCE_WITH_LENGTH_CHANGE;
+      if (levenshtein(strippedKey, key) <= maxDistance) {
         return { displayName: info.displayName, category: info.category, isKnownSubscriptionMerchant: true };
       }
     }
@@ -276,21 +386,22 @@ export function normalizeMerchant(raw: string): MerchantMatch {
 // Real curated data always wins; a caller falls back to its own
 // keyword/LLM guess only when this returns null.
 //
-// >= 4 chars only, longest-alias-first — same reasoning
-// stripPaymentProcessorNoise's own fuzzy gate uses: a short alias like
-// "max" is a real merchant but too short to safely substring-match inside
-// an arbitrary sentence ("my max budget this month" would otherwise
-// false-positive as HBO Max).
-const KNOWN_MERCHANT_ALIASES_BY_LENGTH = Object.keys(KNOWN_MERCHANTS)
-  .filter((alias) => alias.length >= 4)
-  .sort((a, b) => b.length - a.length);
-
-export function matchKnownMerchantInText(
-  freeText: string,
-): { displayName: string; category: Subscription["category"]; overlapGroup?: OverlapGroup } | null {
-  const normalizedText = normalizeName(freeText);
-  const matchedAlias = KNOWN_MERCHANT_ALIASES_BY_LENGTH.find((alias) => normalizedText.includes(alias));
-  return matchedAlias ? KNOWN_MERCHANTS[matchedAlias] : null;
+// Delegates to findKnownMerchantByWords — the exact same whole-word,
+// longest-span matcher normalizeMerchant uses for a bank/CSV descriptor,
+// reused here rather than kept as a second, separately-maintained
+// substring search over KNOWN_MERCHANT_ALIASES_BY_LENGTH. That older
+// version checked `normalizedText.includes(alias)` against
+// normalizeName's alphanumeric-squashed text, with no word-boundary
+// concept at all — "my CANVAS class notes" false-positive-matched "canva",
+// and "the SLACKER RADIO app" matched "slack", the identical bug class
+// findKnownMerchantByWords was built to fix for the bank-import path
+// (release-review finding #6's own follow-up: this function had the same
+// shape of bug, just reached through free-typed quick-add text instead of
+// a bank descriptor). >= 4 chars only still applies (findKnownMerchantByWords's
+// own guard) — a short alias like "max" stays too short to safely
+// word-match inside an arbitrary sentence on its own.
+export function matchKnownMerchantInText(freeText: string): MerchantInfo | null {
+  return findKnownMerchantByWords(freeText);
 }
 
 // Resolves a *subscription's own* (already clean, user-typed or

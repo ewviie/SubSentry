@@ -94,6 +94,70 @@ describe("normalizeMerchant", () => {
     expect(result.isKnownSubscriptionMerchant).toBe(true);
   });
 
+  // Regression: "GYMPASS INC" (a real, common bank descriptor for this
+  // corporate-wellness benefit) used to have no curated entry at all, so it
+  // fell through to the fuzzy fallback and matched "gamepass" (Xbox Game
+  // Pass) — "gympass" and "gamepass" are only edit-distance 2 apart. Fixed
+  // by (a) adding GymPass as a real known merchant, so it now resolves via
+  // an exact-key match tried long before the fuzzy fallback ever runs, and
+  // (b) tightening the fuzzy fallback itself (see its own comment) so this
+  // false-positive *shape* can't recur for some other unrecognized
+  // merchant. Both a bare and processor-noise-bearing form are covered
+  // here since the exact-match path runs on both the lightly- and
+  // fully-stripped forms.
+  it.each([
+    ["GYMPASS INC", "GymPass", "fitness"],
+    ["GYMPASS", "GymPass", "fitness"],
+  ] as const)("resolves %s to %s / %s, not the unrelated Xbox Game Pass", (raw, expectedName, expectedCategory) => {
+    const result = normalizeMerchant(raw);
+    expect(result.displayName).toBe(expectedName);
+    expect(result.category).toBe(expectedCategory);
+    expect(result.isKnownSubscriptionMerchant).toBe(true);
+  });
+
+  // Xbox Game Pass itself must keep resolving correctly, including via its
+  // bare "gamepass" alias — the exact same key GymPass used to be
+  // fuzzy-mismatched against. An exact-key match is unaffected by the fuzzy
+  // fallback's tightening below, so this must still pass unchanged.
+  it.each([
+    ["GAMEPASS", "Xbox Game Pass", "gaming"],
+    ["XBOX GAME PASS", "Xbox Game Pass", "gaming"],
+    ["XBOXGAMEPASS", "Xbox Game Pass", "gaming"],
+  ] as const)("still resolves %s to %s / %s", (raw, expectedName, expectedCategory) => {
+    const result = normalizeMerchant(raw);
+    expect(result.displayName).toBe(expectedName);
+    expect(result.category).toBe(expectedCategory);
+    expect(result.isKnownSubscriptionMerchant).toBe(true);
+  });
+
+  // Regression: these are not hypothetical — scanning KNOWN_MERCHANTS for
+  // any word within the old fuzzy tolerance turned up real collisions
+  // beyond GymPass, confirming the bug was a general gap, not a one-off.
+  // "GAMEPAD" (a game controller) used to false-positive-match "gamepass"
+  // (Xbox Game Pass) the same way GymPass did; "NOTATION" used to
+  // false-positive-match "notion" (Notion). Both are the identical shape:
+  // edit-distance 2 from a known alias, reached only by combining a
+  // substitution with a length change, never a same-length typo.
+  it.each([
+    ["GAMEPAD", "Xbox Game Pass"],
+    ["NOTATION", "Notion"],
+  ] as const)("does not fuzzy-match the unrelated word %s against %s", (raw, _unrelatedTarget) => {
+    const result = normalizeMerchant(raw);
+    expect(result.isKnownSubscriptionMerchant).toBe(false);
+  });
+
+  // The fuzzy fallback must still catch a genuine same-length typo — this
+  // is the case FUZZY_MAX_DISTANCE exists for, and the fix above only
+  // tightens the tolerance for candidates whose length differs, not this
+  // one. "NETFILX" is "netflix" with two adjacent letters transposed, which
+  // plain (non-Damerau) Levenshtein always scores as 2 substitutions with
+  // no length change.
+  it("still fuzzy-matches a genuine same-length typo", () => {
+    const result = normalizeMerchant("NETFILX");
+    expect(result.displayName).toBe("Netflix");
+    expect(result.isKnownSubscriptionMerchant).toBe(true);
+  });
+
   it("strips Google Play's own billing-descriptor prefix", () => {
     const result = normalizeMerchant("GOOGLE *NETFLIX");
     expect(result.displayName).toBe("Netflix");
@@ -141,6 +205,66 @@ describe("normalizeMerchant", () => {
     expect(result.isKnownSubscriptionMerchant).toBe(false);
     expect(result.displayName).toBe("Wax");
   });
+
+  // Regression (release-review finding #6): findKnownMerchantBySubstring
+  // (now findKnownMerchantByWords) used to check `key.includes(candidate)`
+  // against the fully alphanumeric-squashed string, with no word-boundary
+  // check at all — "SNAPPLE VENDING" squashed to "snapplevending", which
+  // contains "apple" as a pure substring despite having nothing to do with
+  // Apple. Checking whole, contiguous words instead means "snapple" (one
+  // word) simply isn't equal to "apple", so it never matches. (CANVAS vs.
+  // "canva" is the same class of bug reached through a different,
+  // fuzzy-matching path — see its own dedicated test below.)
+  it.each([
+    ["SNAPPLE VENDING", "apple"],
+    ["SLACKER RADIO", "slack"],
+  ] as const)("does not false-positive match %s against the unrelated known alias %s", (raw, _alias) => {
+    const result = normalizeMerchant(raw);
+    expect(result.isKnownSubscriptionMerchant).toBe(false);
+  });
+
+  // Regression (release-review finding #6): KNOWN_MERCHANTS is iterated in
+  // insertion order, and "apple" (Apple/software) was inserted before the
+  // more specific "applemusic" (Apple Music/streaming) — a plain substring
+  // check matched whichever came first in iteration order, not whichever
+  // was the better match, so "APPLE MUSIC MEMBERSHIP" resolved to Apple
+  // instead of Apple Music. findKnownMerchantByWords must prefer the
+  // longer (more specific) matching word-span regardless of insertion
+  // order, whether the two real words are typed with a space between them
+  // or come pre-glued as one word (a real payment-processor descriptor
+  // shape).
+  it.each([
+    ["APPLE MUSIC MEMBERSHIP", "Apple Music", "streaming"],
+    ["APPLEMUSIC", "Apple Music", "streaming"],
+  ] as const)("resolves %s to the more specific %s, not the shorter Apple alias", (raw, expectedName, expectedCategory) => {
+    const result = normalizeMerchant(raw);
+    expect(result.displayName).toBe(expectedName);
+    expect(result.category).toBe(expectedCategory);
+    expect(result.isKnownSubscriptionMerchant).toBe(true);
+  });
+
+  it("still resolves a bare Apple charge to the general Apple merchant", () => {
+    const result = normalizeMerchant("APPLE.COM/BILL");
+    expect(result.displayName).toBe("Apple");
+    expect(result.category).toBe("software");
+  });
+
+  // Regression (release-review finding #6, second half): "CANVAS" is a
+  // single whole word, so it's correctly rejected by the word-boundary fix
+  // above — but it's also within edit-distance-1 of the real "canva" alias
+  // (Canvas, the school LMS, is genuinely one letter longer than Canva,
+  // the design tool), so the *separate* fuzzy fallback matched it anyway
+  // via a plain `key.includes(candidate)`-adjacent edit-distance check with
+  // no concept of "this is a whole different word, not a typo." A strict
+  // prefix relationship (one string is the other plus a trailing
+  // extension) is excluded from the fuzzy fallback for exactly this
+  // reason, without narrowing the distance tolerance genuine mid-word
+  // typos still rely on.
+  it("does not fuzzy-match a longer, unrelated real word that happens to start with a known alias", () => {
+    const result = normalizeMerchant("CANVAS");
+    expect(result.isKnownSubscriptionMerchant).toBe(false);
+    expect(result.displayName).toBe("Canvas");
+  });
 });
 
 // Regression coverage for a Phase 7.2 classification bug: quick-add with a
@@ -174,6 +298,34 @@ describe("matchKnownMerchantInText", () => {
     const result = matchKnownMerchantInText("just signed up for spotify premium, renews the 5th at $10.99");
     expect(result?.displayName).toBe("Spotify");
     expect(result?.category).toBe("streaming");
+  });
+
+  // Regression: matchKnownMerchantInText used to check
+  // `normalizedText.includes(alias)` against normalizeName's
+  // alphanumeric-squashed text (KNOWN_MERCHANT_ALIASES_BY_LENGTH), the
+  // same no-word-boundary bug findKnownMerchantByWords was built to fix
+  // for the bank-import path — quick-add free text is exactly as exposed
+  // to it. "my CANVAS class notes" squashed to "mycanvasclassnotes",
+  // which contains "canva" as a pure substring despite having nothing to
+  // do with Canva; "the SLACKER RADIO app" squashed similarly and
+  // contained "slack".
+  it.each([
+    ["my CANVAS class notes $15/semester", "canva"],
+    ["the SLACKER RADIO app is $4.99/mo", "slack"],
+  ] as const)("does not false-positive match %s against the unrelated known alias %s", (text, _alias) => {
+    expect(matchKnownMerchantInText(text)).toBeNull();
+  });
+
+  it("still resolves a genuine Canva subscription mentioned in free text", () => {
+    const result = matchKnownMerchantInText("Canva Pro renews at $12.99/mo");
+    expect(result?.displayName).toBe("Canva");
+    expect(result?.category).toBe("software");
+  });
+
+  it("still resolves a genuine Slack subscription mentioned in free text", () => {
+    const result = matchKnownMerchantInText("Slack subscription, $8/mo per user");
+    expect(result?.displayName).toBe("Slack");
+    expect(result?.category).toBe("software");
   });
 });
 

@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { runInsightsEngine } from "./engine";
+import { describe, it, expect, vi } from "vitest";
+import { runInsightsEngine, mergeInsightResults } from "./engine";
+import { HEALTH_RULES } from "./rules/health";
 import { sub } from "./test-fixtures";
 
 describe("runInsightsEngine", () => {
@@ -103,23 +104,31 @@ describe("runInsightsEngine", () => {
     expect(output.quickWins.some((w) => w.ruleId === "health.duplicates")).toBe(false);
     // With real duplicates present, health.duplicates fires its *warning*
     // branch, not its positive one — this scenario can never contain a
-    // "health.duplicates" positive entry regardless of the exclusion filter,
-    // so it doesn't by itself prove the positive branch survives. See the
-    // next test for that.
+    // "health.duplicates" positive entry regardless of the `positive`
+    // filter's own exclusion below, so it doesn't by itself prove that
+    // filter works. See the next test for the no-duplicates case that does.
     expect(output.positive.some((p) => p.ruleId === "health.duplicates")).toBe(false);
   });
 
-  // Regression test for a bug introduced by the fix above and caught by a
-  // council re-check: filtering health.duplicates out of `results` by
-  // ruleId alone silently removed its *positive* branch too ("No duplicate
-  // subscriptions"), even though Savings opportunities has zero collision
-  // risk with it (that card is silent precisely when there's nothing to
-  // flag) — a user with no duplicates could never see this positive habit
-  // acknowledged, while computeHealthScore's breakdown still credited it.
-  it("positive findings still include health.duplicates' positive branch when there are no duplicates", () => {
+  // UI audit finding: health.duplicates' positive branch ("No confirmed
+  // duplicates") near-verbatim restates OverviewPanel's own always-rendered
+  // "Duplicate check" callout on the same dashboard page — both read the
+  // same shared duplicate-pair detection. Excluded from `positive`
+  // (PositiveHabitsCard's only data source) so that reassurance has one
+  // canonical surface instead of two; computeHealthScore still credits it
+  // in the score breakdown regardless (see the next test), since that reads
+  // `healthResults`, not this filtered array.
+  it("positive findings exclude health.duplicates' positive branch (OverviewPanel already shows it)", () => {
     const subs = [sub({ name: "Netflix" }), sub({ name: "Spotify" })];
     const output = runInsightsEngine(subs, false);
-    expect(output.positive.some((p) => p.ruleId === "health.duplicates")).toBe(true);
+    expect(output.positive.some((p) => p.ruleId === "health.duplicates")).toBe(false);
+  });
+
+  it("health score still credits health.duplicates' positive branch even though PositiveHabitsCard no longer shows it", () => {
+    const subs = [sub({ name: "Netflix" }), sub({ name: "Spotify" })];
+    const output = runInsightsEngine(subs, false);
+    const redundancy = output.healthScore?.dimensions.find((d) => d.key === "redundancy");
+    expect(redundancy?.status).toBe("good");
   });
 
   it("positive findings surface real health-rule results (previously always empty)", () => {
@@ -135,6 +144,25 @@ describe("runInsightsEngine", () => {
     expect(output.savingsForecast.monthlySavingsCents).toBe(1500);
     expect(output.savingsForecast.yearlySavingsCents).toBe(18000);
     expect(output.estimatedYearlySavingsCents).toBe(18000);
+  });
+
+  // Regression (release-review finding #4): yearlySavingsCents/
+  // estimatedYearlySavingsCents used to be monthlySavingsCents * 12 —
+  // invisible for a monthly-billed redundant subscription (the test above),
+  // but a real, silently-wrong dollar figure for a yearly-billed one, since
+  // monthlySavingsCents is itself already monthlyCents()-rounded. A
+  // $99.99/yr duplicate rounds to 833 cents/mo; 833 * 12 = 9996 cents
+  // ($99.96), not the real $99.99 (9999 cents).
+  it("does not double-round the yearly savings forecast for a yearly-billed duplicate", () => {
+    const subs = [
+      sub({ name: "Netflix", amountCents: 9999, billingCycle: "yearly" }),
+      sub({ name: "Netflix Premium", amountCents: 9999, billingCycle: "yearly" }),
+    ];
+    const output = runInsightsEngine(subs, false);
+    expect(output.savingsForecast.monthlySavingsCents).toBe(833);
+    expect(output.savingsForecast.yearlySavingsCents).toBe(9999);
+    expect(output.savingsForecast.yearlySavingsCents).not.toBe(833 * 12);
+    expect(output.estimatedYearlySavingsCents).toBe(9999);
   });
 
   // Regression, reproducing another exact real-account bug: with 2 USD
@@ -190,5 +218,95 @@ describe("runInsightsEngine", () => {
     expect(premium.optimizationScore!.unrealizedYearlySavingsCents).toBeGreaterThan(
       free.optimizationScore!.unrealizedYearlySavingsCents,
     );
+  });
+
+  // Regression (release-review finding #8): runInsightsEngine used to
+  // evaluate HEALTH_RULES itself AND rely on computeHealthScore
+  // re-evaluating the exact same rules against the exact same ctx a second
+  // time internally, doubling the cost of every rule (including the O(n^2)
+  // duplicate/overlap passes) on every call. computeHealthScore now
+  // receives the already-evaluated results instead of re-deriving them.
+  it("evaluates each health rule exactly once per call, not once for results and again for the health score", () => {
+    const spy = vi.spyOn(HEALTH_RULES[0], "evaluate");
+    spy.mockClear();
+    runInsightsEngine([sub({ name: "Netflix" }), sub({ name: "Netflix Premium" })], false);
+    expect(spy).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+  });
+
+  // The health score's own breakdown must still credit every finding,
+  // including the one health.duplicates warning branch runInsightsEngine's
+  // own `results`/`positive`/`warnings` deliberately excludes for
+  // presentational reasons (see this file's own comment above) — passing
+  // the full, unfiltered health results into computeHealthScore (not
+  // engine.ts's display-filtered subset) is what preserves that.
+  it("health score breakdown still reflects a finding excluded from the displayed insights list", () => {
+    const subs = [sub({ name: "Netflix", amountCents: 1000 }), sub({ name: "Netflix Premium", amountCents: 1000 })];
+    const output = runInsightsEngine(subs, false);
+    // Excluded from the displayed warnings (Savings opportunities already
+    // covers it), but computeHealthScore's redundancy dimension must still
+    // show a real, non-empty breakdown for the same finding.
+    expect(output.warnings.some((w) => w.ruleId === "health.duplicates")).toBe(false);
+    const redundancy = output.healthScore!.dimensions.find((d) => d.key === "redundancy")!;
+    expect(redundancy.breakdown.length).toBeGreaterThan(0);
+  });
+
+  // Regression: a real React "two children with the same key" crash on the
+  // subscription detail page, root-caused to this exact array shape.
+  // premium.risk_high_spend_concentration (rules/premium.ts) is both
+  // severity "critical" (so it lands in `warnings`) and `premium: true` (so
+  // it also lands in `premiumInsights`) — severity and the premium flag are
+  // independent axes, not mutually exclusive categories, and every
+  // "risk_*" rule in premium.ts shares this same shape. A naive
+  // `[...positive, ...warnings, ...premiumInsights]` concatenation (what
+  // subscriptions/[id]/page.tsx used to do) therefore includes the exact
+  // same InsightResult object twice.
+  describe("warnings/premiumInsights overlap (regression: duplicate-key crash)", () => {
+    // One outlier subscription making up >=50% of annual spend — the exact
+    // evidence premium.risk_high_spend_concentration requires (see
+    // rules/premium.ts's riskHighConcentration).
+    const bigOutlier = sub({ name: "Enterprise Plan", amountCents: 100_000, category: "software" });
+    const small = [sub({ name: "Aurora", amountCents: 1000 }), sub({ name: "Bramble", amountCents: 1000 })];
+
+    it("reproduces the root cause: the same finding appears in both raw arrays", () => {
+      const output = runInsightsEngine([bigOutlier, ...small], true);
+      expect(output.warnings.some((w) => w.ruleId === "premium.risk_high_spend_concentration")).toBe(true);
+      expect(output.premiumInsights.some((r) => r.ruleId === "premium.risk_high_spend_concentration")).toBe(true);
+      // The naive concatenation subscriptions/[id]/page.tsx used to do
+      // really did produce two entries with the same ruleId.
+      const naiveConcat = [...output.positive, ...output.warnings, ...output.premiumInsights];
+      const riskEntries = naiveConcat.filter((r) => r.ruleId === "premium.risk_high_spend_concentration");
+      expect(riskEntries.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("mergeInsightResults deduplicates by ruleId, preserving the finding exactly once", () => {
+      const output = runInsightsEngine([bigOutlier, ...small], true);
+      const merged = mergeInsightResults(output.positive, output.warnings, output.premiumInsights);
+      const riskEntries = merged.filter((r) => r.ruleId === "premium.risk_high_spend_concentration");
+      expect(riskEntries.length).toBe(1);
+      // Full content preserved — this isn't a lossy merge, the duplicate
+      // removed is the literal same object.
+      expect(riskEntries[0].title).toBe("Spend is concentrated in a few expensive subscriptions");
+      expect(riskEntries[0].severity).toBe("critical");
+      expect(riskEntries[0].premium).toBe(true);
+    });
+
+    it("mergeInsightResults never produces more than one entry per ruleId, across every category combination", () => {
+      const output = runInsightsEngine([bigOutlier, ...small], true);
+      const merged = mergeInsightResults(output.positive, output.warnings, output.premiumInsights);
+      const ruleIds = merged.map((r) => r.ruleId);
+      expect(new Set(ruleIds).size).toBe(ruleIds.length);
+    });
+
+    it("keeps the first-encountered occurrence's array order stable (positive, then warnings, then premiumInsights)", () => {
+      const output = runInsightsEngine([bigOutlier, ...small], true);
+      const merged = mergeInsightResults(output.positive, output.warnings, output.premiumInsights);
+      const riskIndex = merged.findIndex((r) => r.ruleId === "premium.risk_high_spend_concentration");
+      // It was deduplicated from `warnings` (the second array), not dropped
+      // entirely and not duplicated a second time later from
+      // `premiumInsights`.
+      expect(riskIndex).toBeGreaterThanOrEqual(0);
+      expect(merged.filter((r) => r.ruleId === "premium.risk_high_spend_concentration")).toHaveLength(1);
+    });
   });
 });

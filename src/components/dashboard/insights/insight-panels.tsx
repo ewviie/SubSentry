@@ -1,15 +1,18 @@
 import Link from "next/link";
 import type { Route } from "next";
-import { Lock, Sparkles, ShieldCheck, TrendingUp, CalendarClock, AlertTriangle, Gauge, Target } from "lucide-react";
+import { Sparkles, ShieldCheck, TrendingUp, CalendarClock, AlertTriangle, Gauge, Target } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AllSubscriptionsList } from "@/components/dashboard/all-subscriptions-list";
+import { HealthScoreActionsToggle } from "@/components/dashboard/insights/health-score-actions-toggle";
+import { UpgradeCard, UpgradeInline } from "@/components/billing/upgrade-prompt";
+import { isBetaAllAccess } from "@/lib/billing/plan";
 import { formatCents } from "@/lib/subscriptions/money";
-import { getSavingsPriority, PRIORITY_LABEL, PRIORITY_BADGE_VARIANT } from "@/lib/subscriptions/savings";
+import { getSavingsPriority, PRIORITY_LABEL, PRIORITY_BADGE_VARIANT, splitSavingsRecommendationsByPlan } from "@/lib/subscriptions/savings";
 import { computeBiggestOpportunity, type BiggestOpportunity } from "@/lib/insights-engine/biggest-opportunity";
 import { cn } from "@/lib/utils";
-import type { EngineOutput } from "@/lib/insights-engine";
+import type { EngineOutput, HealthDimensionStatus, HealthDimensionResult } from "@/lib/insights-engine";
 import type { Subscription } from "@/lib/db/schema";
 import type { ComputedInsight } from "@/lib/subscriptions/insights";
 
@@ -17,27 +20,15 @@ import type { ComputedInsight } from "@/lib/subscriptions/insights";
 // is a thin render over a single slice of EngineOutput with no shared state,
 // avoiding per-component import/boilerplate overhead for what are
 // otherwise ~20-40 line components.
-
-function PremiumLocked({ title, upgradeUrl }: { title: string; upgradeUrl: string | null }) {
-  return (
-    <Card size="sm" className="shadow-elevation-low">
-      <CardContent className="flex items-center gap-3">
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-          <Lock className="size-4" aria-hidden="true" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium">{title} is a Pro feature</p>
-          <p className="text-sm text-muted-foreground">Upgrade to unlock this insight.</p>
-        </div>
-        {upgradeUrl ? (
-          <Button size="sm" variant="outline" render={<a href={upgradeUrl} />} nativeButton={false}>
-            Upgrade
-          </Button>
-        ) : null}
-      </CardContent>
-    </Card>
-  );
-}
+//
+// The former PremiumLocked (a single terse "X is a Pro feature. Upgrade to
+// unlock this insight." line) is retired in favor of billing/upgrade-prompt.tsx's
+// shared UpgradeCard — same "one consistent upgrade component" this
+// monetization pass asks for everywhere else a gate renders (Health Score
+// breakdown below, Analytics, subscription detail). isBetaAllAccess() is
+// read directly here (safe — see plan.ts's own comment on why it's free of
+// server-only imports) rather than threaded down as another prop through
+// every one of this file's already-long prop lists.
 
 export function QuickWinsCard({ output }: { output: EngineOutput }) {
   if (output.quickWins.length === 0) return null;
@@ -242,7 +233,15 @@ export function BiggestOpportunityCard({ output }: { output: EngineOutput }) {
   );
 }
 
-export function SavingsOpportunitiesCard({ output }: { output: EngineOutput }) {
+export function SavingsOpportunitiesCard({
+  output,
+  isPremium,
+  upgradeUrl,
+}: {
+  output: EngineOutput;
+  isPremium: boolean;
+  upgradeUrl: string | null;
+}) {
   if (output.savingsForecast.recommendations.length === 0) return null;
   // monthlySavingsCents/yearlySavingsCents sum every confirmed-duplicate
   // recommendation's own (currency-correct) figure — see
@@ -254,6 +253,13 @@ export function SavingsOpportunitiesCard({ output }: { output: EngineOutput }) {
   // currencies simultaneously is a known, narrower edge case this total
   // doesn't separately disclose.
   const savingsCurrency = output.savingsForecast.recommendations.find((r) => r.type === "duplicate")?.currency;
+  // Monetization Council P0: every confirmed duplicate always stays fully
+  // visible (see splitSavingsRecommendationsByPlan's own comment — that
+  // promise is never behind a paywall anywhere in this app); only
+  // review-tier findings beyond the first are withheld from a free-plan
+  // caller, and only ever behind a real, checkable count + dollar total,
+  // never a vague "upgrade for more."
+  const { visible, teased } = splitSavingsRecommendationsByPlan(output.savingsForecast.recommendations, isPremium);
   return (
     <Card size="sm" className="shadow-elevation-low">
       <CardHeader>
@@ -271,7 +277,7 @@ export function SavingsOpportunitiesCard({ output }: { output: EngineOutput }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {output.savingsForecast.recommendations.slice(0, 4).map((rec) => (
+        {visible.slice(0, 4).map((rec) => (
           // Used to be one row (title ... button) with the title truncated
           // to make room, fine at 2-up, but 3-up (see the grid this renders
           // in) narrowed the column enough that real titles like "3 active
@@ -297,6 +303,13 @@ export function SavingsOpportunitiesCard({ output }: { output: EngineOutput }) {
             </Button>
           </div>
         ))}
+        {teased ? (
+          <p className="text-sm text-muted-foreground">
+            +{teased.count} more opportunit{teased.count === 1 ? "y" : "ies"}
+            {teased.totalCents !== null ? `, worth an estimated ${formatCents(teased.totalCents, teased.currency ?? undefined)}` : ""}.{" "}
+            <UpgradeInline label="See them with Pro" beta={isBetaAllAccess()} upgradeUrl={upgradeUrl} />
+          </p>
+        ) : null}
       </CardContent>
     </Card>
   );
@@ -305,7 +318,12 @@ export function SavingsOpportunitiesCard({ output }: { output: EngineOutput }) {
 // Status dot color/label pairs. Color alone never carries the meaning
 // (see InsightsSection's identical "text + color, never color alone"
 // convention elsewhere on this dashboard); the word is always visible too.
-const DIMENSION_STATUS_STYLE: Record<string, { dot: string; label: string }> = {
+// Keyed by HealthDimensionStatus itself (not a bare `string`), same
+// exhaustiveness pattern rules/health.ts's `dimension satisfies
+// HealthDimensionKey` already uses — a future addition to that union
+// without a matching entry here is now a compile error, not a runtime
+// crash on first render (release-review finding #10).
+const DIMENSION_STATUS_STYLE: Record<HealthDimensionStatus, { dot: string; label: string }> = {
   good: { dot: "bg-emerald", label: "Good" },
   watch: { dot: "bg-chart-4", label: "Worth a look" },
   attention: { dot: "bg-destructive", label: "Needs attention" },
@@ -314,15 +332,131 @@ const DIMENSION_STATUS_STYLE: Record<string, { dot: string; label: string }> = {
   unknown: { dot: "bg-muted-foreground/40", label: "Not enough data" },
 };
 
-export function ScoreBreakdownCard({ output }: { output: EngineOutput }) {
+// Exported for insight-panels.test.ts, same "plain function, no
+// component-test harness" reasoning as review-table.tsx's
+// isPreselectedByDefault. The exhaustive Record type above already
+// guarantees every real HealthDimensionStatus has an entry — this fallback
+// is defense against a value reaching here some way the type system can't
+// see (e.g. serialized across a server/client boundary), so a render never
+// throws on a missing style.
+export function styleForDimensionStatus(status: HealthDimensionStatus): { dot: string; label: string } {
+  return DIMENSION_STATUS_STYLE[status] ?? DIMENSION_STATUS_STYLE.unknown;
+}
+
+// Grammatical "a, b, and c" join for the collapsed unknown-dimensions row
+// below — there are only ever 5 dimensions total (DIMENSION_ORDER in
+// health-score.ts), so no truncation/"and N more" cap is needed the way
+// rules/health.ts's own formatNameList needs one for subscription names.
+// Exported for insight-panels.test.ts, same "plain function, no
+// component-test harness" reasoning as styleForDimensionStatus above.
+export function joinLabels(labels: string[]): string {
+  if (labels.length <= 1) return labels[0] ?? "";
+  if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
+  return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
+}
+
+// Exported for insight-panels.test.ts, same "plain function, no
+// component-test harness" reasoning as styleForDimensionStatus/joinLabels
+// above. The dimension most responsible for the score being what it is —
+// not an arbitrary first one — is what a free-plan caller sees in place of
+// the full breakdown (Premium). Reads only already-computed dimension
+// scores; no Health Score math changes here.
+export function worstKnownDimension(dimensions: HealthDimensionResult[]): HealthDimensionResult | null {
+  const known = dimensions.filter((d) => d.status !== "unknown");
+  if (known.length === 0) return null;
+  return [...known].sort((a, b) => a.score - b.score)[0];
+}
+
+export function ScoreBreakdownCard({
+  output,
+  isPremium,
+  upgradeUrl,
+}: {
+  output: EngineOutput;
+  isPremium: boolean;
+  upgradeUrl: string | null;
+}) {
   if (!output.healthScore) return null;
   const { dimensions, confidence } = output.healthScore;
+
+  // Monetization Council P0: "gate Health Score dimension breakdown by
+  // plan." The overall score + rating are shown to every plan, unconditionally,
+  // elsewhere (OverviewPanel's own gauge) — never gated. What's Premium-only
+  // is the full per-dimension depth below; a free-plan caller still gets one
+  // real, specific reason (the single dimension most responsible for the
+  // score), never just a bare number with no explanation at all.
+  if (!isPremium) {
+    const worst = worstKnownDimension(dimensions);
+    const style = worst ? styleForDimensionStatus(worst.status) : null;
+    return (
+      <UpgradeCard
+        icon={Gauge}
+        title="How your Health score was calculated"
+        description="Your overall score already reflects all 5 factors — Pro shows the full breakdown behind it."
+        beta={isBetaAllAccess()}
+        upgradeUrl={upgradeUrl}
+        preview={
+          <div className="space-y-3">
+            {/* Real value, not a locked box with nothing in it: names every
+                dimension the score is actually built from (DIMENSION_ORDER
+                in health-score.ts — not invented for this preview), plus
+                the one dimension most responsible for the current score in
+                full, unchanged from before this pass. */}
+            <p className="text-xs text-muted-foreground">
+              Built from {dimensions.map((d) => d.label).join(" · ")}.
+            </p>
+            {worst && style ? (
+              <div className="flex items-start gap-2.5 text-sm">
+                <span className={`mt-1.5 size-2 shrink-0 rounded-full ${style.dot}`} aria-hidden="true" />
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-baseline gap-x-1.5">
+                    <span className="font-medium">{worst.label}</span>
+                    <span className="text-xs text-muted-foreground">({style.label})</span>
+                  </div>
+                  <p className="text-muted-foreground">{worst.summary}</p>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">Not enough data yet to say what&apos;s affecting your score.</p>
+            )}
+          </div>
+        }
+      />
+    );
+  }
+  // UI audit finding #4: a thin/new account (e.g. one subscription with no
+  // price history) can leave several dimensions with zero contributing
+  // rules at once (growth needs 2+ active subscriptions to have an
+  // opinion, renewal needs 3+ — see rules/health.ts) — every one of them
+  // "unknown", every one rendering its own full row with the exact same
+  // generic summary text ("Not enough data to say anything specific
+  // yet."), verbatim, repeated. That read as padding, not information.
+  // Dimensions with real evidence still get their own row, unchanged; the
+  // "unknown" ones collapse into a single line naming all of them, so
+  // nothing shown is lost, it's just not restated N times. Health-score
+  // math (health-score.ts) is untouched — this only changes how the same
+  // `dimensions` data is presented.
+  const knownDimensions = dimensions.filter((d) => d.status !== "unknown");
+  const unknownDimensions = dimensions.filter((d) => d.status === "unknown");
+  // Audit fix #6: recommendedAction used to render inline under every
+  // dimension that had one — up to 5 extra full sentences, unfolded by
+  // default, on top of the 5 summary lines. The summary line (what's true)
+  // is the actual methodology explanation and stays inline; the action line
+  // (what to do about it) is real but secondary — collected here and handed
+  // to HealthScoreActionsToggle so it's one opt-in disclosure instead of a
+  // wall of always-visible advice. See that component's own comment for why
+  // this is a small dedicated client component rather than "use client" on
+  // this whole file.
+  const recommendedActions: { label: string; action: string }[] = [];
+  for (const d of knownDimensions) {
+    if (d.recommendedAction) recommendedActions.push({ label: d.label, action: d.recommendedAction });
+  }
   return (
     <Card size="sm" className="shadow-elevation-low">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Gauge className="size-4 text-muted-foreground" aria-hidden="true" />
-          How your score was calculated
+          How your Health score was calculated
         </CardTitle>
         {/* Only shown for medium/low. High confidence needs no caveat (see
             health-score.ts's computeConfidence). Never invents a "we've
@@ -335,8 +469,8 @@ export function ScoreBreakdownCard({ output }: { output: EngineOutput }) {
         ) : null}
       </CardHeader>
       <CardContent className="space-y-3">
-        {dimensions.map((dimension) => {
-          const style = DIMENSION_STATUS_STYLE[dimension.status];
+        {knownDimensions.map((dimension) => {
+          const style = styleForDimensionStatus(dimension.status);
           return (
             <div key={dimension.key} className="flex items-start gap-2.5 text-sm">
               <span className={`mt-1.5 size-2 shrink-0 rounded-full ${style.dot}`} aria-hidden="true" />
@@ -346,52 +480,89 @@ export function ScoreBreakdownCard({ output }: { output: EngineOutput }) {
                   <span className="text-xs text-muted-foreground">({style.label})</span>
                 </div>
                 <p className="text-muted-foreground">{dimension.summary}</p>
-                {/* Only a dimension with real negative evidence ever has
-                    one (see health-score.ts's recommendedActionFor). A
-                    clean dimension shows just the summary above, never a
-                    manufactured task. */}
-                {dimension.recommendedAction ? (
-                  <p className="mt-0.5 font-medium text-foreground">{dimension.recommendedAction}</p>
-                ) : null}
               </div>
             </div>
           );
         })}
+        {unknownDimensions.length > 0 ? (
+          <div className="flex items-start gap-2.5 text-sm">
+            <span
+              className={`mt-1.5 size-2 shrink-0 rounded-full ${DIMENSION_STATUS_STYLE.unknown.dot}`}
+              aria-hidden="true"
+            />
+            <p className="min-w-0 text-muted-foreground">
+              <span className="font-medium text-foreground">{joinLabels(unknownDimensions.map((d) => d.label))}</span>{" "}
+              {unknownDimensions.length === 1 ? "doesn't" : "don't"} have enough data yet to say anything specific.
+            </p>
+          </div>
+        ) : null}
+        <HealthScoreActionsToggle actions={recommendedActions} />
       </CardContent>
     </Card>
   );
 }
 
-export function OptimizationScoreCard({ output, isPremium, upgradeUrl }: { output: EngineOutput; isPremium: boolean; upgradeUrl: string | null }) {
-  if (!isPremium) return <PremiumLocked title="Optimization score" upgradeUrl={upgradeUrl} />;
+// UI audit finding #5: this used to render as "Optimization score: N/100" —
+// a second bare "/100" grade on the same page as the overview panel's
+// Health ring. Sizing it smaller (text-3xl vs Health's larger treatment)
+// and adding a "separate from Health" caveat, both already tried, weren't
+// enough — a normal user scanning the page still sees two "N/100" numerals
+// and has no reason to know one is the primary signal and the other a
+// narrower supporting one. The two are genuinely different metrics (Health:
+// 5-dimension weighted wellness read; this: unrealized-savings dollars as a
+// % of spend — see optimization-score.ts), not a case for merging them into
+// one number — a full visual merge of these two cards was tried and
+// reverted before. The fix is to stop presenting this as a second score at
+// all: dollars lead (the actionable fact), and the underlying score value
+// is still shown, just reframed as "% of spend recoverable" prose rather
+// than a bare "/100" that echoes Health's own grammar. No calculation
+// changed — optimization-score.ts's `score` is still 100 minus the
+// unrealized/annual-spend ratio; only which of its two existing outputs is
+// the visual headline changed.
+export function UnrealizedSavingsCard({ output, isPremium, upgradeUrl }: { output: EngineOutput; isPremium: boolean; upgradeUrl: string | null }) {
+  if (!isPremium) {
+    return (
+      <UpgradeCard
+        icon={Gauge}
+        title="Unrealized savings"
+        description="See how much you could potentially save across your subscriptions, combining confirmed duplicates with estimated optimizations."
+        beta={isBetaAllAccess()}
+        upgradeUrl={upgradeUrl}
+      />
+    );
+  }
   if (!output.optimizationScore) return null;
+  const { score, unrealizedYearlySavingsCents } = output.optimizationScore;
+  const unrecoveredPct = 100 - score;
   return (
     <Card size="sm" className="shadow-elevation-low">
       <CardHeader>
-        <CardTitle>Optimization score</CardTitle>
+        <CardTitle>Unrealized savings</CardTitle>
         <CardDescription>
-          Unrealized savings across every finding below (confirmed duplicates plus estimated optimizations), as a
-          share of your current spend, separate from Health.
+          A narrower, dollar-specific signal than your Health score above — confirmed duplicates plus estimated
+          optimizations, as a share of current spend.
         </CardDescription>
       </CardHeader>
       <CardContent>
-        {/* text-3xl, not text-4xl. This card sits as one of three-to-four
-            in a dense grid, not the page's primary figure (that's the
-            overview panel's monthly spend); matching that size here read as
-            two competing "biggest number on the page" claims. */}
-        <p className="font-mono text-3xl font-semibold tabular-nums">{output.optimizationScore.score}<span className="text-base text-muted-foreground">/100</span></p>
+        {/* font-financial/text-2xl/text-emerald matches every other real $
+            savings figure on this dashboard (see OverviewPanel's own
+            savings callout) — this card now reads as "a savings figure,"
+            not "a second score," on first glance. */}
+        <p className="font-financial text-2xl font-semibold text-emerald">
+          {formatCents(unrealizedYearlySavingsCents, output.stats.currency ?? undefined)}/yr
+        </p>
         <p className="mt-1 text-sm text-muted-foreground">
-          {formatCents(output.optimizationScore.unrealizedYearlySavingsCents, output.stats.currency ?? undefined)}/yr identified: confirmed duplicates
-          (Savings opportunities) plus estimates from Optimization recommendations below.
+          identified: confirmed duplicates (Savings opportunities) plus estimates from Optimization recommendations
+          below — {unrecoveredPct}% of your current spend still unrecovered.
           {/* This now folds in every optimization-category rule's
               monthlySavingsCents (see engine.ts), not just confirmed
-              duplicates, so it can no longer read 100/100 "nothing found"
-              while Optimization recommendations still shows a real dollar
-              figure underneath it. Savings opportunities above stays
-              duplicates-only on purpose (see its own comment); this score is
+              duplicates, so it can no longer read 0%-unrecovered "nothing
+              found" while Optimization recommendations still shows a real
+              dollar figure underneath it. Savings opportunities above stays
+              duplicates-only on purpose (see its own comment); this card is
               the one place the two signals are meant to combine. */}
         </p>
-        {/* This score's "confirmed duplicates" half only shows its biggest
+        {/* This card's "confirmed duplicates" half only shows its biggest
             few on the dashboard (Savings opportunities above); /savings has
             the full, ranked list plus each one's own Review link. A number
             with no way to see the findings behind it is exactly the
@@ -406,7 +577,17 @@ export function OptimizationScoreCard({ output, isPremium, upgradeUrl }: { outpu
 }
 
 export function AiRecommendationsCard({ output, isPremium, upgradeUrl }: { output: EngineOutput; isPremium: boolean; upgradeUrl: string | null }) {
-  if (!isPremium) return <PremiumLocked title="Optimization recommendations" upgradeUrl={upgradeUrl} />;
+  if (!isPremium) {
+    return (
+      <UpgradeCard
+        icon={Sparkles}
+        title="Optimization recommendations"
+        description="See which subscriptions could be reduced or replaced, with an estimated dollar figure behind each one."
+        beta={isBetaAllAccess()}
+        upgradeUrl={upgradeUrl}
+      />
+    );
+  }
   const suggestions = output.premiumInsights.filter((r) => r.category === "optimization");
   if (suggestions.length === 0) return null;
   return (
@@ -444,7 +625,17 @@ export function AiRecommendationsCard({ output, isPremium, upgradeUrl }: { outpu
 }
 
 export function RiskAlertsCard({ output, isPremium, upgradeUrl }: { output: EngineOutput; isPremium: boolean; upgradeUrl: string | null }) {
-  if (!isPremium) return <PremiumLocked title="Risk alerts" upgradeUrl={upgradeUrl} />;
+  if (!isPremium) {
+    return (
+      <UpgradeCard
+        icon={AlertTriangle}
+        title="Risk alerts"
+        description="Spot spending concentration, unusually large renewal clusters, and other risks before they cost you."
+        beta={isBetaAllAccess()}
+        upgradeUrl={upgradeUrl}
+      />
+    );
+  }
   const risks = output.premiumInsights.filter((r) => r.category === "usage");
   if (risks.length === 0) return null;
   return (

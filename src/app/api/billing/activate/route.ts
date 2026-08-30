@@ -12,15 +12,23 @@ const activateSchema = z.object({
 });
 
 // Redeems the Payment Link's redirect (`/dashboard?checkout_session_id=...`)
-// once the webhook (api/stripe/webhook/route.ts) has recorded the completed
-// checkout. Ownership is strictly the userId the webhook resolved from
-// client_reference_id — deliberately no email fallback. This app doesn't
-// verify email ownership at signup, so an email-based match would let anyone
-// who learns a checkoutSessionId (referrer leak, shared link, support
-// ticket) sign up with the payer's email and claim their entitlement first.
-// A session with no resolved userId (client_reference_id missing/invalid)
-// simply can't be self-service activated — a rare case that needs manual
-// follow-up rather than a security hole.
+// once the webhook (lib/billing/stripe-webhook.ts's processStripeEvent) has
+// recorded the completed checkout. P1 note: the webhook is now the actual
+// source of truth for granting access — it flips users.plan to "pro" itself
+// the moment Stripe confirms payment, independent of whether this endpoint
+// ever runs at all (a user who closes the tab mid-redirect still ends up
+// Premium). This endpoint's own plan update below is consequently an
+// idempotent no-op in the common case; what it still uniquely provides is
+// the ownership check (below) and a fast, explicit confirmation the client
+// can wait on rather than polling for the webhook to land. Ownership is
+// strictly the userId the webhook resolved from client_reference_id —
+// deliberately no email fallback. This app doesn't verify email ownership
+// at signup, so an email-based match would let anyone who learns a
+// checkoutSessionId (referrer leak, shared link, support ticket) sign up
+// with the payer's email and claim their entitlement first. A session with
+// no resolved userId (client_reference_id missing/invalid) simply can't be
+// self-service activated — a rare case that needs manual follow-up rather
+// than a security hole.
 export async function POST(request: Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });

@@ -16,6 +16,7 @@ export function ReviewRow({
   currentValues,
   selected,
   ignored,
+  proposalPending,
   sourceLabel,
   onToggleSelected,
   onEdit,
@@ -25,6 +26,14 @@ export function ReviewRow({
   currentValues: SubscriptionFormValues;
   selected: boolean;
   ignored: boolean;
+  // True while this row's price-change proposal (rendered by
+  // PriceChangeProposalRow directly below) is still unresolved — "Update
+  // price" or "Keep existing" hasn't been clicked yet. Disables the
+  // checkbox for the same reason `ignored` does: selecting this row for
+  // the create batch before that decision is made would create a
+  // duplicate subscription for a charge already reconciled a different
+  // way. See review-table.tsx's isBlockedByUnresolvedProposal.
+  proposalPending: boolean;
   sourceLabel: string;
   onToggleSelected: (id: string) => void;
   onEdit: (id: string) => void;
@@ -38,7 +47,7 @@ export function ReviewRow({
         <Checkbox
           checked={selected}
           onCheckedChange={() => onToggleSelected(detected.id)}
-          disabled={ignored}
+          disabled={ignored || proposalPending}
           aria-label={`Select ${currentValues.name}`}
         />
       </TableCell>

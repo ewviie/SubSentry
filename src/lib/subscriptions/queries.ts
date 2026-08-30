@@ -1,7 +1,8 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, count, eq, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { subscriptions, subscriptionPriceHistory, type Subscription, type SubscriptionPriceHistory, type User } from "@/lib/db/schema";
-import { MAX_ACTIVE_SUBSCRIPTIONS, hasReachedSubscriptionLimit } from "@/lib/billing/plan";
+import { MAX_ACTIVE_SUBSCRIPTIONS } from "@/lib/billing/plan";
+import { resolveHasReachedSubscriptionLimit } from "@/lib/dev/plan-preview";
 import { amountStringToCents, monthlyCents, annualCents, splitByPrimaryCurrency } from "./money";
 import type { SubscriptionInput, SubscriptionUpdate } from "./validation";
 import type { SubscriptionSource } from "./source";
@@ -125,7 +126,7 @@ export async function createSubscriptionWithLimitCheck(
     const activeCount = existing.filter((s) => s.status === "active").length;
 
     if (existing.length >= MAX_ACTIVE_SUBSCRIPTIONS) return { kind: "ceiling" };
-    if (hasReachedSubscriptionLimit(plan, activeCount)) return { kind: "plan" };
+    if (await resolveHasReachedSubscriptionLimit(plan, activeCount)) return { kind: "plan" };
 
     const [row] = await tx
       .insert(subscriptions)
@@ -155,7 +156,7 @@ export async function createSubscriptionsBulkWithLimitCheck(
     const activeRowCount = rows.filter((row) => row.status === "active").length;
 
     if (existing.length + rows.length > MAX_ACTIVE_SUBSCRIPTIONS) return { kind: "ceiling" };
-    if (hasReachedSubscriptionLimit(plan, activeCount + activeRowCount)) return { kind: "plan" };
+    if (await resolveHasReachedSubscriptionLimit(plan, activeCount + activeRowCount)) return { kind: "plan" };
     if (rows.length === 0) return { kind: "created", subscriptions: [] };
 
     const created = await tx
@@ -197,9 +198,9 @@ export async function updateSubscription(
   // free-plan user could cancel then reactivate (or reactivate several
   // already-cancelled rows) to exceed FREE_PLAN_SUBSCRIPTION_LIMIT entirely
   // through PATCH, bypassing the limit createSubscriptionWithLimitCheck
-  // enforces on the create path. Currently inert while BETA_ALL_ACCESS is
-  // on (hasReachedSubscriptionLimit always returns false — see
-  // lib/billing/plan.ts), but must hold the moment that flag flips off.
+  // enforces on the create path. Inert while BETA_ALL_ACCESS is on and no
+  // dev preview overrides it (see lib/billing/plan.ts and
+  // lib/dev/plan-preview.ts), but must hold the moment the beta ends.
   const mayActivate = input.status === "active";
 
   // Only pay for the extra read/transaction when this edit could possibly
@@ -241,9 +242,18 @@ export async function updateSubscription(
     if (!before) return { kind: "not_found" };
 
     if (mayActivate && before.status !== "active") {
-      const existing = await tx.select().from(subscriptions).where(eq(subscriptions.userId, userId));
-      const activeCount = existing.filter((s) => s.status === "active" && s.id !== id).length;
-      if (hasReachedSubscriptionLimit(plan, activeCount)) return { kind: "plan" };
+      // A targeted COUNT, not the full-row fetch createSubscription{,Bulk}WithLimitCheck
+      // above use — this check only ever needs the one number, unlike
+      // those two, which also need the actual row count (regardless of
+      // status) for the defensive MAX_ACTIVE_SUBSCRIPTIONS ceiling. Pulling
+      // every row over the wire inside an advisory-locked transaction just
+      // to produce one integer was real, wasted I/O on a hot,
+      // security-sensitive path (release-review finding #9).
+      const [{ value: activeCount }] = await tx
+        .select({ value: count() })
+        .from(subscriptions)
+        .where(and(eq(subscriptions.userId, userId), eq(subscriptions.status, "active"), ne(subscriptions.id, id)));
+      if (await resolveHasReachedSubscriptionLimit(plan, activeCount)) return { kind: "plan" };
     }
 
     const [row] = await tx

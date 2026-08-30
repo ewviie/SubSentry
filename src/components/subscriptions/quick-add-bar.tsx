@@ -18,8 +18,22 @@ import {
   type SubscriptionFormValues,
 } from "@/components/subscriptions/subscription-form";
 import { QuickAddSummary } from "@/components/subscriptions/quick-add-summary";
+import { UpgradeInline } from "@/components/billing/upgrade-prompt";
 import { amountStringToCents, formatCents, monthlyCents, annualCents } from "@/lib/subscriptions/money";
 import type { SubscriptionInput } from "@/lib/subscriptions/validation";
+
+// Set only for the one error /api/subscriptions/quick-add can return that
+// has a real, useful next step beyond "try again" — a free-plan caller who
+// just hit their daily ceiling. Everything else (parse failure, network
+// error, oversized input) stays a plain error string; this is deliberately
+// not a generic "any 429 gets a fancy treatment" mechanism, since the
+// premium narrate-insights limiter elsewhere has its own already-adequate
+// plain-text handling and doesn't need this.
+interface RateLimitPrompt {
+  message: string;
+  beta: boolean;
+  upgradeUrl: string | null;
+}
 
 type Confidence = "high" | "medium" | "low";
 
@@ -41,6 +55,7 @@ export function QuickAddBar({ isFirstSubscription = false }: { isFirstSubscripti
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rateLimitPrompt, setRateLimitPrompt] = useState<RateLimitPrompt | null>(null);
   const [draft, setDraft] = useState<SubscriptionFormValues | null>(null);
   const [confidence, setConfidence] = useState<Confidence>("medium");
   // Snapshotted separately from `text` (not just read live) so the summary
@@ -59,6 +74,7 @@ export function QuickAddBar({ isFirstSubscription = false }: { isFirstSubscripti
   async function handleParse(event: FormEvent) {
     event.preventDefault();
     setError(null);
+    setRateLimitPrompt(null);
     setLoading(true);
     try {
       const res = await fetch("/api/subscriptions/quick-add", {
@@ -68,7 +84,11 @@ export function QuickAddBar({ isFirstSubscription = false }: { isFirstSubscripti
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(data?.message ?? "Couldn't parse that. Try again or add it manually.");
+        if (data?.error === "rate_limited") {
+          setRateLimitPrompt({ message: data.message, beta: Boolean(data.beta), upgradeUrl: data.upgradeUrl ?? null });
+        } else {
+          setError(data?.message ?? "Couldn't parse that. Try again or add it manually.");
+        }
         return;
       }
       setParsedText(text);
@@ -158,6 +178,21 @@ export function QuickAddBar({ isFirstSubscription = false }: { isFirstSubscripti
       {error ? (
         <p role="alert" className="mt-2 text-sm text-destructive">
           {error}
+        </p>
+      ) : null}
+      {/* Section 8 of the monetization pass: a free user hitting the real
+          5/day ceiling sees why (Pro's real 40/day number) and a real next
+          step, not just a dead-end error — "enter it manually" (still
+          works, no functionality lost) alongside the actual upgrade path. */}
+      {rateLimitPrompt ? (
+        <p role="alert" className="mt-2 text-sm text-muted-foreground">
+          {rateLimitPrompt.message}{" "}
+          <UpgradeInline
+            label="Upgrade to Pro"
+            beta={rateLimitPrompt.beta}
+            upgradeUrl={rateLimitPrompt.upgradeUrl}
+            className="align-baseline"
+          />
         </p>
       ) : null}
 

@@ -16,8 +16,15 @@ export function BillingCycleCards({ entries, currency }: { entries: BillingCycle
     return <p className="text-sm text-muted-foreground">Add a subscription to see this breakdown.</p>;
   }
 
+  // Launch-readiness audit finding #3: grid-cols-2 was unconditional, so
+  // the common single-cycle account (e.g. every subscription billed
+  // monthly) rendered one small tile floating in a 2-column grid with the
+  // second track left as dead space. entries.length === 1 drops to a
+  // single, width-capped column instead — the tile no longer stretches to
+  // fill a track it doesn't need. 2+ entries keep the original two-column
+  // layout untouched.
   return (
-    <div className="grid grid-cols-2 gap-3">
+    <div className={entries.length === 1 ? "grid max-w-xs grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
       {entries.map((entry) => (
         <div key={entry.cycle} className="rounded-lg border border-border p-3">
           <p className="text-xs font-medium text-muted-foreground">{CYCLE_LABELS[entry.cycle]}</p>

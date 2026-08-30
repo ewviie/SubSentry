@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { sessions, users, type User } from "@/lib/db/schema";
 import { SESSION_COOKIE } from "./constants";
+import { getDevPlanPreview } from "@/lib/dev/plan-preview";
 
 const SESSION_DAYS = 30;
 
@@ -91,6 +92,20 @@ export const getSession = cache(async (): Promise<{ user: SafeUser } | null> => 
   }
 
   const { expiresAt: _expiresAt, ...user } = row;
+
+  // Dev-only Free/Pro preview override — see lib/dev/plan-preview.ts's own
+  // comment for the full reasoning. getDevPlanPreview() is unconditionally
+  // safe to call here: it returns null immediately (never touching cookies
+  // at all) whenever NODE_ENV is production, so this branch is provably
+  // dead code in a real deployment, not just conventionally unused. The
+  // real DB row (and everything derived from it elsewhere — billing,
+  // webhooks, the Settings page's own "actually on Pro" checks that
+  // deliberately read the raw plan for Manage Billing) is never touched;
+  // only the `plan` field in *this* returned object is overridden, which is
+  // what every hasPaidAccess/isPremium call site downstream already reads.
+  const devPlanPreview = await getDevPlanPreview();
+  if (devPlanPreview) return { user: { ...user, plan: devPlanPreview } };
+
   return { user };
 });
 

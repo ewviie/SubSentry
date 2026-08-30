@@ -1,5 +1,5 @@
 import type { Subscription } from "@/lib/db/schema";
-import { monthlyCents, annualCents, formatCents } from "./money";
+import { monthlyCents, annualCents, formatCents, splitByPrimaryCurrency } from "./money";
 import { forEachLikelyDuplicatePair, computeFunctionalOverlapGroups, findSmallSubscriptionsCluster, smallSubscriptionsClusterTitle } from "./insights";
 
 // A dedicated, actionable savings engine — distinct from insights.ts's
@@ -41,6 +41,15 @@ export interface SavingsRecommendation {
   // description — real, known data — just not claimed as money that would
   // be saved. See impactCents below for the prioritization-only figure.
   monthlySavingsCents: number;
+  // The true annual figure for a "duplicate" recommendation, computed via
+  // annualCents(b.amountCents, b.billingCycle) directly from the redundant
+  // subscription — NOT monthlySavingsCents * 12. monthlySavingsCents is
+  // already monthlyCents()-rounded (a real rounding step for yearly/
+  // quarterly/weekly cycles, e.g. a $99.99/yr redundant subscription
+  // rounds to 833 cents/mo); multiplying that back by 12 would give $99.96,
+  // not the real $99.99. 0 for functional_overlap/small_subscriptions, same
+  // as monthlySavingsCents, for the same "not a proven saving" reason.
+  annualSavingsCents: number;
   // The real dollar amount actually involved in this finding, whether or
   // not it's a proven saving — equal to monthlySavingsCents for a
   // duplicate, and the combined cost of the group/cluster otherwise. Exists
@@ -110,6 +119,7 @@ export function computeSavingsRecommendations(
     alreadyFlagged.add(b.id);
 
     const savings = monthlyCents(b.amountCents, b.billingCycle);
+    const annualSavings = annualCents(b.amountCents, b.billingCycle);
     // Identical raw names (not just namesLikelyMatch's fuzzy sense — two
     // subscriptions both literally called "Netflix") produce "Netflix and
     // Netflix look like duplicates" if the two names are just concatenated
@@ -130,6 +140,7 @@ export function computeSavingsRecommendations(
         : `These look like the same service. If ${b.name} is the stale one, canceling it saves you money every month.`,
       actionLabel: `Review ${b.name}`,
       monthlySavingsCents: savings,
+      annualSavingsCents: annualSavings,
       impactCents: savings,
       evidenceTier: "confirmed",
       urgencyDays: soonestUrgencyDays([a, b], todayIso),
@@ -166,6 +177,7 @@ export function computeSavingsRecommendations(
       description: `${verb} ${label.toLowerCase()} functionality. ${formatCents(combinedMonthlyCents, currency)}/mo combined. If you primarily use one, review whether you need ${needAllOf}.`,
       actionLabel: `Review ${priciest.name}`,
       monthlySavingsCents: 0,
+      annualSavingsCents: 0,
       impactCents: combinedMonthlyCents,
       evidenceTier: "review",
       urgencyDays: soonestUrgencyDays(subs, todayIso),
@@ -194,6 +206,7 @@ export function computeSavingsRecommendations(
       description: `${smallCluster.subscriptions.map((s) => s.name).join(", ")} are each well below your typical subscription cost here — but combined, they're ${Math.round(smallCluster.shareOfTotal * 100)}% of your monthly spend. Worth a look if some have gone unused.`,
       actionLabel: `Review ${priciest.name}`,
       monthlySavingsCents: 0,
+      annualSavingsCents: 0,
       impactCents: smallCluster.combinedMonthlyCents,
       evidenceTier: "review",
       urgencyDays: soonestUrgencyDays(smallCluster.subscriptions, todayIso),
@@ -222,24 +235,70 @@ export function computeSavingsRecommendations(
     (a, b) =>
       priorityRank[getSavingsPriority(b)] - priorityRank[getSavingsPriority(a)] ||
       evidenceRank[b.evidenceTier] - evidenceRank[a.evidenceTier] ||
-      b.impactCents - a.impactCents ||
+      // impactCents is only comparable when both recommendations share a
+      // currency — this app has no exchange rate, so raw cents from two
+      // different currencies is not a real magnitude comparison, the same
+      // "never sum/compare cents across currencies" rule
+      // sumMonthlyCentsIfSingleCurrency/splitByPrimaryCurrency already
+      // follow elsewhere (release-review finding #5: a £20/mo GBP finding
+      // used to outrank an $18/mo USD one purely because 2000 > 1800 in raw
+      // cents). A cross-currency pair ties here and falls through to
+      // urgencyDays instead of a fabricated ranking.
+      (a.currency === b.currency ? b.impactCents - a.impactCents : 0) ||
       a.urgencyDays - b.urgencyDays,
   );
 }
 
-// Same identity rule as insights.ts's computePotentialSavingsMonthlyCents:
-// each distinct redundant subscription counted at most once, even if it
-// shows up as the redundant half of more than one duplicate pair.
-export function computeTotalPotentialSavingsMonthlyCents(recommendations: SavingsRecommendation[]): number {
+// Shared by computeTotalPotentialSavingsMonthlyCents/YearlyCents below:
+// every "duplicate" recommendation, each distinct redundant subscription
+// counted at most once (same identity rule as insights.ts's
+// computePotentialSavingsMonthlyCents — a subscription flagged as the
+// redundant half of more than one pair doesn't get double-counted),
+// restricted to active's primary currency. Deduping before restricting to
+// the primary currency (not after) means a popular duplicate target
+// appearing in multiple pairs can't inflate its own currency's count more
+// than once.
+//
+// Release-review follow-up finding: this dedup used to sum
+// monthlySavingsCents/annualSavingsCents straight across every recommendation
+// regardless of currency — each recommendation's own `currency` field
+// comment already documents that summing raw cents across currencies is
+// fabricated math (the same rule sumMonthlyCentsIfSingleCurrency/
+// splitByPrimaryCurrency/the impactCents tiebreak above already follow),
+// but neither total actually applied it. A GBP duplicate's savings could
+// silently inflate a USD-denominated total (or vice versa) by however many
+// raw cents the other currency's pair happened to be worth.
+function primaryCurrencyDuplicateRecommendations(recommendations: SavingsRecommendation[]): SavingsRecommendation[] {
   const countedIds = new Set<string>();
-  let total = 0;
+  const deduped: SavingsRecommendation[] = [];
   for (const rec of recommendations) {
     if (rec.type !== "duplicate") continue;
     if (countedIds.has(rec.targetSubscriptionId)) continue;
     countedIds.add(rec.targetSubscriptionId);
-    total += rec.monthlySavingsCents;
+    deduped.push(rec);
   }
-  return total;
+  return splitByPrimaryCurrency(deduped).included;
+}
+
+export function computeTotalPotentialSavingsMonthlyCents(recommendations: SavingsRecommendation[]): number {
+  return primaryCurrencyDuplicateRecommendations(recommendations).reduce(
+    (sum, rec) => sum + rec.monthlySavingsCents,
+    0,
+  );
+}
+
+// Same currency-safe, identity-deduped set as computeTotalPotentialSavingsMonthlyCents
+// above, but sums each recommendation's own annualSavingsCents rather than
+// scaling the monthly total by 12 (release-review finding #4: engine.ts
+// used to compute `monthlySavingsCents * 12`, double-rounding on top of
+// monthlySavingsCents' own monthlyCents() rounding for yearly/quarterly/
+// weekly redundant subscriptions — a $99.99/yr duplicate reported as
+// $99.96/yr instead of the real $99.99).
+export function computeTotalPotentialSavingsYearlyCents(recommendations: SavingsRecommendation[]): number {
+  return primaryCurrencyDuplicateRecommendations(recommendations).reduce(
+    (sum, rec) => sum + rec.annualSavingsCents,
+    0,
+  );
 }
 
 // The other half of "potential vs. actually happened" — everything above
@@ -345,3 +404,76 @@ export function getSavingsPriority(recommendation: SavingsRecommendation): Savin
 // app (the emerald brand accent), not a new bespoke color.
 export const PRIORITY_LABEL = { high: "High impact", medium: "Medium impact", low: "Worth a look" } as const;
 export const PRIORITY_BADGE_VARIANT = { high: "success", medium: "secondary", low: "outline" } as const;
+
+// Monetization Council P0: "gate savings-opportunity list depth by plan."
+//
+// Every "confirmed" recommendation (evidenceTier === "confirmed", which
+// today only ever means a deterministic duplicate-name match — see this
+// file's own header comment) is ALWAYS fully visible, on principle, for
+// every plan. This app's own duplicate-detection promise ("you're not
+// paying twice for the same thing") is never behind a paywall anywhere
+// else in the product (health.duplicates, the dashboard's own duplicate
+// check callout, and the /subscriptions list's own duplicate badges are
+// all free and ungated) — gating it here specifically, on this one list,
+// while leaving it free everywhere else, wouldn't be a real restriction,
+// it would just be an inconsistency a user could route around by looking
+// at a different page. So there is nothing to gate: only "review"-tier
+// findings (functional_overlap, small_subscriptions — plausible, not
+// proof) are ever withheld, and only beyond the single highest-priority
+// one, which stays visible so a free-plan user still sees a real,
+// specific example of what the review tier looks like.
+//
+// `teased` deliberately mirrors the "amount honestly involved, in a
+// caller-checkable dollar figure" convention this file already uses for
+// impactCents elsewhere — never a vague "upgrade for more" with no number
+// behind it. totalCents/currency are null (not a wrong number) when the
+// withheld items don't share one currency, the same "honest gap" rule
+// splitByPrimaryCurrency/computeRealizedSavings already follow.
+export interface SavingsTease {
+  count: number;
+  totalCents: number | null;
+  currency: string | null;
+}
+
+export interface SavingsVisibility {
+  visible: SavingsRecommendation[];
+  // null exactly when nothing is being withheld — including for every
+  // Premium caller, and for a Free caller whose review-tier findings all
+  // already fit within the one always-visible slot.
+  teased: SavingsTease | null;
+}
+
+export function splitSavingsRecommendationsByPlan(
+  recommendations: SavingsRecommendation[],
+  isPremium: boolean,
+): SavingsVisibility {
+  if (isPremium) return { visible: recommendations, teased: null };
+
+  const reviewIds = new Set<string>();
+  let reviewSeen = 0;
+  for (const rec of recommendations) {
+    if (rec.evidenceTier !== "review") continue;
+    reviewSeen += 1;
+    if (reviewSeen === 1) reviewIds.add(rec.id);
+  }
+
+  // Preserves the original relative order (the same priority order
+  // computeSavingsRecommendations already sorted into) rather than
+  // reordering confirmed-before-review, so a Free caller's list is a
+  // strict prefix-like subset of what Premium sees, never a reshuffled one.
+  const visible = recommendations.filter((rec) => rec.evidenceTier === "confirmed" || reviewIds.has(rec.id));
+  const hidden = recommendations.filter((rec) => rec.evidenceTier === "review" && !reviewIds.has(rec.id));
+
+  if (hidden.length === 0) return { visible, teased: null };
+
+  const currency = hidden[0].currency;
+  const sameCurrency = hidden.every((rec) => rec.currency === currency);
+  return {
+    visible,
+    teased: {
+      count: hidden.length,
+      totalCents: sameCurrency ? hidden.reduce((sum, rec) => sum + rec.impactCents, 0) : null,
+      currency: sameCurrency ? currency : null,
+    },
+  };
+}

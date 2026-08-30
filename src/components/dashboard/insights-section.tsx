@@ -8,7 +8,7 @@ import { AlertTriangle, Check, Copy, Loader2, PieChart, ShieldCheck, Sparkles, T
 import { motion } from "framer-motion";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { fadeInUp, liftOnHover, revealViewport, springSnappy, staggerContainer } from "@/lib/motion";
+import { fadeInUp, liftOnHover, springSnappy, staggerContainer } from "@/lib/motion";
 import type { ComputedInsight, InsightType } from "@/lib/subscriptions/insights";
 
 const ICONS: Record<InsightType, typeof TrendingUp> = {
@@ -95,7 +95,14 @@ export function InsightsSection({ insights }: { insights: ComputedInsight[] }) {
   return (
     <div>
       <div className="flex items-center justify-between">
-        <h2 className="font-heading flex items-center gap-2 text-h2 font-semibold">
+        {/* UI audit finding #3: this used to be sized text-h2 — identical to
+            Financial Overview's own section title directly above it (see
+            section-heading.tsx's "secondary" weight for the sibling case of
+            the same problem at the top-level-section layer). Insights is
+            nested content within that section, not a second section title,
+            so it gets the same "secondary" scale rather than competing with
+            what it's nested under. */}
+        <h2 className="font-heading flex items-center gap-2 text-base font-semibold">
           <Sparkles className="size-4 text-ai" />
           Insights
         </h2>
@@ -124,11 +131,15 @@ export function InsightsSection({ insights }: { insights: ComputedInsight[] }) {
           </CardContent>
         </Card>
       ) : (
+        // Launch-readiness audit finding #7: same fix as
+        // overview-panel.tsx/stagger-section.tsx — animate replaces
+        // whileInView so this (Dashboard's own primary content, already on
+        // screen at mount) doesn't wait on an IntersectionObserver callback
+        // to become visible.
         <motion.div
           variants={staggerContainer(0.06)}
           initial="hidden"
-          whileInView="visible"
-          viewport={revealViewport}
+          animate="visible"
           className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3"
         >
           {insights.map((insight, idx) => {

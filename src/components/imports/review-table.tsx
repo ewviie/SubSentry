@@ -35,6 +35,27 @@ export function isPreselectedByDefault(detected: DetectedSubscription): boolean 
   return detected.confidence === "high" && !detected.isDuplicateOfExistingId;
 }
 
+// Exported for review-table.test.ts, same "plain function, no
+// component-test harness" reasoning as isPreselectedByDefault above.
+//
+// A row carrying a price-change proposal that hasn't been resolved yet
+// (neither "Update price" nor "Keep existing" clicked) must never reach
+// the create batch — Confirm would then both leave the proposal dangling
+// AND create a brand-new, duplicate subscription for a charge already
+// tracked under a different price, exactly the double-import this feature
+// exists to prevent (release-review finding: neither toggleSelectAll nor a
+// direct checkbox click nor the final selectedRows/onConfirm batch guarded
+// against this — a row could be manually checked, or swept in by "select
+// all", before its proposal was ever acted on). Used to gate selectability
+// at every one of those three points, not just one, so there's no
+// remaining path that skips it.
+export function isBlockedByUnresolvedProposal(
+  detected: DetectedSubscription,
+  resolvedProposalIds: ReadonlySet<string>,
+): boolean {
+  return detected.priceChangeProposal !== undefined && !resolvedProposalIds.has(detected.id);
+}
+
 export function detectedToFormValues(detected: DetectedSubscription): SubscriptionFormValues {
   return {
     // Truncated here, not in merchant-normalizer.ts's displayName: that
@@ -195,7 +216,9 @@ export function ReviewTable({
     }
   }
 
-  const selectableIds = detected.filter((d) => !ignoredIds.has(d.id)).map((d) => d.id);
+  const selectableIds = detected
+    .filter((d) => !ignoredIds.has(d.id) && !isBlockedByUnresolvedProposal(d, resolvedProposalIds))
+    .map((d) => d.id);
   const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id));
   const someSelected = selectableIds.some((id) => selectedIds.has(id));
 
@@ -213,8 +236,14 @@ export function ReviewTable({
 
   // Same cap as toggleSelectAll above: a no-op past MAX_IMPORT_ROWS rather
   // than letting one-at-a-time clicks reach a count toggleSelectAll itself
-  // would never produce.
+  // would never produce. Also a no-op for a row still blocked by an
+  // unresolved price-change proposal — belt-and-suspenders alongside the
+  // row's own disabled checkbox (see ReviewRow's proposalPending prop
+  // below): this is the actual state update a stray call would mutate, so
+  // it guards itself rather than trusting every caller to check first.
   function toggleSelected(id: string) {
+    const row = detected.find((d) => d.id === id);
+    if (row && isBlockedByUnresolvedProposal(row, resolvedProposalIds)) return;
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) {
@@ -232,7 +261,17 @@ export function ReviewTable({
   // selected row shares one currency. See sumMonthlyCentsIfSingleCurrency's
   // own comment for why a mixed-currency batch can't be honestly summed
   // into one figure.
+  // Defensive filter, not just trust in toggleSelected/toggleSelectAll
+  // already excluding these ids: this is the actual batch onConfirm
+  // receives, so it's the last, authoritative point to guarantee a row
+  // with an unresolved price-change proposal never becomes a duplicate
+  // subscription, independent of how selectedIds got into whatever state
+  // it's in.
   const selectedRows = [...selectedIds]
+    .filter((id) => {
+      const row = detected.find((d) => d.id === id);
+      return !row || !isBlockedByUnresolvedProposal(row, resolvedProposalIds);
+    })
     .map((id) => values.get(id))
     .filter((v): v is SubscriptionFormValues => v !== undefined);
   const selectedTotal = sumMonthlyCentsIfSingleCurrency(selectedRows);
@@ -274,6 +313,7 @@ export function ReviewTable({
                     currentValues={currentValues}
                     selected={selectedIds.has(row.id)}
                     ignored={ignoredIds.has(row.id)}
+                    proposalPending={!!showProposal}
                     sourceLabel={sourceLabel}
                     onToggleSelected={toggleSelected}
                     onEdit={setEditingId}

@@ -68,6 +68,43 @@ describe("premium.risk_expensive_duplicate", () => {
     const result = rule.evaluate(ctx([sub({ name: "Netflix", amountCents: 1000 }), sub({ name: "Netflix Premium", amountCents: 1000 })]));
     expect(result?.severity).toBe("critical");
   });
+
+  // Regression (release-review finding #3): `total` used to be
+  // monthlyTotalCents(ctx.active) — summed across every currency
+  // regardless of which one the duplicate pair was actually in — and the
+  // description used formatCents() with no currency argument, silently
+  // defaulting to USD. A GBP duplicate pair with no other subscriptions
+  // padding the total is the simplest reproduction: the ratio must be
+  // computed from a GBP-only total, and the rendered amount must say £,
+  // not $.
+  it("uses the duplicate's own currency for both the ratio and the formatted amount", () => {
+    const result = rule.evaluate(
+      ctx([sub({ name: "Netflix", amountCents: 1000, currency: "gbp" }), sub({ name: "Netflix Premium", amountCents: 1000, currency: "gbp" })]),
+    );
+    expect(result).not.toBeNull();
+    expect(result!.description).toContain("£10.00/mo");
+    expect(result!.description).not.toContain("$10.00");
+  });
+
+  // A non-primary-currency subscription must not inflate the denominator
+  // `expensive.monthlySavingsCents / total` is checked against — before
+  // the fix, three unrelated USD subscriptions could pad `total` high
+  // enough that a real, otherwise-qualifying GBP duplicate's ratio fell
+  // under the 20% threshold and the finding was silently suppressed.
+  it("does not let a non-primary-currency subscription suppress the finding by padding the total", () => {
+    const gbpDuplicateA = sub({ name: "Netflix", amountCents: 1000, currency: "gbp" });
+    const gbpDuplicateB = sub({ name: "Netflix Premium", amountCents: 1000, currency: "gbp" });
+    // A single, smaller-count USD subscription: splitByPrimaryCurrency
+    // picks the majority currency by subscription count, so gbp (2 subs)
+    // stays primary over usd (1 sub) — isolates the "does padding the
+    // total suppress the finding" question from the separate "which
+    // currency wins as primary" one already covered by
+    // annualSwitchSavings' own currency test.
+    const usdPadding = sub({ name: "Unrelated", amountCents: 100_000, currency: "usd" });
+    const result = rule.evaluate(ctx([gbpDuplicateA, gbpDuplicateB, usdPadding]));
+    expect(result).not.toBeNull();
+    expect(result!.description).toContain("£10.00/mo");
+  });
 });
 
 describe("premium.risk_renewal_cluster", () => {

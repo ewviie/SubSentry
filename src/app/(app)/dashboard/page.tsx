@@ -2,6 +2,7 @@ import Link from "next/link";
 import { PiggyBank, BarChart3 } from "lucide-react";
 import { requireUser } from "@/lib/auth/session";
 import { getDashboardData, getAllPriceHistoryForUser } from "@/lib/subscriptions/queries";
+import { getDismissedRecommendationIds } from "@/lib/subscriptions/dismissed-recommendations";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CategorySpendBar } from "@/components/dashboard/category-spend-bar";
@@ -12,8 +13,10 @@ import { OverviewPanel } from "@/components/dashboard/overview-panel";
 import { MotionCard } from "@/components/dashboard/motion-card";
 import { StaggerSection } from "@/components/dashboard/stagger-section";
 import { computeInsights, computePotentialSavingsMonthlyCents } from "@/lib/subscriptions/insights";
-import { getUpgradeUrl, hasPaidAccess } from "@/lib/billing/plan";
+import { FREE_PLAN_SUBSCRIPTION_LIMIT, getUpgradeUrl, isBetaAllAccess, shouldShowSubscriptionLimitBanner } from "@/lib/billing/plan";
+import { resolveHasPaidAccess } from "@/lib/dev/plan-preview";
 import { runInsightsEngine } from "@/lib/insights-engine";
+import { UpgradeLimitBanner } from "@/components/billing/upgrade-prompt";
 import {
   BiggestOpportunityCard,
   QuickWinsCard,
@@ -21,7 +24,7 @@ import {
   RenewalForecastCard,
   SavingsOpportunitiesCard,
   ScoreBreakdownCard,
-  OptimizationScoreCard,
+  UnrealizedSavingsCard,
   AiRecommendationsCard,
   RiskAlertsCard,
 } from "@/components/dashboard/insights/insight-panels";
@@ -33,17 +36,18 @@ export default async function DashboardPage() {
   // Promise.all (raised in local-council review, Performance lens, for that
   // page; applied here too rather than reintroducing the same avoidable
   // extra round trip).
-  const [data, priceHistoryBySubscriptionId] = await Promise.all([
+  const [data, priceHistoryBySubscriptionId, dismissedRecommendationIds] = await Promise.all([
     getDashboardData(user.id),
     getAllPriceHistoryForUser(user.id),
+    getDismissedRecommendationIds(user.id),
   ]);
   const insights = computeInsights(data.subscriptions);
-  const isPremium = hasPaidAccess(user.plan);
+  const isPremium = await resolveHasPaidAccess(user.plan);
   const upgradeUrl = isPremium ? null : getUpgradeUrl(user.id);
 
   const potentialSavingsMonthlyCents = computePotentialSavingsMonthlyCents(insights);
   const duplicateInsights = insights.filter((i) => i.potentialSavingsMonthlyCents !== undefined);
-  const engineOutput = runInsightsEngine(data.subscriptions, isPremium, priceHistoryBySubscriptionId);
+  const engineOutput = runInsightsEngine(data.subscriptions, isPremium, priceHistoryBySubscriptionId, dismissedRecommendationIds);
   // Insights and the Savings opportunities section below both ultimately
   // read from the same overlap/duplicate detection, left unfiltered here,
   // "Possible duplicate: Netflix and Netflix Premium" and "3 active
@@ -70,20 +74,21 @@ export default async function DashboardPage() {
   return (
     <div className="space-y-10">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        {/* min-w-0: without it, a flex item's automatic minimum width is
-            its content's min-content size (spec default, applies in
-            flex-col too), not 0. A name falls back to the account's
-            email when unset, and an email has no natural break point;
-            with no min-w-0 here, the browser reserved room to fit it on
-            one unbroken line and forced this whole row (and the page)
-            wider than the viewport on mobile (confirmed via a real
-            production build (a long email caused ~230px of horizontal
-            overflow at every tested mobile width). break-words on the
-            h1 below is the other half of the fix: min-w-0 alone would
-            still let the text overflow its own box; break-words gives
-            it somewhere to actually wrap to once it's allowed to shrink. */}
+        {/* UI audit fix: this used to fall back to the account's email
+            ("Welcome, alex@example.com") when no name was set — an email
+            address isn't a name, and blowing it up to text-h1 as this
+            page's hero headline read as a data leak/placeholder, not a
+            greeting. Nameless accounts now get the plain, still-warm
+            "Welcome" with nothing appended, an intentional neutral
+            empty-state rather than a fallback value with no natural
+            reason to be this prominent. min-w-0 + break-words stay: a
+            user-entered name has no length limit here either (see
+            settings' EditNameForm, 120 chars) and could still in
+            principle be one long unbroken word. */}
         <div className="min-w-0">
-          <h1 className="break-words font-heading text-h1 font-semibold">Welcome, {user.name || user.email}</h1>
+          <h1 className="break-words font-heading text-h1 font-semibold">
+            Welcome{user.name ? `, ${user.name}` : ""}
+          </h1>
           <p className="mt-1 text-muted-foreground">Here&apos;s what you&apos;re paying for.</p>
         </div>
         <div className="flex items-center gap-2">
@@ -148,7 +153,7 @@ export default async function DashboardPage() {
 
       <section className="space-y-5">
         <SectionHeading
-          eyebrow="Next steps"
+          weight="secondary"
           title="Subscription Management"
           // First-run-specific: a brand-new account's only guaranteed-to-work
           // path to real value is typing one subscription below. Plaid/
@@ -175,6 +180,21 @@ export default async function DashboardPage() {
             </CardContent>
           </Card>
         </MotionCard>
+        {/* Section 9 of the monetization pass: progressive limit awareness
+            right where a user is actively adding more, not only after a
+            hard block on /api/subscriptions. Same "4 of 5" threshold and
+            isPremium guard as the Subscriptions page's own banner — see
+            that page's comment for why it starts one below the real limit
+            rather than from zero, and why it's already correctly inert for
+            a real beta user. */}
+        {shouldShowSubscriptionLimitBanner(isPremium, data.activeCount) ? (
+          <UpgradeLimitBanner
+            current={data.activeCount}
+            limit={FREE_PLAN_SUBSCRIPTION_LIMIT}
+            beta={isBetaAllAccess()}
+            upgradeUrl={upgradeUrl}
+          />
+        ) : null}
         {/* One merged card instead of two side-by-side ones that led with
             the same fact (see RenewalForecastCard's own comment), and now
             the dashboard's only subscription list at all: this used to be
@@ -196,41 +216,41 @@ export default async function DashboardPage() {
       {hasActive ? (
         <section className="space-y-5">
           <SectionHeading
-            eyebrow="Take action"
+            weight="secondary"
             title="Savings opportunities"
             description="The biggest wins, ranked by real dollar impact."
             icon={PiggyBank}
             iconClassName="text-emerald"
           />
           {/* 3-wide, not the 2-wide grid every other section uses.
-              Optimization score is one short number next to three cards
+              Unrealized savings is one short figure next to three cards
               that are each a short list, so a uniform 2-column split kept
               leaving one side of the row visually heavier than the other.
-              3 columns lets the score sit on its own instead of stretching
-              to match a list card's height.
+              3 columns lets it sit on its own instead of stretching to
+              match a list card's height.
               items-start (not the grid default stretch): the third column
-              now stacks Optimization score with Optimization recommendations
+              now stacks Unrealized savings with Optimization recommendations
               underneath it, so it's naturally taller than the single cards
               in the other two columns. Without items-start, grid's default
               row-stretch would force those two shorter columns to grow to
               match, leaving visible empty space at the bottom of each. */}
           <StaggerSection className="grid items-start gap-4 lg:grid-cols-3" staggerChildren={0.07}>
             <MotionCard>
-              <SavingsOpportunitiesCard output={engineOutput} />
+              <SavingsOpportunitiesCard output={engineOutput} isPremium={isPremium} upgradeUrl={upgradeUrl} />
             </MotionCard>
             <MotionCard>
               <QuickWinsCard output={engineOutput} />
             </MotionCard>
-            {/* Optimization recommendations sits directly under Optimization
-                score, same column, instead of wrapping to its own row below
-                the other two cards (a flat 4th item in a 3-col grid lands
-                alone in column 1 of a second row) — keeps the recommendation
-                paired with the score it elaborates on, and visually
-                secondary to it (smaller, second in the stack) rather than
-                reading as its own separate section. */}
+            {/* Optimization recommendations sits directly under Unrealized
+                savings, same column, instead of wrapping to its own row
+                below the other two cards (a flat 4th item in a 3-col grid
+                lands alone in column 1 of a second row) — keeps the
+                recommendation paired with the figure it elaborates on, and
+                visually secondary to it (smaller, second in the stack)
+                rather than reading as its own separate section. */}
             <div className="space-y-4">
               <MotionCard>
-                <OptimizationScoreCard output={engineOutput} isPremium={isPremium} upgradeUrl={upgradeUrl} />
+                <UnrealizedSavingsCard output={engineOutput} isPremium={isPremium} upgradeUrl={upgradeUrl} />
               </MotionCard>
               <MotionCard>
                 <AiRecommendationsCard output={engineOutput} isPremium={isPremium} upgradeUrl={upgradeUrl} />
@@ -249,7 +269,7 @@ export default async function DashboardPage() {
       {hasActive ? (
         <section className="space-y-5">
           <SectionHeading
-            eyebrow="Deeper look"
+            weight="secondary"
             title="Analytics"
             description="Trends, categories, and patterns across your subscriptions."
             icon={BarChart3}
@@ -277,7 +297,7 @@ export default async function DashboardPage() {
               <RiskAlertsCard output={engineOutput} isPremium={isPremium} upgradeUrl={upgradeUrl} />
             </MotionCard>
             <MotionCard>
-              <ScoreBreakdownCard output={engineOutput} />
+              <ScoreBreakdownCard output={engineOutput} isPremium={isPremium} upgradeUrl={upgradeUrl} />
             </MotionCard>
           </StaggerSection>
         </section>

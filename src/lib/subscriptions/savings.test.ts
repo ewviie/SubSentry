@@ -2,8 +2,10 @@ import { describe, it, expect } from "vitest";
 import {
   computeSavingsRecommendations,
   computeTotalPotentialSavingsMonthlyCents,
+  computeTotalPotentialSavingsYearlyCents,
   computeRealizedSavings,
   getSavingsPriority,
+  splitSavingsRecommendationsByPlan,
   type SavingsRecommendation,
 } from "./savings";
 import type { Subscription } from "@/lib/db/schema";
@@ -167,6 +169,38 @@ describe("computeSavingsRecommendations", () => {
     expect(duplicates[0].impactCents).toBeGreaterThan(duplicates[1].impactCents);
   });
 
+  // Regression (release-review finding #5): the same impactCents tiebreak
+  // above compared raw cents with no currency check — a GBP finding's raw
+  // cents outranking a USD one purely because 2000 > 1800 is not a real
+  // magnitude comparison (this app has no exchange rate). A cross-currency
+  // pair must tie on impactCents and fall through to the next tiebreaker
+  // (urgencyDays) instead.
+  it("does not rank a cross-currency finding above another by raw cents alone", () => {
+    const today = "2026-01-01";
+    const result = computeSavingsRecommendations(
+      [
+        // GBP pair: larger raw impactCents (2000), but renews further away.
+        sub({ name: "Netflix", amountCents: 500, currency: "gbp", nextRenewalDate: "2026-06-01" }),
+        sub({ name: "Netflix Premium", amountCents: 2000, currency: "gbp", nextRenewalDate: "2026-06-01" }),
+        // USD pair: smaller raw impactCents (1800), but renews sooner.
+        sub({ name: "Spotify", amountCents: 500, currency: "usd", nextRenewalDate: "2026-01-10" }),
+        sub({ name: "Spotify Premium", amountCents: 1800, currency: "usd", nextRenewalDate: "2026-01-10" }),
+      ],
+      today,
+    );
+    const duplicates = result.filter((r) => r.type === "duplicate");
+    expect(duplicates).toHaveLength(2);
+    // Both clear the $15/mo "high" priority threshold and are both
+    // "confirmed" evidence — same tier, so impactCents (then urgencyDays)
+    // is what's actually being tested here.
+    expect(getSavingsPriority(duplicates[0])).toBe(getSavingsPriority(duplicates[1]));
+    expect(duplicates[0].impactCents).toBeLessThan(duplicates[1].impactCents);
+    // Pre-fix, the GBP pair (higher raw cents) would sort first regardless
+    // of currency. Post-fix, the sooner-renewing USD pair sorts first.
+    expect(duplicates[0].currency).toBe("usd");
+    expect(duplicates[1].currency).toBe("gbp");
+  });
+
   // Phase 8 Part 6: flags 3+ individually-small active subscriptions whose
   // combined cost is a material share of total spend — see
   // findSmallSubscriptionsCluster's own comment in insights.ts.
@@ -299,6 +333,77 @@ describe("computeTotalPotentialSavingsMonthlyCents", () => {
   it("returns 0 for no recommendations", () => {
     expect(computeTotalPotentialSavingsMonthlyCents([])).toBe(0);
   });
+
+  // Regression (release-review follow-up): this used to sum
+  // monthlySavingsCents across every duplicate recommendation regardless of
+  // currency — a GBP duplicate's savings could silently inflate a
+  // USD-denominated total. Two USD duplicate pairs vs. one GBP pair makes
+  // USD the primary currency (majority by count); the GBP pair's savings
+  // must be excluded from the total entirely, not converted or blended in.
+  it("never sums a non-primary-currency duplicate's savings into the total", () => {
+    const subs = [
+      sub({ name: "Netflix", amountCents: 500, currency: "usd" }),
+      sub({ name: "Netflix Premium", amountCents: 1000, currency: "usd" }),
+      sub({ name: "Spotify", amountCents: 300, currency: "usd" }),
+      sub({ name: "Spotify Premium", amountCents: 500, currency: "usd" }),
+      sub({ name: "Hulu", amountCents: 400, currency: "gbp" }),
+      sub({ name: "Hulu Plus", amountCents: 2000, currency: "gbp" }),
+    ];
+    const recommendations = computeSavingsRecommendations(subs);
+    const duplicates = recommendations.filter((r) => r.type === "duplicate");
+    expect(duplicates).toHaveLength(3); // 2 usd pairs + 1 gbp pair, all detected
+    const total = computeTotalPotentialSavingsMonthlyCents(recommendations);
+    expect(total).toBe(1500); // 1000 (Netflix Premium) + 500 (Spotify Premium), usd only
+    expect(total).not.toBe(3500); // the pre-fix behavior: 1000 + 500 + 2000 blended
+  });
+});
+
+// Regression (release-review finding #4): engine.ts used to compute
+// `yearlySavingsCents`/`estimatedYearlySavingsCents` as
+// `monthlySavingsCents * 12` — double-rounding on top of monthlySavingsCents'
+// own monthlyCents() rounding for a yearly-billed redundant subscription. A
+// $99.99/yr duplicate rounds to 833 cents/mo (monthlyCents(9999, "yearly")),
+// and 833 * 12 = 9996 cents ($99.96), not the real $99.99 (9999 cents).
+// computeTotalPotentialSavingsYearlyCents must reproduce the true figure by
+// summing each recommendation's own annualSavingsCents instead.
+describe("computeTotalPotentialSavingsYearlyCents", () => {
+  it("does not double-round a yearly-billed redundant subscription's savings", () => {
+    const first = sub({ name: "Netflix", amountCents: 9999, billingCycle: "yearly" });
+    const second = sub({ name: "Netflix Premium", amountCents: 9999, billingCycle: "yearly" });
+    const recommendations = computeSavingsRecommendations([first, second]);
+    expect(computeTotalPotentialSavingsMonthlyCents(recommendations)).toBe(833);
+    expect(computeTotalPotentialSavingsYearlyCents(recommendations)).toBe(9999);
+    expect(computeTotalPotentialSavingsYearlyCents(recommendations)).not.toBe(833 * 12);
+  });
+
+  it("sums only duplicate-type recommendations, not functional_overlap", () => {
+    const first = sub({ name: "Netflix", category: "streaming", amountCents: 1000, billingCycle: "monthly" });
+    const second = sub({ name: "Netflix Premium", category: "streaming", amountCents: 1500, billingCycle: "monthly" });
+    const third = sub({ name: "Hulu", category: "streaming", amountCents: 500, billingCycle: "monthly" });
+    const total = computeTotalPotentialSavingsYearlyCents(computeSavingsRecommendations([first, second, third]));
+    expect(total).toBe(1500 * 12);
+  });
+
+  it("returns 0 for no recommendations", () => {
+    expect(computeTotalPotentialSavingsYearlyCents([])).toBe(0);
+  });
+
+  // Same currency-safety regression as computeTotalPotentialSavingsMonthlyCents's
+  // own test above, for the annual total.
+  it("never sums a non-primary-currency duplicate's savings into the total", () => {
+    const subs = [
+      sub({ name: "Netflix", amountCents: 500, currency: "usd" }),
+      sub({ name: "Netflix Premium", amountCents: 1000, currency: "usd" }),
+      sub({ name: "Spotify", amountCents: 300, currency: "usd" }),
+      sub({ name: "Spotify Premium", amountCents: 500, currency: "usd" }),
+      sub({ name: "Hulu", amountCents: 400, currency: "gbp" }),
+      sub({ name: "Hulu Plus", amountCents: 2000, currency: "gbp" }),
+    ];
+    const recommendations = computeSavingsRecommendations(subs);
+    const total = computeTotalPotentialSavingsYearlyCents(recommendations);
+    expect(total).toBe(1500 * 12); // usd only, annualized
+    expect(total).not.toBe(3500 * 12); // the pre-fix behavior: gbp blended in
+  });
 });
 
 describe("computeRealizedSavings", () => {
@@ -384,6 +489,7 @@ describe("getSavingsPriority", () => {
       description: "d",
       actionLabel: "Review",
       monthlySavingsCents: evidenceTier === "confirmed" ? impactCents : 0,
+      annualSavingsCents: evidenceTier === "confirmed" ? impactCents * 12 : 0,
       impactCents,
       evidenceTier,
       urgencyDays: 30,
@@ -425,5 +531,98 @@ describe("getSavingsPriority", () => {
 
   it("a small review-only finding is still 'low'", () => {
     expect(getSavingsPriority(rec(300, "review"))).toBe("low");
+  });
+});
+
+describe("splitSavingsRecommendationsByPlan", () => {
+  let recId = 1;
+  function rec(overrides: Partial<SavingsRecommendation> = {}): SavingsRecommendation {
+    return {
+      id: `rec-${recId++}`,
+      type: "functional_overlap",
+      title: "t",
+      description: "d",
+      actionLabel: "Review",
+      monthlySavingsCents: 0,
+      annualSavingsCents: 0,
+      impactCents: 1000,
+      evidenceTier: "review",
+      urgencyDays: 30,
+      targetSubscriptionId: "sub-1",
+      involvedSubscriptionIds: ["sub-1"],
+      currency: "usd",
+      ...overrides,
+    };
+  }
+  function confirmed(overrides: Partial<SavingsRecommendation> = {}): SavingsRecommendation {
+    return rec({ type: "duplicate", evidenceTier: "confirmed", monthlySavingsCents: 1000, annualSavingsCents: 12000, ...overrides });
+  }
+
+  it("a premium caller sees every recommendation, with nothing teased", () => {
+    const all = [confirmed(), rec(), rec()];
+    const result = splitSavingsRecommendationsByPlan(all, true);
+    expect(result.visible).toEqual(all);
+    expect(result.teased).toBeNull();
+  });
+
+  // Monetization Council ruling: confirmed duplicates are never gated,
+  // anywhere, on principle — this app's duplicate-detection promise is
+  // already free everywhere else, and gating it on just this one list
+  // would be an inconsistency, not a real restriction.
+  it("a free caller sees every confirmed recommendation, no matter how many", () => {
+    const confirmedRecs = [confirmed(), confirmed(), confirmed()];
+    const result = splitSavingsRecommendationsByPlan(confirmedRecs, false);
+    expect(result.visible).toEqual(confirmedRecs);
+    expect(result.teased).toBeNull();
+  });
+
+  it("a free caller sees exactly one review-tier recommendation in full, even with several present", () => {
+    const reviewRecs = [rec(), rec(), rec()];
+    const result = splitSavingsRecommendationsByPlan(reviewRecs, false);
+    expect(result.visible).toEqual([reviewRecs[0]]);
+    expect(result.teased).not.toBeNull();
+    expect(result.teased?.count).toBe(2);
+  });
+
+  it("a free caller sees confirmed items plus one review item, with the rest honestly teased by count and dollar total", () => {
+    const first = confirmed({ impactCents: 500 });
+    const secondConfirmed = confirmed({ impactCents: 800 });
+    const visibleReview = rec({ impactCents: 1200, currency: "usd" });
+    const hiddenA = rec({ impactCents: 900, currency: "usd" });
+    const hiddenB = rec({ impactCents: 300, currency: "usd" });
+    const result = splitSavingsRecommendationsByPlan([first, secondConfirmed, visibleReview, hiddenA, hiddenB], false);
+
+    expect(result.visible).toEqual([first, secondConfirmed, visibleReview]);
+    expect(result.teased).toEqual({ count: 2, totalCents: 1200, currency: "usd" });
+  });
+
+  it("preserves original relative order in the visible list rather than reshuffling confirmed-before-review", () => {
+    const review1 = rec({ impactCents: 100 });
+    const confirmedOne = confirmed({ impactCents: 500 });
+    const all = [review1, confirmedOne];
+    const result = splitSavingsRecommendationsByPlan(all, false);
+    expect(result.visible).toEqual([review1, confirmedOne]);
+  });
+
+  it("never fabricates a dollar total across mismatched currencies — an honest gap, not a wrong number", () => {
+    const visibleReview = rec({ currency: "usd" });
+    const hiddenUsd = rec({ impactCents: 500, currency: "usd" });
+    const hiddenGbp = rec({ impactCents: 500, currency: "gbp" });
+    const result = splitSavingsRecommendationsByPlan([visibleReview, hiddenUsd, hiddenGbp], false);
+
+    expect(result.teased?.count).toBe(2);
+    expect(result.teased?.totalCents).toBeNull();
+    expect(result.teased?.currency).toBeNull();
+  });
+
+  it("returns no tease at all when there is nothing beyond what's already visible", () => {
+    const result = splitSavingsRecommendationsByPlan([confirmed(), rec()], false);
+    expect(result.teased).toBeNull();
+  });
+
+  it("returns no tease for an empty list", () => {
+    const result = splitSavingsRecommendationsByPlan([], false);
+    expect(result.visible).toEqual([]);
+    expect(result.teased).toBeNull();
   });
 });

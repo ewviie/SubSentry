@@ -17,6 +17,15 @@ export interface EngineContext {
   // reason to care about it — a rule that does defaults a missing map to
   // "no history known," never throws.
   priceHistoryBySubscriptionId?: Map<string, SubscriptionPriceHistory[]>;
+  // Every id computeSavingsRecommendations has ever produced for this user
+  // that they've since dismissed on /savings (dismissed-recommendations.ts's
+  // getDismissedRecommendationIds — one bulk query, same pattern as
+  // priceHistoryBySubscriptionId above). Optional for the same reason: every
+  // existing caller/test predates this field. Health Score v2: lets
+  // health.duplicates tell "a fresh finding" apart from "this exact
+  // duplicate was already surfaced and dismissed, and is still unresolved" —
+  // real, already-stored evidence of staleness, not an inferred intent.
+  dismissedRecommendationIds?: Set<string>;
 }
 
 export type InsightSeverity = "positive" | "info" | "warning" | "critical";

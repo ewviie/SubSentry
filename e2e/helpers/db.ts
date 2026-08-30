@@ -89,6 +89,31 @@ export async function deleteTestUser(email: string): Promise<void> {
   }
 }
 
+// Seeds a checkout_sessions row the way api/stripe/webhook/route.ts's
+// processStripeEvent would after a real checkout.session.completed event —
+// there is no live Stripe test-mode integration in this E2E suite to
+// trigger a real one, so this mirrors that write directly (same
+// Drizzle-free, raw-SQL pattern as the token helpers above) to set up the
+// precondition /api/billing/activate's own authorization tests need: a
+// completed checkout that does or doesn't belong to the user under test.
+export async function insertTestCheckoutSession(id: string, ownerUserId: string | null): Promise<void> {
+  const sql = connect();
+  try {
+    await sql`insert into checkout_sessions (id, user_id, status) values (${id}, ${ownerUserId}, 'completed')`;
+  } finally {
+    await sql.end();
+  }
+}
+
+export async function deleteTestCheckoutSession(id: string): Promise<void> {
+  const sql = connect();
+  try {
+    await sql`delete from checkout_sessions where id = ${id}`;
+  } finally {
+    await sql.end();
+  }
+}
+
 // No-op kept so existing `test.afterAll(closeDb)` call sites don't need
 // touching — each helper call now owns and closes its own short-lived
 // connection instead of one shared one.

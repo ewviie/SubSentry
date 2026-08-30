@@ -3,7 +3,9 @@ import { Check, Sparkles } from "lucide-react";
 import { requireUser } from "@/lib/auth/session";
 import { listSubscriptions } from "@/lib/subscriptions/queries";
 import { isAIConfigured } from "@/lib/ai/provider";
-import { FREE_PLAN_SUBSCRIPTION_LIMIT, getUpgradeUrl, isBillingPortalConfigured, hasPaidAccess, isBetaAllAccess } from "@/lib/billing/plan";
+import { FREE_PLAN_SUBSCRIPTION_LIMIT, getUpgradeUrl, isBillingPortalConfigured, isBetaAllAccess } from "@/lib/billing/plan";
+import { PRO_MONTHLY_PRICE, PRO_FEATURES } from "@/lib/billing/pro-features";
+import { getDevPlanPreview, resolveHasPaidAccess } from "@/lib/dev/plan-preview";
 import { initials } from "@/lib/utils";
 import { getEmailConnection } from "@/lib/imports/email-connections";
 import { listBankConnections } from "@/lib/imports/bank-connections";
@@ -11,7 +13,6 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { LogoutButton } from "@/components/app-shell/logout-button";
 import { EditNameForm } from "@/components/settings/edit-name-form";
 import { RenewalReminderToggle } from "@/components/settings/renewal-reminder-toggle";
 import { ManageBillingButton } from "@/components/billing/manage-billing-button";
@@ -20,20 +21,28 @@ import { DeleteAccountCard } from "@/components/settings/delete-account-card";
 import { MotionCard } from "@/components/dashboard/motion-card";
 import { StaggerSection } from "@/components/dashboard/stagger-section";
 
-const PRO_BENEFITS = [
-  "Unlimited active subscriptions",
-  "Everything in Free",
-  "Priority support",
-];
+// PRO_FEATURES (lib/billing/pro-features.ts) is the single shared list
+// pricing-section.tsx and the login page's Pro teaser also read from — see
+// that file's own comment. Used to be a locally-hardcoded array here, which
+// is exactly how this list once drifted out of sync with pricing-section.tsx
+// (missing "Optimization recommendations" until that was caught
+// separately). No "Everything in Free" line: it's redundant here, since
+// this card only ever shows for a free-plan account in the first place.
 
 export default async function SettingsPage() {
   const user = await requireUser();
-  const isPaid = hasPaidAccess(user.plan);
+  const isPaid = await resolveHasPaidAccess(user.plan);
   const activeCount = isPaid ? 0 : (await listSubscriptions(user.id)).filter((s) => s.status === "active").length;
   const upgradeUrl = isPaid ? null : getUpgradeUrl(user.id);
   const aiConfigured = isAIConfigured();
   const portalConfigured = isBillingPortalConfigured();
-  const beta = isBetaAllAccess();
+  // A dev preview overrides user.plan (see getSession()'s own comment) so
+  // isPaid above already reflects it correctly — but isBetaAllAccess()
+  // itself has no way to know that, since it isn't session-scoped. Without
+  // this, previewing "Free" while the real beta is still on would still
+  // show the "Beta: full access" badge below, which would be actively
+  // false during the preview it exists to demonstrate.
+  const beta = isBetaAllAccess() && !(await getDevPlanPreview());
 
   // Self-service disconnect surface for every live-API import connection.
   // see api/imports/{gmail,plaid,truelayer}/disconnect. Fetched here
@@ -56,15 +65,19 @@ export default async function SettingsPage() {
             {initials(user.name, user.email)}
           </AvatarFallback>
         </Avatar>
-        {/* min-w-0 + break-words: same fix and reasoning as
-            dashboard/page.tsx's identical header row: a flex item's
-            automatic minimum width defaults to its content's min-content
-            size, and a name-less account's email (no natural break
-            point) forced this row wider than the viewport on mobile
-            without min-w-0 to allow it to shrink and break-words to give
-            the now-shrunk text somewhere to wrap. */}
+        {/* UI audit fix: a name-less account used to render its email
+            address here as this page's text-h1 hero headline — the email
+            is already shown, properly labeled, in the Email row below;
+            repeating it unlabeled and oversized as if it were a name
+            wasn't a considered fallback, it was displaying the wrong
+            field at the wrong size. "Your account" is a neutral heading
+            for that case, same register as the page's own description
+            line right underneath it. min-w-0 + break-words stay: a
+            user-entered name has no natural break point either (up to
+            120 chars — see EditNameForm) and could still force this row
+            wider than the viewport without them. */}
         <div className="min-w-0">
-          <h1 className="break-words font-heading text-h1 font-semibold">{user.name || user.email}</h1>
+          <h1 className="break-words font-heading text-h1 font-semibold">{user.name || "Your account"}</h1>
           <p className="mt-0.5 text-sm text-muted-foreground">
             Manage your account, plan, and AI configuration.
           </p>
@@ -111,9 +124,17 @@ export default async function SettingsPage() {
                 </Badge>
               </CardTitle>
               <CardDescription>
-                {isPaid
-                  ? "You have unlimited subscriptions."
-                  : `Up to ${FREE_PLAN_SUBSCRIPTION_LIMIT} active subscriptions.`}
+                {/* Section 12 of the monetization pass: this relationship
+                    needs to be obvious without being obnoxious, specifically
+                    including this exact sentence during the beta — the
+                    badge above already says "Beta: full access", but that's
+                    a two-word status, not the actual sentence a user should
+                    be able to read and understand their situation from. */}
+                {beta
+                  ? "You have unlimited subscriptions. You're currently receiving Pro access free during the beta — no card required."
+                  : isPaid
+                    ? "You have unlimited subscriptions."
+                    : `Up to ${FREE_PLAN_SUBSCRIPTION_LIMIT} active subscriptions.`}
               </CardDescription>
             </CardHeader>
             {user.plan === "pro" && portalConfigured && user.stripeCustomerId ? (
@@ -139,22 +160,34 @@ export default async function SettingsPage() {
                     />
                   </div>
                 </div>
-                {upgradeUrl ? (
-                  <div className="rounded-lg border border-emerald/20 bg-emerald-muted/40 p-4">
-                    <p className="text-sm font-medium">Upgrade to Pro: £4.99/mo</p>
-                    <ul className="mt-2 space-y-1.5">
-                      {PRO_BENEFITS.map((benefit) => (
-                        <li key={benefit} className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <Check className="size-3.5 shrink-0 text-emerald" aria-hidden="true" />
-                          {benefit}
-                        </li>
-                      ))}
-                    </ul>
+                {/* Shown even when upgradeUrl is null (no live payment
+                    link configured yet — see getUpgradeUrl) rather than
+                    hiding this whole block: billing/upgrade-prompt.tsx's
+                    shared components establish the same pattern everywhere
+                    else a gate renders — still naming what Pro unlocks with
+                    plain text when there's nothing to link to yet. A user
+                    who's just hit their 5-subscription cap is exactly who
+                    should see what upgrading gets them, even before
+                    there's a working checkout to send them to; a real CTA
+                    button only ever appears once one exists. */}
+                <div className="rounded-lg border border-emerald/20 bg-emerald-muted/40 p-4">
+                  <p className="text-sm font-medium">Upgrade to Pro: {PRO_MONTHLY_PRICE}/mo</p>
+                  <ul className="mt-2 space-y-1.5">
+                    {PRO_FEATURES.map((benefit) => (
+                      <li key={benefit} className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Check className="size-3.5 shrink-0 text-emerald" aria-hidden="true" />
+                        {benefit}
+                      </li>
+                    ))}
+                  </ul>
+                  {upgradeUrl ? (
                     <Button className="mt-3" render={<a href={upgradeUrl} />} nativeButton={false}>
                       Upgrade to Pro
                     </Button>
-                  </div>
-                ) : null}
+                  ) : (
+                    <p className="mt-3 text-sm text-muted-foreground">Upgrades aren&apos;t open yet — check back soon.</p>
+                  )}
+                </div>
               </CardContent>
             ) : null}
           </Card>
@@ -227,12 +260,15 @@ export default async function SettingsPage() {
           <DeleteAccountCard />
         </MotionCard>
 
-        <div className="flex items-center justify-between">
-          <Link href="/dashboard" className="text-sm text-muted-foreground underline underline-offset-4">
-            Back to dashboard
-          </Link>
-          <LogoutButton />
-        </div>
+        {/* UI audit finding #5 (P2): this row used to also carry its own
+            LogoutButton — a second "Log out" affordance on top of the
+            global one every authenticated page already has in its header
+            (see (app)/layout.tsx). The header's stays as the one,
+            consistent-everywhere logout control; this page no longer
+            duplicates it. */}
+        <Link href="/dashboard" className="text-sm text-muted-foreground underline underline-offset-4">
+          Back to dashboard
+        </Link>
 
         <nav aria-label="Legal" className="flex items-center gap-4 text-xs text-muted-foreground">
           <Link href="/privacy" className="hover:text-foreground hover:underline">Privacy Policy</Link>

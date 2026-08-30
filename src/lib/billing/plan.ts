@@ -8,6 +8,16 @@ import type { User } from "@/lib/db/schema";
 // plan-based gating everywhere) when monetization restarts. The
 // plan column, webhook, and Stripe wiring are untouched — this only
 // short-circuits what they unlock.
+//
+// Deliberately kept free of any import that isn't safe in a browser bundle
+// (no next/headers, directly or transitively): hero-section.tsx and
+// final-cta-section.tsx are Client Components that call isBetaAllAccess()
+// below, so this whole file gets bundled for the client too. The dev-only
+// Free/Pro preview (lib/dev/plan-preview.ts) needs next/headers and is
+// therefore never imported from here — see that file's resolveHasPaidAccess/
+// resolveHasReachedSubscriptionLimit, the preview-aware wrappers every
+// server-only caller (pages, queries.ts, rate-limit.ts) uses instead of
+// calling the two functions below directly.
 const BETA_ALL_ACCESS = true;
 
 export function hasPaidAccess(plan: User["plan"]): boolean {
@@ -29,6 +39,23 @@ export const FREE_PLAN_SUBSCRIPTION_LIMIT = 5;
 
 export function hasReachedSubscriptionLimit(plan: User["plan"], activeCount: number): boolean {
   return !hasPaidAccess(plan) && activeCount >= FREE_PLAN_SUBSCRIPTION_LIMIT;
+}
+
+// Monetization pass, section 9: progressive limit awareness (the
+// dashboard's and Subscriptions page's own UpgradeLimitBanner) starts one
+// below the real ceiling ("4 of 5"), not from zero — showing this from the
+// very first subscription would be nagging, not a genuine
+// approaching-limit signal (section 17: "do not over-gate"). Takes
+// `isPremium` directly (the caller's own already-resolved
+// resolveHasPaidAccess result — see lib/dev/plan-preview.ts) rather than a
+// raw `plan`, so this is never true for a real beta user either: isPremium
+// already reflects BETA_ALL_ACCESS the same way every other gate in this
+// app does, and this must never incorrectly nag someone who actually has
+// full access right now. A plain exported function (not left as an inline
+// expression duplicated across both call sites) specifically so it's one
+// thing to test and one thing to change the threshold of.
+export function shouldShowSubscriptionLimitBanner(isPremium: boolean, activeCount: number): boolean {
+  return !isPremium && activeCount >= FREE_PLAN_SUBSCRIPTION_LIMIT - 1;
 }
 
 // A defensive ceiling, not a product limit — no legitimate user tracks

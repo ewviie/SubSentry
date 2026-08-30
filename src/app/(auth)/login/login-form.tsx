@@ -117,7 +117,7 @@ export function LoginForm() {
             </Link>
           </p>
           {error ? (
-            <p ref={errorRef} id="auth-error" role="alert" tabIndex={-1} className="text-sm text-destructive outline-none">
+            <p ref={errorRef} id="auth-error" role="alert" tabIndex={-1} className="rounded-sm text-sm text-destructive outline-none focus-visible:ring-3 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40">
               {error}
             </p>
           ) : null}

@@ -7,22 +7,25 @@ import { inArray } from "drizzle-orm";
 // cleanly wherever DATABASE_URL isn't set.
 const hasDb = Boolean(process.env.DATABASE_URL);
 
-// hasReachedSubscriptionLimit is unconditionally false during the beta
-// (BETA_ALL_ACCESS in lib/billing/plan.ts — see that file's own comment),
-// so there is no way to observe this code path's behavior end-to-end
-// through the real function right now. Mocked here, the same way
-// renewal-reminders.db.test.ts mocks nodemailer, so this test exercises the
-// actual wiring in updateSubscription (does it call the check, at the right
-// moment, with the right count, and honor the result) independently of
-// whether the beta flag happens to be on. MAX_ACTIVE_SUBSCRIPTIONS and every
-// other export stay real.
-const { hasReachedSubscriptionLimitMock } = vi.hoisted(() => ({
-  hasReachedSubscriptionLimitMock: vi.fn(),
+// The real check is unconditionally false during the beta (BETA_ALL_ACCESS
+// in lib/billing/plan.ts — see that file's own comment), so there is no
+// way to observe this code path's behavior end-to-end through the real
+// function right now. Mocked here, the same way renewal-reminders.db.test.ts
+// mocks nodemailer, so this test exercises the actual wiring in
+// updateSubscription (does it call the check, at the right moment, with the
+// right count, and honor the result) independently of whether the beta flag
+// happens to be on. queries.ts calls resolveHasReachedSubscriptionLimit
+// (lib/dev/plan-preview.ts) rather than the real function directly — see
+// that file's own comment on why (plan.ts must stay free of next/headers,
+// which the real dev-preview mechanism needs) — so that's the export mocked
+// here. MAX_ACTIVE_SUBSCRIPTIONS and every other export stay real.
+const { resolveHasReachedSubscriptionLimitMock } = vi.hoisted(() => ({
+  resolveHasReachedSubscriptionLimitMock: vi.fn(),
 }));
 
-vi.mock("@/lib/billing/plan", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/billing/plan")>();
-  return { ...actual, hasReachedSubscriptionLimit: hasReachedSubscriptionLimitMock };
+vi.mock("@/lib/dev/plan-preview", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/dev/plan-preview")>();
+  return { ...actual, resolveHasReachedSubscriptionLimit: resolveHasReachedSubscriptionLimitMock };
 });
 
 describe.skipIf(!hasDb)("updateSubscription: reactivation re-checks the free-plan limit", () => {
@@ -46,7 +49,7 @@ describe.skipIf(!hasDb)("updateSubscription: reactivation re-checks the free-pla
   });
 
   beforeEach(() => {
-    hasReachedSubscriptionLimitMock.mockReset();
+    resolveHasReachedSubscriptionLimitMock.mockReset();
   });
 
   afterAll(async () => {
@@ -67,7 +70,7 @@ describe.skipIf(!hasDb)("updateSubscription: reactivation re-checks the free-pla
   }
 
   it("blocks reactivating a cancelled subscription once the plan-limit check reports 'reached', and leaves the row untouched", async () => {
-    hasReachedSubscriptionLimitMock.mockReturnValue(true);
+    resolveHasReachedSubscriptionLimitMock.mockReturnValue(true);
     const sub = await queries.createSubscription(userA, subInput("Blocked Reactivation", "canceled"));
 
     const result = await queries.updateSubscription(userA, sub.id, "free", { status: "active" });
@@ -78,7 +81,7 @@ describe.skipIf(!hasDb)("updateSubscription: reactivation re-checks the free-pla
   });
 
   it("allows reactivating once the plan-limit check reports 'not reached'", async () => {
-    hasReachedSubscriptionLimitMock.mockReturnValue(false);
+    resolveHasReachedSubscriptionLimitMock.mockReturnValue(false);
     const sub = await queries.createSubscription(userA, subInput("Allowed Reactivation", "canceled"));
 
     const result = await queries.updateSubscription(userA, sub.id, "free", { status: "active" });
@@ -88,22 +91,22 @@ describe.skipIf(!hasDb)("updateSubscription: reactivation re-checks the free-pla
   });
 
   it("does not re-check the limit for a subscription that is already active (no-op transition)", async () => {
-    hasReachedSubscriptionLimitMock.mockReturnValue(true);
+    resolveHasReachedSubscriptionLimitMock.mockReturnValue(true);
     const sub = await queries.createSubscription(userA, subInput("Already Active", "active"));
 
     const result = await queries.updateSubscription(userA, sub.id, "free", { status: "active" });
 
     expect(result.kind).toBe("updated");
-    expect(hasReachedSubscriptionLimitMock).not.toHaveBeenCalled();
+    expect(resolveHasReachedSubscriptionLimitMock).not.toHaveBeenCalled();
   });
 
   it("does not check the limit when the update doesn't touch status at all", async () => {
-    hasReachedSubscriptionLimitMock.mockReturnValue(true);
+    resolveHasReachedSubscriptionLimitMock.mockReturnValue(true);
     const sub = await queries.createSubscription(userA, subInput("Rename Only", "canceled"));
 
     const result = await queries.updateSubscription(userA, sub.id, "free", { name: "Renamed" });
 
     expect(result.kind).toBe("updated");
-    expect(hasReachedSubscriptionLimitMock).not.toHaveBeenCalled();
+    expect(resolveHasReachedSubscriptionLimitMock).not.toHaveBeenCalled();
   });
 });

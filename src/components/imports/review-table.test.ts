@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { detectedToFormValues, isPreselectedByDefault } from "./review-table";
-import type { DetectedSubscription } from "@/lib/imports/types";
+import { detectedToFormValues, isPreselectedByDefault, isBlockedByUnresolvedProposal } from "./review-table";
+import type { DetectedSubscription, PriceChangeProposal } from "@/lib/imports/types";
 
 // This project has no React component-rendering test setup (no
 // testing-library/jsdom dependency, no other *.test.tsx anywhere under
@@ -116,5 +116,46 @@ describe("isPreselectedByDefault", () => {
         }),
       ),
     ).toBe(false);
+  });
+});
+
+const SAMPLE_PROPOSAL: PriceChangeProposal = {
+  existingSubscriptionId: "existing-sub-1",
+  existingName: "Netflix",
+  existingAmountCents: 1599,
+  existingBillingCycle: "monthly",
+  currency: "usd",
+  detectedAmountCents: 1999,
+  detectedBillingCycle: "monthly",
+  percentChange: 25,
+  annualDeltaCents: 4800,
+};
+
+// Regression: release-review finding #1. Neither toggleSelectAll, a direct
+// checkbox click, nor the final selectedRows/onConfirm batch guarded
+// against a row whose price-change proposal was still unresolved, letting
+// "select all" (or a manual check) sweep it into the create batch and
+// produce a duplicate subscription for a charge already reconciled a
+// different way. isBlockedByUnresolvedProposal is the single source of
+// truth all three of those call sites now share.
+describe("isBlockedByUnresolvedProposal", () => {
+  it("blocks a row whose price-change proposal has not been resolved", () => {
+    const row = makeDetected({ priceChangeProposal: SAMPLE_PROPOSAL });
+    expect(isBlockedByUnresolvedProposal(row, new Set())).toBe(true);
+  });
+
+  it("does not block once the row's id is in resolvedProposalIds", () => {
+    const row = makeDetected({ id: "d1", priceChangeProposal: SAMPLE_PROPOSAL });
+    expect(isBlockedByUnresolvedProposal(row, new Set(["d1"]))).toBe(false);
+  });
+
+  it("does not block a row with no price-change proposal at all", () => {
+    const row = makeDetected();
+    expect(isBlockedByUnresolvedProposal(row, new Set())).toBe(false);
+  });
+
+  it("does not block a different row's proposal from resolving this one", () => {
+    const row = makeDetected({ id: "d1", priceChangeProposal: SAMPLE_PROPOSAL });
+    expect(isBlockedByUnresolvedProposal(row, new Set(["some-other-id"]))).toBe(true);
   });
 });

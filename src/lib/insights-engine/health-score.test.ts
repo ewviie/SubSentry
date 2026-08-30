@@ -369,10 +369,20 @@ describe("computeHealthScore", () => {
       expect(result.score).toBeLessThan(Math.round(plainWeightedAverage));
       expect(result.rating).not.toBe("Excellent");
       expect(result.rating).not.toBe("Very Good");
-      // Bounded, not punitive beyond what the evidence supports — the
-      // worst-dimension penalty is capped at 15 on top of the weighted
-      // average, so this can't collapse to near-zero over one dimension.
-      expect(result.score).toBeGreaterThanOrEqual(Math.round(plainWeightedAverage) - 15);
+      // Bounded, not punitive beyond what the evidence supports — recomputed
+      // from the same two correction terms computeHealthScore itself applies
+      // (worstDimensionPenalty, capped at 35; spreadPenalty, a continuous
+      // shortfall-below-70 sum excluding the single worst dimension, scaled
+      // 0.25x and capped at 18) rather than a hardcoded magic number, so
+      // this stays correct if either cap is retuned later without needing
+      // hand-traced arithmetic re-derived here (same self-verifying pattern
+      // as the weighted-average test above).
+      const worstScore = Math.min(...known.map((d) => d.score));
+      const worstPenalty = Math.min(35, Math.max(0, (90 - worstScore) * 0.38));
+      const shortfalls = known.map((d) => Math.max(0, 70 - d.score)).sort((a, b) => b - a);
+      const excessShortfall = shortfalls.slice(1).reduce((sum, s) => sum + s, 0);
+      const spreadPenalty = Math.min(18, Math.round(excessShortfall * 0.25));
+      expect(result.score).toBeGreaterThanOrEqual(Math.round(plainWeightedAverage) - Math.ceil(worstPenalty) - spreadPenalty);
     });
 
     // The corrective term must never fire for a dimension that's merely
@@ -382,6 +392,94 @@ describe("computeHealthScore", () => {
       const known = result.dimensions.filter((d) => d.status !== "unknown");
       expect(known.every((d) => d.score >= 90)).toBe(true);
       expect(result.score).toBeGreaterThanOrEqual(90);
+    });
+
+    // Health Score v2's spreadPenalty: a portfolio with genuine, evidenced
+    // problems in *multiple independent* dimensions must score worse than
+    // one with the exact same single problem alone — a compounding pattern
+    // (duplicates AND a renewal spike) is a materially worse portfolio than
+    // either issue in isolation, which the pre-v2 model (weighted average +
+    // a single worst-dimension term) had no way to reflect.
+    it("penalizes a portfolio with problems in multiple independent dimensions more than the same single problem alone", () => {
+      // Both fixtures share the exact same 4 subscriptions and the exact
+      // same total monthly spend (4997) — only BigBill's billing cycle and
+      // renewal date differ, so the confirmed-duplicate pair's severity
+      // (same pair count, same share of total spend) is identical in both,
+      // isolating the difference below to the added renewal problem plus
+      // spreadPenalty, not a side effect of redundancy quietly changing too.
+      const oneProblem = computeHealthScore(
+        ctx([
+          sub({ name: "Netflix", amountCents: 999, nextRenewalDate: "2099-01-01" }),
+          sub({ name: "Netflix Premium", amountCents: 999, nextRenewalDate: "2099-01-02" }),
+          sub({ name: "Hulu", amountCents: 999, nextRenewalDate: "2099-01-03" }),
+          sub({ name: "Big Bill", amountCents: 2000, billingCycle: "monthly", nextRenewalDate: "2099-01-04" }),
+        ]),
+      )!;
+      const twoProblems = computeHealthScore(
+        ctx([
+          sub({ name: "Netflix", amountCents: 999, nextRenewalDate: "2099-01-01" }),
+          sub({ name: "Netflix Premium", amountCents: 999, nextRenewalDate: "2099-01-02" }),
+          sub({ name: "Hulu", amountCents: 999, nextRenewalDate: "2099-01-03" }),
+          sub({ name: "Big Bill", amountCents: 24000, billingCycle: "yearly", nextRenewalDate: "2026-01-05" }),
+        ]),
+      )!;
+      const redundancyOne = oneProblem.dimensions.find((d) => d.key === "redundancy")!.score;
+      const redundancyTwo = twoProblems.dimensions.find((d) => d.key === "redundancy")!.score;
+      expect(redundancyOne).toBe(redundancyTwo);
+      const renewalTwo = twoProblems.dimensions.find((d) => d.key === "renewal")!;
+      expect(renewalTwo.score).toBeLessThan(70);
+      expect(twoProblems.score).toBeLessThan(oneProblem.score);
+    });
+  });
+
+  describe("confidence — multi-currency coverage", () => {
+    it("caps confidence at medium when a meaningful share of active subscriptions sit outside the primary currency", () => {
+      const subs = [
+        sub({ name: "Netflix", currency: "usd" }),
+        sub({ name: "Hulu", currency: "usd" }),
+        sub({ name: "UK Gym", currency: "gbp" }),
+        sub({ name: "EU VPN", currency: "eur" }),
+      ];
+      const result = computeHealthScore(ctx(subs))!;
+      expect(result.confidence.level).not.toBe("high");
+    });
+
+    it("does not cap confidence when the account is effectively single-currency", () => {
+      const result = computeHealthScore(
+        ctx([sub({ name: "Netflix" }), sub({ name: "Spotify" }), sub({ name: "Hulu" }), sub({ name: "Adobe" })]),
+      )!;
+      expect(result.confidence.level).toBe("high");
+    });
+  });
+
+  // Health Score v2 adversarial-audit fix: a large share of active
+  // subscriptions with an already-passed renewal date is a live signal
+  // that this app's own "active" set might not reflect reality — every
+  // dollar-based figure in the score is computed FROM that set. Confidence
+  // must reflect that doubt rather than default to "high" purely because
+  // subscription count and history depth look fine.
+  describe("confidence — overdue-renewal density", () => {
+    it("caps confidence at medium when a large share of active subscriptions are overdue", () => {
+      // todayIso here is "2026-01-01" (this file's ctx default) — all three
+      // dates below are strictly before it, so overdueRenewals counts them.
+      const result = computeHealthScore(
+        ctx([
+          sub({ name: "Netflix", nextRenewalDate: "2025-10-01" }),
+          sub({ name: "Hulu", nextRenewalDate: "2025-11-01" }),
+          sub({ name: "Spotify", nextRenewalDate: "2025-12-01" }),
+          sub({ name: "Adobe", nextRenewalDate: "2099-01-01" }),
+        ]),
+      )!;
+      expect(result.confidence.level).not.toBe("high");
+    });
+
+    it("does not cap confidence for a single forgotten renewal among many", () => {
+      const subs = [
+        sub({ name: "Netflix", nextRenewalDate: "2025-10-01" }),
+        ...["Hulu", "Spotify", "Adobe", "Disney", "Peacock", "Paramount"].map((name) => sub({ name })),
+      ];
+      const result = computeHealthScore(ctx(subs))!;
+      expect(result.confidence.level).toBe("high");
     });
   });
 });

@@ -7,6 +7,7 @@ import type { SubscriptionPriceHistory } from "@/lib/db/schema";
 function ctx(
   subs: ReturnType<typeof sub>[],
   priceHistoryBySubscriptionId?: Map<string, SubscriptionPriceHistory[]>,
+  dismissedRecommendationIds?: Set<string>,
 ): EngineContext {
   return {
     subscriptions: subs,
@@ -14,6 +15,7 @@ function ctx(
     todayIso: "2026-01-01",
     isPremium: false,
     priceHistoryBySubscriptionId,
+    dismissedRecommendationIds,
   };
 }
 
@@ -45,11 +47,37 @@ describe("health.duplicates", () => {
     expect(result?.scoreImpact).toBeGreaterThan(0);
     expect(result?.dimension).toBe("redundancy");
   });
-  it("penalizes duplicates, capped at -60", () => {
+  // Final-calibration-review fix: ceiling raised 60->100 (see
+  // confirmedDuplicateSeverity's own comment) — this fixture's raw value
+  // (4 pairs, 80% share) is 90, no longer flattened to -60.
+  it("penalizes duplicates, magnitude- and count-aware, capped at -100", () => {
     const subs = Array.from({ length: 5 }, (_, i) => sub({ name: `Netflix ${i}` }));
     const result = rule.evaluate(ctx(subs));
-    expect(result?.scoreImpact).toBe(-60);
+    expect(result?.scoreImpact).toBe(-90);
     expect(result?.dimension).toBe("redundancy");
+  });
+
+  // Health Score v2: magnitude-aware severity — a duplicate that's a tiny
+  // share of total spend must hurt less than one that dominates it, even at
+  // the same pair count.
+  it("penalizes a duplicate that's a small share of total spend less than one that dominates it", () => {
+    const small = rule.evaluate(
+      ctx([sub({ name: "Netflix", amountCents: 999 }), sub({ name: "Netflix Premium", amountCents: 100 }), sub({ name: "Big Bill", amountCents: 9000 })]),
+    );
+    const large = rule.evaluate(ctx([sub({ name: "Netflix", amountCents: 999 }), sub({ name: "Netflix Premium", amountCents: 999 })]));
+    expect(small?.scoreImpact).toBeLessThan(0);
+    expect(large?.scoreImpact).toBeLessThan(small!.scoreImpact!);
+  });
+
+  // Health Score v2: a duplicate already surfaced on /savings and dismissed,
+  // but still present today, is stronger evidence than a fresh finding —
+  // real, stored data (dismissedSavingsRecommendations), not an inference.
+  it("penalizes a dismissed-but-unresolved duplicate more than an identical fresh one", () => {
+    const netflix = sub({ id: "keep-id", name: "Netflix" });
+    const premium = sub({ id: "redundant-id", name: "Netflix Premium" });
+    const fresh = rule.evaluate(ctx([netflix, premium]));
+    const stale = rule.evaluate(ctx([netflix, premium], undefined, new Set([`duplicate-${netflix.id}-${premium.id}`])));
+    expect(stale?.scoreImpact).toBeLessThan(fresh!.scoreImpact!);
   });
 });
 
@@ -138,6 +166,28 @@ describe("health.expensive_outliers", () => {
   it("negative when a real outlier exists", () => {
     const result = rule.evaluate(ctx([sub({ amountCents: 1000 }), sub({ amountCents: 1000 }), sub({ amountCents: 10000 })]));
     expect(result?.scoreImpact).toBeLessThan(0);
+  });
+
+  // Health Score v2 adversarial-audit fix: magnitude-aware, not just
+  // count-aware — a single subscription that's barely 2x the mean and one
+  // that dominates nearly the entire portfolio's spend must not score
+  // identically. Both fixtures have exactly 1 outlier (same count), so any
+  // difference in scoreImpact is attributable to the magnitude factor.
+  it("penalizes a portfolio-dominating outlier more than a barely-qualifying one", () => {
+    // 6 items in both fixtures so the comparison isolates magnitude, not
+    // count: 5 baseline subs + 1 outlier. Barely-qualifying: outlier's
+    // share of total (2510/7510 ≈ 33%) stays under the 40% floor where
+    // expensiveOutlierMagnitudeFactor starts scaling, so this fixture's
+    // penalty is the original, unscaled -16. Dominating: outlier's share
+    // (9700/10200 ≈ 95%) is deep into the scaled range, capped at 2x.
+    const barelyQualifying = rule.evaluate(
+      ctx([sub({ amountCents: 1000 }), sub({ amountCents: 1000 }), sub({ amountCents: 1000 }), sub({ amountCents: 1000 }), sub({ amountCents: 1000 }), sub({ amountCents: 2510 })]),
+    );
+    const dominating = rule.evaluate(
+      ctx([sub({ amountCents: 100 }), sub({ amountCents: 100 }), sub({ amountCents: 100 }), sub({ amountCents: 100 }), sub({ amountCents: 100 }), sub({ amountCents: 9700 })]),
+    );
+    expect(barelyQualifying?.scoreImpact).toBe(-16);
+    expect(dominating?.scoreImpact).toBeLessThan(barelyQualifying!.scoreImpact!);
   });
 
   // Regression: this used to render formatCents(o.annualCents) with no
@@ -234,10 +284,37 @@ describe("health.canceled_history", () => {
     expect(rule.evaluate(ctx([sub({ status: "active" })]))).toBeNull();
   });
   it("positive bonus scaling with canceled count, capped at 24", () => {
-    const subs = [sub({ status: "active" }), ...Array.from({ length: 5 }, () => sub({ status: "canceled" }))];
+    // Distinct names from the active sub (and from each other) — none of
+    // these canceled subscriptions should read as a reactivation of "Test
+    // Sub" (the active one), which is exactly what this test is isolating:
+    // count-scaling for genuinely resolved cancellations.
+    const subs = [
+      sub({ status: "active" }),
+      ...["Aurora", "Bramble", "Cascade", "Driftwood", "Ember"].map((name) => sub({ name, status: "canceled" })),
+    ];
     const result = rule.evaluate(ctx(subs));
     expect(result?.scoreImpact).toBe(24);
     expect(result?.dimension).toBe("hygiene");
+  });
+
+  // Health Score v2 audit fix: a canceled subscription that's since come
+  // back (same name, now active) is a reactivation, not resolved pruning —
+  // health.reactivation already penalizes it from the active side, so it
+  // must not also earn a positive credit here.
+  it("does not credit a canceled subscription that's since been reactivated", () => {
+    const subs = [sub({ name: "Netflix", status: "canceled" }), sub({ name: "Netflix", status: "active" })];
+    expect(rule.evaluate(ctx(subs))).toBeNull();
+  });
+
+  it("still credits a genuinely resolved cancellation alongside an unrelated reactivation", () => {
+    const subs = [
+      sub({ name: "Netflix", status: "canceled" }),
+      sub({ name: "Netflix", status: "active" }), // reactivated — excluded
+      sub({ name: "Hulu", status: "canceled" }), // genuinely resolved — still credited
+      sub({ name: "Spotify", status: "active" }),
+    ];
+    const result = rule.evaluate(ctx(subs));
+    expect(result?.scoreImpact).toBe(8); // 1 genuinely-pruned subscription (Hulu) * WEAK
   });
 });
 
@@ -438,5 +515,144 @@ describe("health.price_increases", () => {
     const result = rule.evaluate(ctx([flagged, noHistory], history));
     expect(result?.subscriptionIds).toEqual(["flagged"]);
     expect(result?.description).not.toContain("NoHistory");
+  });
+
+  // Health Score v2: a flat, once-per-rule kicker on top of the base
+  // per-increase penalty when at least one active subscription shows 2+
+  // recorded changes (3+ history rows) in the trailing 12 months.
+  it("adds a repeated-change kicker when a subscription has 3+ recorded price points", () => {
+    const netflix = sub({ id: "netflix", name: "Netflix", amountCents: 1799 });
+    const singleChangeHistory = new Map([
+      [
+        "netflix",
+        [
+          historyRow({ subscriptionId: "netflix", amountCents: 1549, observedAt: new Date("2025-01-01T00:00:00Z") }),
+          historyRow({ subscriptionId: "netflix", amountCents: 1799, observedAt: new Date("2025-06-01T00:00:00Z") }),
+        ],
+      ],
+    ]);
+    const repeatedHistory = new Map([
+      [
+        "netflix",
+        [
+          historyRow({ subscriptionId: "netflix", amountCents: 1400, observedAt: new Date("2025-01-01T00:00:00Z") }),
+          historyRow({ subscriptionId: "netflix", amountCents: 1549, observedAt: new Date("2025-06-01T00:00:00Z") }),
+          historyRow({ subscriptionId: "netflix", amountCents: 1799, observedAt: new Date("2025-11-01T00:00:00Z") }),
+        ],
+      ],
+    ]);
+    const singleResult = rule.evaluate(ctx([netflix], singleChangeHistory));
+    const repeatedResult = rule.evaluate(ctx([netflix], repeatedHistory));
+    expect(repeatedResult?.scoreImpact).toBeLessThan(singleResult!.scoreImpact!);
+  });
+
+  // Final-calibration-review fix: the whole reason priceIncreaseSeverity
+  // exists — a randomized calibration sweep found that once 2+
+  // subscriptions had a genuine, material price increase, a portfolio
+  // where EVERY subscription's price nearly doubled (+80%) scored
+  // identically (-32, the old flat cap) to one where only two rose a
+  // modest 30%. Builds 4-subscription portfolios where `increasedCount` of
+  // them have a real, material (well above the $30/yr floor) increase of
+  // `pct`, and confirms the penalty now differentiates both by count AND
+  // by magnitude, up through the new -48 ceiling.
+  function buildPriceIncreasePortfolio(increasedCount: number, pct: number) {
+    const names = ["Netflix", "Hulu", "Spotify", "Adobe"];
+    const toAmounts = [1799, 1499, 1299, 5999];
+    const subs = names.map((name, i) => sub({ id: `pi${i}`, name, amountCents: toAmounts[i], createdAt: new Date("2024-01-01T00:00:00Z") }));
+    const history = new Map<string, SubscriptionPriceHistory[]>();
+    for (let i = 0; i < names.length; i++) {
+      const to = toAmounts[i];
+      const from = i < increasedCount ? Math.round(to / (1 + pct)) : to;
+      history.set(`pi${i}`, [
+        historyRow({ subscriptionId: `pi${i}`, amountCents: from, observedAt: new Date("2025-01-01T00:00:00Z") }),
+        historyRow({ subscriptionId: `pi${i}`, amountCents: to, observedAt: new Date("2026-01-01T00:00:00Z") }),
+      ]);
+    }
+    return { subs, history };
+  }
+
+  it("penalizes 4/4 subscriptions increasing more than 2/4, at the same magnitude", () => {
+    const two = buildPriceIncreasePortfolio(2, 0.8);
+    const four = buildPriceIncreasePortfolio(4, 0.8);
+    const twoResult = rule.evaluate(ctx(two.subs, two.history));
+    const fourResult = rule.evaluate(ctx(four.subs, four.history));
+    expect(fourResult?.scoreImpact).toBeLessThan(twoResult!.scoreImpact!);
+    // Neither collapses to the old flat -32 cap.
+    expect(twoResult?.scoreImpact).not.toBe(-32);
+    expect(fourResult?.scoreImpact).not.toBe(-32);
+  });
+
+  it("penalizes a severe (+80%) increase more than a modest (+30%) one, at the same count", () => {
+    const modest = buildPriceIncreasePortfolio(4, 0.3);
+    const severe = buildPriceIncreasePortfolio(4, 0.8);
+    const modestResult = rule.evaluate(ctx(modest.subs, modest.history));
+    const severeResult = rule.evaluate(ctx(severe.subs, severe.history));
+    expect(severeResult?.scoreImpact).toBeLessThan(modestResult!.scoreImpact!);
+  });
+
+  it("never exceeds the new -48 ceiling", () => {
+    const worst = buildPriceIncreasePortfolio(4, 0.8);
+    const result = rule.evaluate(ctx(worst.subs, worst.history));
+    expect(result?.scoreImpact).toBeGreaterThanOrEqual(-48);
+  });
+});
+
+describe("health.portfolio_concentration", () => {
+  const rule = ruleById("health.portfolio_concentration");
+
+  it("null with fewer than 3 subscriptions", () => {
+    expect(rule.evaluate(ctx([sub({ amountCents: 1000 }), sub({ amountCents: 1000 })]))).toBeNull();
+  });
+
+  it("null for a perfectly even split", () => {
+    const subs = Array.from({ length: 4 }, () => sub({ amountCents: 1000 }));
+    expect(rule.evaluate(ctx(subs))).toBeNull();
+  });
+
+  it("flags genuine imbalance from two large subscriptions, neither individually a 2x-mean outlier", () => {
+    // 4 subscriptions: two large, two trivial. Mean is 2500, so the 2x-mean
+    // outlier bar is 5000 — both A (4900) and B (4800) sit just under it,
+    // so health.expensive_outliers has nothing to say here; the imbalance
+    // is only visible at the whole-portfolio level.
+    const subs = [
+      sub({ name: "A", amountCents: 4900 }),
+      sub({ name: "B", amountCents: 4800 }),
+      sub({ name: "C", amountCents: 150 }),
+      sub({ name: "D", amountCents: 150 }),
+    ];
+    const result = rule.evaluate(ctx(subs));
+    expect(result).not.toBeNull();
+    expect(result?.scoreImpact).toBeLessThan(0);
+    expect(result?.dimension).toBe("spending");
+  });
+
+  it("stays silent when its top contributor is already flagged by health.expensive_outliers — same fact, not double-counted", () => {
+    const subs = [sub({ name: "Small A", amountCents: 100 }), sub({ name: "Small B", amountCents: 100 }), sub({ name: "Huge", amountCents: 10_000 })];
+    expect(rule.evaluate(ctx(subs))).toBeNull();
+  });
+});
+
+describe("health.reactivation", () => {
+  const rule = ruleById("health.reactivation");
+
+  it("null with no canceled history", () => {
+    expect(rule.evaluate(ctx([sub({ name: "Netflix" })]))).toBeNull();
+  });
+
+  it("flags an active subscription whose name matches a previously-canceled one", () => {
+    const canceled = sub({ name: "Netflix", status: "canceled" });
+    const active = sub({ name: "Netflix" });
+    const result = rule.evaluate(ctx([canceled, active]));
+    expect(result).not.toBeNull();
+    expect(result?.severity).toBe("info");
+    expect(result?.scoreImpact).toBeLessThan(0);
+    expect(result?.dimension).toBe("hygiene");
+    expect(result?.subscriptionIds).toEqual([active.id]);
+  });
+
+  it("does not flag an active subscription with no canceled counterpart", () => {
+    const canceled = sub({ name: "Netflix", status: "canceled" });
+    const active = sub({ name: "Spotify" });
+    expect(rule.evaluate(ctx([canceled, active]))).toBeNull();
   });
 });

@@ -42,7 +42,12 @@ for (const vp of VIEWPORTS) {
     // coverage without any realized-savings history; the dedicated
     // long-sentence case (a canceled subscription's "Money saved so far"
     // block) gets its own test below, same split as the long-name case.
-    test(`/dashboard, /settings, /subscriptions/import, /subscriptions/new, /subscriptions/[id], and /savings have no horizontal overflow at ${vp.name}`, async ({ browser }) => {
+    //
+    // /subscriptions (the list/explorer page, distinct from
+    // /subscriptions/[id] below) added for the Free-tier CSV-export icon
+    // button — a real new element in that page's own top action row, not
+    // previously covered by anything in this file.
+    test(`/dashboard, /settings, /subscriptions, /subscriptions/import, /subscriptions/new, /subscriptions/[id], and /savings have no horizontal overflow at ${vp.name}`, async ({ browser }) => {
       const user = await createVerifiedUser(browser, `e2e-mobile-${vp.name.replace("x", "-")}`, {
         viewport: { width: vp.width, height: vp.height },
       });
@@ -56,6 +61,7 @@ for (const vp of VIEWPORTS) {
       for (const path of [
         "/dashboard",
         "/settings",
+        "/subscriptions",
         "/subscriptions/import",
         "/subscriptions/new",
         `/subscriptions/${subscriptionId}`,

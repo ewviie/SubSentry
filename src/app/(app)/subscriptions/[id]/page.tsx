@@ -2,15 +2,18 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth/session";
 import { getSubscription, listSubscriptions, getAllPriceHistoryForUser } from "@/lib/subscriptions/queries";
+import { getDismissedRecommendationIds } from "@/lib/subscriptions/dismissed-recommendations";
 import { subscriptionIdSchema } from "@/lib/subscriptions/validation";
 import { computeInsights, computeFunctionalOverlapGroups } from "@/lib/subscriptions/insights";
 import { monthlyCents, annualCents, formatCents } from "@/lib/subscriptions/money";
-import { runInsightsEngine, RULE_RECOMMENDED_ACTION } from "@/lib/insights-engine";
-import { hasPaidAccess } from "@/lib/billing/plan";
+import { runInsightsEngine, RULE_RECOMMENDED_ACTION, mergeInsightResults } from "@/lib/insights-engine";
+import { getUpgradeUrl, isBetaAllAccess } from "@/lib/billing/plan";
+import { resolveHasPaidAccess } from "@/lib/dev/plan-preview";
 import { EditSubscriptionForm } from "@/components/subscriptions/edit-subscription-form";
 import { SubscriptionSummary } from "@/components/subscriptions/subscription-summary";
 import { DuplicateNotice } from "@/components/subscriptions/duplicate-notice";
 import { PriceHistoryNote } from "@/components/subscriptions/price-history-note";
+import { UpgradeInline } from "@/components/billing/upgrade-prompt";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { MotionCard } from "@/components/dashboard/motion-card";
@@ -40,10 +43,11 @@ export default async function SubscriptionDetailPage({
   // the same bulk-fetched map (see engine.ts/health.price_increases, the
   // other consumer this map was added for), so there's no need to fetch it
   // a second time from the same table.
-  const [subscription, allSubscriptions, priceHistoryBySubscriptionId] = await Promise.all([
+  const [subscription, allSubscriptions, priceHistoryBySubscriptionId, dismissedRecommendationIds] = await Promise.all([
     getSubscription(user.id, id),
     listSubscriptions(user.id),
     getAllPriceHistoryForUser(user.id),
+    getDismissedRecommendationIds(user.id),
   ]);
   if (!subscription) notFound();
 
@@ -99,8 +103,9 @@ export default async function SubscriptionDetailPage({
   );
   const relatedSubscriptions = overlapGroup ? overlapGroup.subscriptions.filter((s) => s.id !== subscription.id) : [];
 
-  const isPremium = hasPaidAccess(user.plan);
-  const engineOutput = runInsightsEngine(allSubscriptions, isPremium, priceHistoryBySubscriptionId);
+  const isPremium = await resolveHasPaidAccess(user.plan);
+  const upgradeUrl = isPremium ? null : getUpgradeUrl(user.id);
+  const engineOutput = runInsightsEngine(allSubscriptions, isPremium, priceHistoryBySubscriptionId, dismissedRecommendationIds);
   // positive + warnings + premiumInsights, not `optimization` separately,
   // since every optimization-category finding today is also premium (see
   // premium.ts's annual_switch_savings), so premiumInsights already covers
@@ -126,7 +131,15 @@ export default async function SubscriptionDetailPage({
   // health.duplicates the exclusion has to happen here, per-page, rather
   // than engine-wide, since Quick Wins/the health score are the *only*
   // place this fact appears on the dashboard and must keep it.
-  const relevantSignals = [...engineOutput.positive, ...engineOutput.warnings, ...engineOutput.premiumInsights].filter(
+  // mergeInsightResults, not a raw [...a, ...b, ...c] concatenation: severity
+  // and the premium flag are independent axes on an InsightResult, and every
+  // rules/premium.ts "risk_*" rule is both critical (landing in `warnings`)
+  // and premium (landing in `premiumInsights`) — concatenating directly
+  // included the exact same finding twice, which is what produced a real
+  // React "two children with the same key" crash here for a premium user
+  // (see mergeInsightResults' own comment in engine.ts, and this page's
+  // regression test in engine.test.ts).
+  const relevantSignals = mergeInsightResults(engineOutput.positive, engineOutput.warnings, engineOutput.premiumInsights).filter(
     (r) => r.subscriptionIds.includes(subscription.id) && r.ruleId !== "health.price_increases",
   );
   // The first (title/description already sorted by relevance where they're
@@ -277,6 +290,23 @@ export default async function SubscriptionDetailPage({
                   ))}
                 </ul>
               </div>
+            ) : null}
+
+            {/* Section 11 of the monetization pass: a free caller's
+                relevantSignals above can only ever be empty of premium
+                content — engine.ts never evaluates PREMIUM_RULES for a
+                non-premium isPremium, so there's genuinely nothing
+                per-subscription to disclose here. Rather than fabricating
+                "we found something about this subscription" (section 5's
+                "do not fabricate opportunities" applies just as much here),
+                this states the real, general fact instead: Pro adds this
+                kind of analysis for every subscription, not a claim about
+                this one specifically. */}
+            {!isPremium ? (
+              <p className="border-t border-border pt-4 text-sm text-muted-foreground">
+                Pro adds deeper cost analysis and personalized optimization tips for every subscription.{" "}
+                <UpgradeInline beta={isBetaAllAccess()} upgradeUrl={upgradeUrl} />
+              </p>
             ) : null}
 
             <EditSubscriptionForm subscription={subscription} />

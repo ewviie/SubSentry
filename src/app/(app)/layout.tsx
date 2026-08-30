@@ -4,6 +4,8 @@ import Image from "next/image";
 import type { Metadata } from "next";
 import { requireUser } from "@/lib/auth/session";
 import { initials } from "@/lib/utils";
+import { isDevPlanPreviewAvailable, getDevPlanPreview } from "@/lib/dev/plan-preview";
+import { DevPlanPreviewBanner } from "@/components/dev/dev-plan-preview-banner";
 import { LogoutButton } from "@/components/app-shell/logout-button";
 import { CheckoutActivator } from "@/components/billing/checkout-activator";
 import { SidebarNav } from "@/components/app-shell/sidebar-nav";
@@ -28,9 +30,19 @@ export const metadata: Metadata = {
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
+  // Rendered on every authenticated page, not just Settings — the whole
+  // point is to see the Free/Pro distinction show up everywhere it's
+  // supposed to (dashboard, subscriptions, savings), not only on the one
+  // page that names the plan. Never rendered at all when unavailable
+  // (checked server-side, before the component or its JS is even part of
+  // the tree) — see lib/dev/plan-preview.ts's own comment on why that's a
+  // hard guarantee, not a cosmetic hide.
+  const devPreviewAvailable = isDevPlanPreviewAvailable();
+  const devPlanPreview = devPreviewAvailable ? await getDevPlanPreview() : null;
 
   return (
     <div className="min-h-svh bg-background">
+      {devPreviewAvailable ? <DevPlanPreviewBanner current={devPlanPreview} /> : null}
       <Suspense fallback={null}>
         <CheckoutActivator />
       </Suspense>

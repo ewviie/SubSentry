@@ -75,14 +75,15 @@ test.describe("import review — possible price change", () => {
     await deleteTestUser(user.email);
   });
 
-  // Regression (CodeRabbit review + product council, PM lens): the
-  // checkbox above a price-change proposal is deliberately left enabled
-  // (nothing is force-disabled while a proposal is pending) — a user could
-  // check it, meaning to import this cluster as a brand-new subscription,
-  // then change their mind and resolve the proposal instead. Resolving
-  // (either button) must clear that selection too, or the batch Confirm
-  // would still create a duplicate subscription alongside the update.
-  test("resolving a proposal clears the row from the new-subscription selection, even if it was manually checked first", async ({ browser }) => {
+  // Release-review finding: a row carrying an unresolved price-change
+  // proposal must never be selectable for the create batch (see
+  // review-table.tsx's isBlockedByUnresolvedProposal) — otherwise Confirm
+  // could both leave the proposal dangling AND create a brand-new,
+  // duplicate subscription for a charge already tracked under a different
+  // price. The checkbox is disabled outright while the proposal is
+  // pending, and resolving it (either button) folds the row into the
+  // ignored set, so it stays disabled and unchecked afterward too.
+  test("a row with an unresolved price-change proposal can't be selected for the create batch, before or after resolving it", async ({ browser }) => {
     const user = await createVerifiedUser(browser, "e2e-import-price-selected");
 
     const created = await apiFetch(user.page, "/api/subscriptions", {
@@ -95,8 +96,10 @@ test.describe("import review — possible price change", () => {
 
     const row = user.page.getByRole("row", { name: /Netflix/ });
     const checkbox = row.getByRole("checkbox", { name: /^Select/ });
-    await checkbox.check();
-    await expect(checkbox).toBeChecked();
+    // Disabled from the moment the proposal appears — never checkable
+    // while it's still pending.
+    await expect(checkbox).toBeDisabled();
+    await expect(checkbox).not.toBeChecked();
 
     // Accessible name is the fuller aria-label (accessibility review fix),
     // not the plain visible text — a screen-reader user navigating a
@@ -107,8 +110,8 @@ test.describe("import review — possible price change", () => {
     await expect(user.page.getByText(/price updated/i)).toBeVisible({ timeout: 10_000 });
 
     // Still visible (now ignored, not selected) — not removed from the
-    // table — but definitively unchecked and disabled, proving it was
-    // cleared from the create-batch selection.
+    // table — and still unchecked and disabled, proving it can never
+    // reach the create-batch selection.
     await expect(checkbox).not.toBeChecked();
     await expect(checkbox).toBeDisabled();
 

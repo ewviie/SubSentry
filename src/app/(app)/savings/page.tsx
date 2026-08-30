@@ -4,17 +4,24 @@ import {
   computeSavingsRecommendations,
   computeTotalPotentialSavingsMonthlyCents,
   computeRealizedSavings,
+  splitSavingsRecommendationsByPlan,
 } from "@/lib/subscriptions/savings";
 import { getDismissedRecommendationIds } from "@/lib/subscriptions/dismissed-recommendations";
 import { formatCents } from "@/lib/subscriptions/money";
+import { getUpgradeUrl, isBetaAllAccess } from "@/lib/billing/plan";
+import { resolveHasPaidAccess } from "@/lib/dev/plan-preview";
 import { EmptyState } from "@/components/ui/empty-state";
 import { MotionCard } from "@/components/dashboard/motion-card";
 import { StaggerSection } from "@/components/dashboard/stagger-section";
+import { SectionHeading } from "@/components/dashboard/section-heading";
 import { SavingsRecommendationCard } from "@/components/subscriptions/savings-recommendation-card";
-import { PiggyBank, ShieldCheck, CheckCircle2, EyeOff } from "lucide-react";
+import { UpgradeInline } from "@/components/billing/upgrade-prompt";
+import { PiggyBank, ShieldCheck, CheckCircle2, EyeOff, Lock } from "lucide-react";
 
 export default async function SavingsPage() {
   const user = await requireUser();
+  const isPremium = await resolveHasPaidAccess(user.plan);
+  const upgradeUrl = isPremium ? null : getUpgradeUrl(user.id);
   // Independent reads, fetched in parallel — same reasoning every other
   // Promise.all in this app gives (see subscriptions/[id]/page.tsx's own
   // comment): neither depends on the other's result.
@@ -35,17 +42,22 @@ export default async function SavingsPage() {
   const recommendations = allRecommendations.filter((r) => !dismissedIds.has(r.id));
   const totalMonthlyCents = computeTotalPotentialSavingsMonthlyCents(recommendations);
   const realized = computeRealizedSavings(subscriptions);
+  // Monetization Council P0: "gate savings-opportunity list depth by plan."
+  // Every confirmed duplicate always stays fully visible here too, on the
+  // same principle SavingsOpportunitiesCard's own comment documents — this
+  // page's real total above (totalMonthlyCents) is entirely confirmed-
+  // duplicate-derived, so gating never makes that number and this list
+  // disagree with each other.
+  const { visible: visibleRecommendations, teased } = splitSavingsRecommendationsByPlan(recommendations, isPremium);
 
   return (
     <div className="max-w-3xl">
-      <p className="mb-2 flex items-center gap-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-foreground/35" />
-        Take action
-      </p>
-      <h1 className="font-heading text-h1 font-semibold">Smart Savings</h1>
-      <p className="mt-1 text-muted-foreground">
-        Real opportunities found in your own subscriptions. Never a guessed percentage.
-      </p>
+      <SectionHeading
+        as="h1"
+        eyebrow="Take action"
+        title="Smart Savings"
+        description="Real opportunities found in your own subscriptions. Never a guessed percentage."
+      />
 
       {/* Realized savings, distinct from the "potential" section below on
           purpose, both in data source and in wording: this is what you've
@@ -143,10 +155,37 @@ export default async function SavingsPage() {
           ) : null}
 
           <StaggerSection className="mt-6 space-y-3" staggerChildren={0.05}>
-            {recommendations.map((recommendation) => (
+            {visibleRecommendations.map((recommendation) => (
               <SavingsRecommendationCard key={recommendation.id} recommendation={recommendation} />
             ))}
           </StaggerSection>
+
+          {/* Only ever describes review-tier findings (functional overlap,
+              small-subscriptions clusters) beyond the one already shown in
+              full above — confirmed duplicates are never withheld, see
+              splitSavingsRecommendationsByPlan's own comment. Always a real,
+              checkable count and dollar figure, never a vague "there's
+              more" with nothing behind it. */}
+          {teased ? (
+            <MotionCard className="mt-3">
+              <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/30 p-4">
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                  <Lock className="size-4" aria-hidden="true" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium">
+                    +{teased.count} more opportunit{teased.count === 1 ? "y" : "ies"} found
+                    {teased.totalCents !== null
+                      ? `, worth an estimated ${formatCents(teased.totalCents, teased.currency ?? undefined)}`
+                      : ""}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    <UpgradeInline label="See the full list with Pro" beta={isBetaAllAccess()} upgradeUrl={upgradeUrl} />
+                  </p>
+                </div>
+              </div>
+            </MotionCard>
+          ) : null}
         </>
       )}
     </div>

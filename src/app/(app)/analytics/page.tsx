@@ -8,30 +8,47 @@ import {
   computeTopMerchantsBySpend,
 } from "@/lib/subscriptions/analytics";
 import { splitByPrimaryCurrency } from "@/lib/subscriptions/money";
+import { getUpgradeUrl } from "@/lib/billing/plan";
+import { resolveHasPaidAccess } from "@/lib/dev/plan-preview";
+import { runInsightsEngine } from "@/lib/insights-engine";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { MotionCard } from "@/components/dashboard/motion-card";
 import { StaggerSection } from "@/components/dashboard/stagger-section";
+import { SectionHeading } from "@/components/dashboard/section-heading";
 import { SpendBySourceBars } from "@/components/analytics/spend-by-source-bars";
 import { BillingCycleCards } from "@/components/analytics/billing-cycle-cards";
 import { GrowthChart } from "@/components/analytics/growth-chart";
 import { RenewalsTimelineChart } from "@/components/analytics/renewals-timeline-chart";
 import { TopMerchantsList } from "@/components/analytics/top-merchants-list";
+import { RiskAlertsCard, AiRecommendationsCard } from "@/components/dashboard/insights/insight-panels";
 import { BarChart3 } from "lucide-react";
 
 export default async function AnalyticsPage() {
   const user = await requireUser();
   const subscriptions = await listSubscriptions(user.id);
+  // Monetization pass, section 6: everything above this point (spend
+  // growth, upcoming renewals, top subscriptions, spend by source, billing
+  // cycles) stays exactly as free as it already was — "basic spend
+  // summary, basic category breakdown, basic useful analytics" per that
+  // section's own Free/Pro split, none of it newly restricted. What's new
+  // is adding this page's own Pro depth (Risk alerts, Optimization
+  // recommendations) below, reusing the exact same engine output and gated
+  // cards the dashboard already uses — not a second, page-specific
+  // definition of what's premium here.
+  const isPremium = await resolveHasPaidAccess(user.plan);
+  const upgradeUrl = isPremium ? null : getUpgradeUrl(user.id);
+  const engineOutput = runInsightsEngine(subscriptions, isPremium);
 
   if (subscriptions.length === 0) {
     return (
       <div className="max-w-4xl">
-        <p className="mb-2 flex items-center gap-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-foreground/35" />
-          Deeper look
-        </p>
-        <h1 className="font-heading text-h1 font-semibold">Analytics</h1>
-        <p className="mt-1 text-muted-foreground">A deeper look at your subscription spend over time.</p>
+        <SectionHeading
+          as="h1"
+          eyebrow="Deeper look"
+          title="Analytics"
+          description="A deeper look at your subscription spend over time."
+        />
         <EmptyState
           className="mt-6"
           icon={BarChart3}
@@ -57,14 +74,12 @@ export default async function AnalyticsPage() {
 
   return (
     <div className="max-w-5xl space-y-6">
-      <div>
-        <p className="mb-2 flex items-center gap-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-foreground/35" />
-          Deeper look
-        </p>
-        <h1 className="font-heading text-h1 font-semibold">Analytics</h1>
-        <p className="mt-1 text-muted-foreground">A deeper look at your subscription spend over time.</p>
-      </div>
+      <SectionHeading
+        as="h1"
+        eyebrow="Deeper look"
+        title="Analytics"
+        description="A deeper look at your subscription spend over time."
+      />
 
       <MotionCard>
         <Card size="sm" className="shadow-elevation-low">
@@ -127,6 +142,21 @@ export default async function AnalyticsPage() {
               <BillingCycleCards entries={billingCycles} currency={currency ?? undefined} />
             </CardContent>
           </Card>
+        </MotionCard>
+      </StaggerSection>
+
+      {/* Same two Pro-gated cards the dashboard already renders, fed the
+          same engineOutput computed above — RiskAlertsCard/AiRecommendationsCard
+          already return null for a premium caller with nothing to show, and
+          the shared UpgradeCard (billing/upgrade-prompt.tsx) for a free one,
+          so this page can't show different Pro content than the dashboard
+          does for the same account. */}
+      <StaggerSection className="grid gap-4 lg:grid-cols-2" staggerChildren={0.07}>
+        <MotionCard>
+          <RiskAlertsCard output={engineOutput} isPremium={isPremium} upgradeUrl={upgradeUrl} />
+        </MotionCard>
+        <MotionCard>
+          <AiRecommendationsCard output={engineOutput} isPremium={isPremium} upgradeUrl={upgradeUrl} />
         </MotionCard>
       </StaggerSection>
     </div>

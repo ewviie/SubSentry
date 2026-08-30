@@ -1,12 +1,21 @@
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 
-function SectionHeadingSkeleton() {
+// Mirrors SectionHeading's own two weights (see its comment, UI audit
+// finding #3) so this skeleton doesn't reintroduce the exact layout-jump
+// problem its own header comment already warns about for the cards below:
+// Financial Overview is the one "primary"-weight section (bigger title,
+// eyebrow-height gap kept), the other three are "secondary" (smaller
+// title, tighter gap to the description) now that they no longer render
+// an eyebrow line above the real heading either.
+function SectionHeadingSkeleton({ weight = "primary" }: { weight?: "primary" | "secondary" }) {
+  const isSecondary = weight === "secondary";
   return (
-    <div className="flex items-end justify-between gap-4">
-      <div className="space-y-2">
-        <Skeleton className="h-6 w-48" />
-        <Skeleton className="h-4 w-64" />
+    <div className={cn("flex flex-wrap gap-3", isSecondary ? "items-center justify-between" : "items-end justify-between gap-4")}>
+      <div className={isSecondary ? "space-y-1" : "space-y-2"}>
+        <Skeleton className={isSecondary ? "h-5 w-40" : "h-6 w-48"} />
+        <Skeleton className={isSecondary ? "h-3.5 w-56" : "h-4 w-64"} />
       </div>
       <Skeleton className="h-4 w-16" />
     </div>
@@ -91,7 +100,7 @@ export default function DashboardLoading() {
       {/* Subscription management: QuickAddBar, one merged RenewalForecastCard
           (full width, not a 2-col pair), then the subscriptions list. */}
       <div className="space-y-6">
-        <SectionHeadingSkeleton />
+        <SectionHeadingSkeleton weight="secondary" />
         <Card>
           <CardContent className="pt-6">
             <Skeleton className="h-8 w-full" />
@@ -112,7 +121,7 @@ export default function DashboardLoading() {
           stretching to match a list card's height; see the real section's
           own comment), up to 4 cards. */}
       <div className="space-y-6">
-        <SectionHeadingSkeleton />
+        <SectionHeadingSkeleton weight="secondary" />
         <div className="grid gap-4 lg:grid-cols-3">
           {Array.from({ length: 3 }).map((_, i) => (
             <CardSkeleton key={i} />
@@ -122,7 +131,7 @@ export default function DashboardLoading() {
 
       {/* Analytics: category breakdown + 3 insight-engine cards, 2-col. */}
       <div className="space-y-6">
-        <SectionHeadingSkeleton />
+        <SectionHeadingSkeleton weight="secondary" />
         <div className="grid gap-4 lg:grid-cols-2">
           {Array.from({ length: 4 }).map((_, i) => (
             <CardSkeleton key={i} />

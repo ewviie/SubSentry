@@ -59,10 +59,16 @@ test.describe("dashboard — Quick wins", () => {
     // pattern documented in renewal-reminders.spec.ts — not a link role.
     // exact: true guards against Savings opportunities' own "Review {name}"
     // buttons (e.g. "Review Netflix") also matching a substring search for
-    // "Review" — this fixture's 3 distinct, non-duplicate, non-overlapping
-    // names shouldn't trigger that card, but exact matching keeps this
-    // assertion correct even if that changes.
-    const reviewButton = user.page.getByRole("button", { name: "Review", exact: true });
+    // "Review". It doesn't guard against the Premium Optimization
+    // recommendations / Risk alerts cards' own bare "Review" buttons
+    // though (insight-panels.tsx) — this fixture's two $9.99/mo
+    // subscriptions are enough on their own to also trip the annual-plan-
+    // savings rule, and every authenticated user sees Premium cards during
+    // the beta (BETA_ALL_ACCESS), so a page-wide search can legitimately
+    // match more than one "Review" button. Scoped to the Quick wins card
+    // itself, the one this test is actually about.
+    const quickWinsCard = user.page.locator('[data-slot="card"]', { has: user.page.getByText("Quick wins") });
+    const reviewButton = quickWinsCard.getByRole("button", { name: "Review", exact: true });
     await expect(reviewButton).toBeVisible();
     await reviewButton.click();
     // Not just "any subscription page" — the finding names a specific

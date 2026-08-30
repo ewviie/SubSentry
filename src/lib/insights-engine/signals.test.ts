@@ -13,6 +13,15 @@ import {
   canceledCount,
   findPriceIncreases,
   hasEnoughPriceHistoryToEvaluate,
+  confirmedDuplicateSeverity,
+  portfolioConcentration,
+  portfolioConcentrationPenalty,
+  renewalExposurePenalty,
+  reactivationCandidates,
+  hasRepeatedPriceChanges,
+  expensiveOutlierMagnitudeFactor,
+  nonReactivatedCanceledCount,
+  priceIncreaseSeverity,
 } from "./signals";
 import { sub } from "./test-fixtures";
 import type { SubscriptionPriceHistory } from "@/lib/db/schema";
@@ -155,6 +164,34 @@ describe("findRenewalCluster", () => {
     expect(cluster?.subscriptionIds).toHaveLength(3); // still counts all 3 for timing
     expect(cluster?.currency).toBe("usd");
     expect(cluster?.totalCents).toBe(3000); // the GBP 500000 never enters this sum
+  });
+
+  // Regression (release-review finding #7): the window's upper bound used
+  // to be inclusive (`d <= windowEnd` where windowEnd = anchor + 7 days),
+  // spanning 8 calendar days (anchor+0 through anchor+7) for the default
+  // windowDays=7 — while every caller's own copy says "the same week"/
+  // "within 7 days". A renewal exactly 7 days after the anchor must now
+  // fall OUTSIDE the cluster; one 6 days after must still fall inside.
+  it("treats the window as exactly 7 days (anchor+6 inside, anchor+7 outside)", () => {
+    const insideCluster = findRenewalCluster(
+      [
+        sub({ nextRenewalDate: "2026-01-05" }),
+        sub({ nextRenewalDate: "2026-01-06" }),
+        sub({ nextRenewalDate: "2026-01-11" }), // anchor (Jan 5) + 6 days
+      ],
+      today,
+    );
+    expect(insideCluster?.subscriptionIds).toHaveLength(3);
+
+    const outsideCluster = findRenewalCluster(
+      [
+        sub({ nextRenewalDate: "2026-01-05" }),
+        sub({ nextRenewalDate: "2026-01-06" }),
+        sub({ nextRenewalDate: "2026-01-12" }), // anchor (Jan 5) + 7 days
+      ],
+      today,
+    );
+    expect(outsideCluster).toBeNull();
   });
 });
 
@@ -407,5 +444,267 @@ describe("hasEnoughPriceHistoryToEvaluate", () => {
       ["a", [historyRow({ subscriptionId: "a" }), historyRow({ subscriptionId: "a", amountCents: 1100 })]],
     ]);
     expect(hasEnoughPriceHistoryToEvaluate([sub({ id: "a" })], history)).toBe(true);
+  });
+});
+
+describe("confirmedDuplicateSeverity", () => {
+  it("is 0 with no pairs", () => {
+    expect(confirmedDuplicateSeverity(0, 0, 1000, false)).toBe(0);
+  });
+
+  it("scales with dollar share, not just count — a trivial-dollar duplicate costs less than a portfolio-dominating one", () => {
+    const trivial = confirmedDuplicateSeverity(1, 100, 10_000, false); // 1% of spend
+    const dominant = confirmedDuplicateSeverity(1, 5_000, 10_000, false); // 50% of spend
+    expect(trivial).toBeLessThan(0);
+    expect(dominant).toBeLessThan(trivial);
+  });
+
+  it("applies diminishing returns per additional pair, not linear scaling", () => {
+    const one = confirmedDuplicateSeverity(1, 1000, 10_000, false);
+    const two = confirmedDuplicateSeverity(2, 2000, 10_000, false);
+    // Same per-pair share (10%), double the pairs — a linear model would
+    // exactly double the penalty; sqrt-based diminishing returns must not.
+    expect(Math.abs(two)).toBeLessThan(Math.abs(one) * 2);
+    expect(Math.abs(two)).toBeGreaterThan(Math.abs(one));
+  });
+
+  // Final-calibration-review fix: ceiling raised 60->100 — 100 is the
+  // natural bound past which raising it further can't matter, since
+  // computeHealthScore clamps every dimension to [0, 100] regardless.
+  it("never exceeds the -100 ceiling regardless of magnitude", () => {
+    expect(confirmedDuplicateSeverity(10, 1_000_000, 1_000_000, true)).toBe(-100);
+  });
+
+  it("applies a stale-dismissal multiplier, still capped at -100", () => {
+    const fresh = confirmedDuplicateSeverity(1, 1000, 10_000, false);
+    const stale = confirmedDuplicateSeverity(1, 1000, 10_000, true);
+    expect(stale).toBeLessThan(fresh);
+  });
+
+  // Final-calibration-review fix: the whole reason the ceiling moved — 2
+  // pairs and 6 duplicate pairs at a comparable per-pair share must no
+  // longer collapse to the same capped value the way they did under the
+  // old -60 ceiling.
+  it("scores a heavily duplicate-saturated portfolio materially worse than a lightly duplicated one", () => {
+    const light = confirmedDuplicateSeverity(2, 7000, 10_000, false); // 2 pairs, 70% share
+    const heavy = confirmedDuplicateSeverity(6, 7000, 10_000, false); // 6 pairs, same share
+    expect(heavy).toBeLessThan(light);
+    // Neither is silently flattened to the same old ceiling.
+    expect(light).not.toBe(-60);
+    expect(heavy).not.toBe(-60);
+  });
+
+  it("treats zero total spend as zero share rather than dividing by zero", () => {
+    expect(Number.isFinite(confirmedDuplicateSeverity(1, 0, 0, false))).toBe(true);
+  });
+});
+
+describe("portfolioConcentration", () => {
+  it("is null with fewer than 3 primary-currency subscriptions", () => {
+    expect(portfolioConcentration([sub({ amountCents: 1000 }), sub({ amountCents: 1000 })])).toBeNull();
+  });
+
+  it("normalizes to 0 for a perfectly even split, regardless of subscription count", () => {
+    const even3 = portfolioConcentration([sub({ amountCents: 1000 }), sub({ amountCents: 1000 }), sub({ amountCents: 1000 })]);
+    const even5 = portfolioConcentration(Array.from({ length: 5 }, () => sub({ amountCents: 1000 })));
+    expect(even3?.normalizedHHI).toBeCloseTo(0, 5);
+    expect(even5?.normalizedHHI).toBeCloseTo(0, 5);
+  });
+
+  it("approaches 1 as one subscription dominates the rest", () => {
+    const result = portfolioConcentration([sub({ amountCents: 100 }), sub({ amountCents: 100 }), sub({ amountCents: 10_000 })]);
+    expect(result?.normalizedHHI).toBeGreaterThan(0.8);
+    expect(result?.topShare).toBeGreaterThan(0.9);
+  });
+
+  it("restricts to the primary currency", () => {
+    const result = portfolioConcentration([
+      sub({ amountCents: 1000, currency: "usd" }),
+      sub({ amountCents: 1000, currency: "usd" }),
+      sub({ amountCents: 1000, currency: "usd" }),
+      sub({ amountCents: 999_999, currency: "gbp" }),
+    ]);
+    // The GBP outlier is excluded entirely — 3 even USD subscriptions left.
+    expect(result?.normalizedHHI).toBeCloseTo(0, 5);
+  });
+});
+
+describe("portfolioConcentrationPenalty", () => {
+  it("is 0 below the concern threshold", () => {
+    expect(portfolioConcentrationPenalty(0.1)).toBe(0);
+  });
+
+  it("is negative and capped at -20 for severe concentration", () => {
+    expect(portfolioConcentrationPenalty(0.95)).toBe(-20);
+  });
+
+  it("increases in magnitude as concentration increases", () => {
+    expect(Math.abs(portfolioConcentrationPenalty(0.7))).toBeGreaterThan(Math.abs(portfolioConcentrationPenalty(0.3)));
+  });
+});
+
+describe("renewalExposurePenalty", () => {
+  it("is 0 at or below the 1.3x baseline", () => {
+    expect(renewalExposurePenalty(1.0)).toBe(0);
+    expect(renewalExposurePenalty(1.3)).toBe(0);
+  });
+
+  it("is harsher at a genuine severe spike than the old flat -16 ceiling", () => {
+    expect(renewalExposurePenalty(3.5)).toBeLessThan(-16);
+  });
+
+  // Final-calibration-review fix: ceiling extended 32->48, reached further
+  // out (ratio>=15 instead of >=3.5) — see this function's own comment for
+  // why a 9x and a 20x spike used to be indistinguishable.
+  it("is capped at -48", () => {
+    expect(renewalExposurePenalty(100)).toBe(-48);
+  });
+
+  it("increases in magnitude with the ratio", () => {
+    expect(Math.abs(renewalExposurePenalty(1.8))).toBeLessThan(Math.abs(renewalExposurePenalty(2.5)));
+  });
+
+  // Final-calibration-review fix: the whole reason the curve was extended —
+  // a 9x and a 20x spike must no longer collapse to the same capped value.
+  it("distinguishes a 9x spike from a 20x spike, both worse than the old -32 ceiling", () => {
+    const nineX = renewalExposurePenalty(9);
+    const twentyX = renewalExposurePenalty(20);
+    expect(twentyX).toBeLessThan(nineX);
+    expect(nineX).toBeLessThan(-32);
+    expect(twentyX).toBe(-48);
+  });
+});
+
+describe("reactivationCandidates", () => {
+  it("is empty with no canceled history", () => {
+    expect(reactivationCandidates([sub({ name: "Netflix" })], [sub({ name: "Netflix" })])).toEqual([]);
+  });
+
+  it("flags an active subscription whose name matches a canceled one", () => {
+    const canceled = sub({ name: "Netflix", status: "canceled" });
+    const active = sub({ name: "Netflix" });
+    const found = reactivationCandidates([canceled, active], [active]);
+    expect(found.map((s) => s.id)).toEqual([active.id]);
+  });
+
+  it("does not flag an active subscription with no canceled counterpart", () => {
+    const canceled = sub({ name: "Netflix", status: "canceled" });
+    const active = sub({ name: "Spotify" });
+    expect(reactivationCandidates([canceled, active], [active])).toEqual([]);
+  });
+});
+
+describe("hasRepeatedPriceChanges", () => {
+  it("is false with fewer than 3 recorded rows", () => {
+    const history = new Map([["a", [historyRow({ subscriptionId: "a" }), historyRow({ subscriptionId: "a", amountCents: 1100 })]]]);
+    expect(hasRepeatedPriceChanges([sub({ id: "a" })], history, "2026-01-01")).toBe(false);
+  });
+
+  it("is true with 3+ recorded rows within the trailing 12 months", () => {
+    const history = new Map([
+      [
+        "a",
+        [
+          historyRow({ subscriptionId: "a", amountCents: 1000, observedAt: new Date("2025-06-01T00:00:00Z") }),
+          historyRow({ subscriptionId: "a", amountCents: 1100, observedAt: new Date("2025-09-01T00:00:00Z") }),
+          historyRow({ subscriptionId: "a", amountCents: 1200, observedAt: new Date("2025-12-01T00:00:00Z") }),
+        ],
+      ],
+    ]);
+    expect(hasRepeatedPriceChanges([sub({ id: "a" })], history, "2026-01-01")).toBe(true);
+  });
+
+  it("ignores rows older than 12 months", () => {
+    const history = new Map([
+      [
+        "a",
+        [
+          historyRow({ subscriptionId: "a", amountCents: 1000, observedAt: new Date("2020-01-01T00:00:00Z") }),
+          historyRow({ subscriptionId: "a", amountCents: 1100, observedAt: new Date("2020-02-01T00:00:00Z") }),
+          historyRow({ subscriptionId: "a", amountCents: 1200, observedAt: new Date("2020-03-01T00:00:00Z") }),
+        ],
+      ],
+    ]);
+    expect(hasRepeatedPriceChanges([sub({ id: "a" })], history, "2026-01-01")).toBe(false);
+  });
+});
+
+describe("expensiveOutlierMagnitudeFactor", () => {
+  it("is 1x (no scaling) at or below 40% share", () => {
+    expect(expensiveOutlierMagnitudeFactor(0)).toBe(1);
+    expect(expensiveOutlierMagnitudeFactor(0.4)).toBe(1);
+  });
+
+  it("ramps smoothly between 40% and 90% share", () => {
+    expect(expensiveOutlierMagnitudeFactor(0.65)).toBeCloseTo(1.5, 5);
+  });
+
+  it("caps at 2x by 90%+ share", () => {
+    expect(expensiveOutlierMagnitudeFactor(0.9)).toBe(2);
+    expect(expensiveOutlierMagnitudeFactor(1)).toBe(2);
+  });
+});
+
+describe("nonReactivatedCanceledCount", () => {
+  it("counts a genuinely resolved cancellation", () => {
+    expect(nonReactivatedCanceledCount([sub({ name: "Netflix", status: "canceled" }), sub({ name: "Spotify", status: "active" })])).toBe(1);
+  });
+
+  it("excludes a canceled subscription whose name matches a currently-active one", () => {
+    expect(nonReactivatedCanceledCount([sub({ name: "Netflix", status: "canceled" }), sub({ name: "Netflix", status: "active" })])).toBe(0);
+  });
+
+  it("counts genuinely resolved cancellations alongside an excluded reactivation", () => {
+    const all = [
+      sub({ name: "Netflix", status: "canceled" }),
+      sub({ name: "Netflix", status: "active" }),
+      sub({ name: "Hulu", status: "canceled" }),
+      sub({ name: "Spotify", status: "active" }),
+    ];
+    expect(nonReactivatedCanceledCount(all)).toBe(1);
+  });
+});
+
+describe("priceIncreaseSeverity", () => {
+  it("is 0 with no increased subscriptions", () => {
+    expect(priceIncreaseSeverity(0, 0, 10_000, false)).toBe(0);
+  });
+
+  // Final-calibration-review fix: the whole reason this function exists —
+  // 100%, 75%, 50%, and 25% of a portfolio's subscriptions increasing must
+  // no longer collapse to the same penalty once 2+ are involved, and
+  // magnitude (dollar share of the increases) must matter, not just count.
+  it("scores more increased subscriptions worse than fewer, at a comparable dollar share", () => {
+    const one = priceIncreaseSeverity(1, 1000, 10_000, false);
+    const two = priceIncreaseSeverity(2, 2000, 10_000, false);
+    const four = priceIncreaseSeverity(4, 4000, 10_000, false);
+    expect(two).toBeLessThan(one);
+    expect(four).toBeLessThan(two);
+  });
+
+  it("applies diminishing returns per additional increased subscription, not linear scaling", () => {
+    const one = priceIncreaseSeverity(1, 1000, 10_000, false);
+    const two = priceIncreaseSeverity(2, 2000, 10_000, false);
+    expect(Math.abs(two)).toBeLessThan(Math.abs(one) * 2);
+  });
+
+  it("scales with dollar share — a large combined increase costs more than a trivial one, same count", () => {
+    const trivial = priceIncreaseSeverity(2, 100, 10_000, false); // 1% of spend
+    const large = priceIncreaseSeverity(2, 5000, 10_000, false); // 50% of spend
+    expect(large).toBeLessThan(trivial);
+  });
+
+  it("applies a small repeated-change multiplier", () => {
+    const fresh = priceIncreaseSeverity(1, 1000, 10_000, false);
+    const repeated = priceIncreaseSeverity(1, 1000, 10_000, true);
+    expect(repeated).toBeLessThan(fresh);
+  });
+
+  it("never exceeds the -48 ceiling regardless of magnitude", () => {
+    expect(priceIncreaseSeverity(20, 1_000_000, 1_000_000, true)).toBe(-48);
+  });
+
+  it("treats zero total annual spend as zero share rather than dividing by zero", () => {
+    expect(Number.isFinite(priceIncreaseSeverity(1, 1000, 0, false))).toBe(true);
   });
 });
