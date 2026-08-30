@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { LoginForm } from "./login-form";
+import { LoginProTeaser } from "@/components/auth/login-pro-teaser";
 import { absoluteUrl } from "@/lib/seo";
 
 // Distinct from the root layout's default "SubSentry" title/description:
@@ -20,5 +21,10 @@ export const metadata: Metadata = {
 };
 
 export default function LoginPage() {
-  return <LoginForm />;
+  return (
+    <div className="flex w-full flex-col gap-4">
+      <LoginForm />
+      <LoginProTeaser />
+    </div>
+  );
 }

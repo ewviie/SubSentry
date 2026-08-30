@@ -100,3 +100,47 @@ test.describe("route protection", () => {
     await expect(page).toHaveURL(/\/login/);
   });
 });
+
+// The literal price/feature strings here mirror lib/billing/pro-features.ts
+// (the single source of truth pricing-section.tsx, Settings → Plan &
+// Billing, and login-pro-teaser.tsx all import from) rather than importing
+// it directly — no other spec in this suite imports app source into a test
+// file, Playwright config here doesn't resolve the `@/` alias, and a plain
+// page-content assertion is exactly what every other spec in this file
+// already does for real UI copy. If this ever drifts from pro-features.ts,
+// that module's own unit test (pro-features.test.ts) is what actually
+// pins the canonical values; this test's job is only "the login page
+// renders what that module currently says," not re-verifying the module
+// itself.
+test.describe("login page — Pro messaging", () => {
+  test("shows the real Pro price and full feature list without disturbing the login form", async ({ page }) => {
+    await page.goto("/login");
+
+    // The login form itself stays exactly as it was — this is the one
+    // guard that a Pro teaser added below it never quietly turned into a
+    // login-page redesign.
+    await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
+    await expect(page.getByLabel("Email")).toBeVisible();
+    await expect(page.getByLabel("Password", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Log in" })).toBeVisible();
+
+    // The Pro teaser: real price, real feature list, no invented ones.
+    await expect(page.getByText("SubSentry Pro")).toBeVisible();
+    await expect(page.getByText("£4.99")).toBeVisible();
+    for (const feature of [
+      "Unlimited active subscriptions",
+      "Full Health Score across all 5 factors",
+      "Every savings opportunity",
+      "Optimization recommendations",
+      "AI quick-add — 40/day",
+      "Priority support",
+    ]) {
+      await expect(page.getByText(feature)).toBeVisible();
+    }
+
+    // No fake urgency/scarcity/countdown language.
+    for (const darkPattern of [/limited spots/i, /act now/i, /hurry/i, /offer ends/i, /\d+:\d{2}:\d{2}/]) {
+      await expect(page.getByText(darkPattern)).toHaveCount(0);
+    }
+  });
+});
