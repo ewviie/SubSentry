@@ -24,6 +24,17 @@ describe("checkPasswordStrength", () => {
     expect(checkPasswordStrength("87654321", "user@example.com").ok).toBe(false);
   });
 
+  it("rejects a non-sequential digits-only password", () => {
+    // Not in the common list, not a repeated/sequential run — but still
+    // only digits, so still limited to 10^n combinations.
+    expect(checkPasswordStrength("48213976", "user@example.com").ok).toBe(false);
+    expect(checkPasswordStrength("90275318142", "user@example.com").ok).toBe(false);
+  });
+
+  it("accepts a long digits-only string only when non-digit characters are mixed in", () => {
+    expect(checkPasswordStrength("4821-3976!", "user@example.com").ok).toBe(true);
+  });
+
   it("rejects a password containing the user's own email local-part", () => {
     expect(checkPasswordStrength("johnsmith99", "johnsmith@example.com").ok).toBe(false);
   });

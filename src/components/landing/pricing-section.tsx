@@ -57,8 +57,8 @@ export function PricingSection() {
         viewport={revealViewport}
         className="mx-auto max-w-2xl text-center"
       >
-        <h2 className="text-h2 font-semibold">Choose your level of control.</h2>
-        <p className="mt-3 text-lg text-muted-foreground">Start free. Upgrade when you need more.</p>
+        <h2 className="text-h2 font-semibold">Know what you&apos;re paying for. Then do something about it.</h2>
+        <p className="mt-3 text-lg text-muted-foreground">Free gives you the essentials. Pro finds the opportunities hiding underneath.</p>
       </motion.div>
 
       <motion.div

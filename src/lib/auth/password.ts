@@ -63,6 +63,13 @@ export function checkPasswordStrength(password: string, email: string): Password
   if (isTrivialSequence(password)) {
     return { ok: false, reason: "That password is too predictable (repeated or sequential characters)." };
   }
+  // Digits-only passwords (whether or not they happen to be sequential —
+  // isTrivialSequence above only catches the sequential/repeated subset)
+  // are limited to 10^n combinations regardless of length, far weaker than
+  // the entropy the length requirement is meant to buy.
+  if (/^\d+$/.test(password)) {
+    return { ok: false, reason: "Your password can't be numbers only." };
+  }
   const emailLocalPart = email.split("@")[0]?.toLowerCase();
   if (emailLocalPart && emailLocalPart.length >= 4 && password.toLowerCase().includes(emailLocalPart)) {
     return { ok: false, reason: "Your password can't contain part of your email address." };
