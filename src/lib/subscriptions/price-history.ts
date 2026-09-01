@@ -1,4 +1,4 @@
-import { monthlyCents, annualCents } from "./money";
+import { monthlyCents, annualCents, splitByPrimaryCurrency } from "./money";
 import type { Subscription, SubscriptionPriceHistory } from "@/lib/db/schema";
 
 // Phase 9: the read side of price-history capture — see schema.ts's own
@@ -441,4 +441,178 @@ export function computeCreepingCostTrailing12Months(
 
   if (!counted || currency === null) return null;
   return { annualDeltaCents: totalCents, currency };
+}
+
+export interface SpendHistoryEvent {
+  subscriptionId: string;
+  subscriptionName: string;
+  fromCents: number;
+  toCents: number;
+  currency: string;
+  // Signed, same convention as PriceChange.annualDeltaCents above —
+  // positive is an increase, negative is a decrease.
+  percentChange: number;
+  annualDeltaCents: number;
+  observedAtIso: string;
+}
+
+export interface SpendHistoryPoint {
+  monthIso: string;
+  monthLabel: string;
+  // The active portfolio's real monthly-equivalent cost AS OF this month —
+  // not a running total, moves up or down with genuine price changes.
+  totalMonthlyCents: number;
+  // Genuine price changes whose observedAt falls inside this exact month,
+  // biggest annual impact first — the "why did the line move here" answer
+  // for whichever month a viewer is looking at.
+  events: SpendHistoryEvent[];
+}
+
+function spendHistoryMonthKey(date: Date): string {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+const spendHistoryMonthLabelFormatter = new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+
+// Bounded lookback so a multi-year account can't render an ever-widening
+// chart — same "bounded, not unlimited" posture computeRenewalsTimeline's
+// own 12-month forward-looking cap follows, just backward and roomier
+// (price history is worth seeing further back than a renewal forecast).
+const SPEND_HISTORY_MAX_MONTHS = 24;
+
+// Free plan sees the most recent FREE_SPEND_HISTORY_MONTHS; Pro sees the
+// full reconstructed range. Same "recent slice for Free, full depth for
+// Pro" shape as FREE_NOTIFICATION_HISTORY_LIMIT (notifications/queries.ts)
+// — deeper history is a genuine, non-arbitrary Pro differentiator (the
+// underlying subscriptionPriceHistory rows are captured for every plan;
+// only how far back this chart is allowed to render them differs).
+export const FREE_SPEND_HISTORY_MONTHS = 6;
+
+// "Spend history": what this account's ACTIVE portfolio has genuinely cost,
+// month by month, reconstructed entirely from subscriptionPriceHistory (and
+// each subscription's own createdAt/amountCents/billingCycle as the
+// pre-history fallback — the same "current stored price is the only real
+// fact known before any history row exists" fallback estimatePaidCents'
+// own history.length < 2 branch already uses).
+//
+// Deliberately the metric computeGrowthOverTime (analytics.ts) is NOT: that
+// function answers "how much recurring spend have I ever added to
+// SubSentry" (every status, buckets by createdAt only, never decreases —
+// see its own comment for why that's the right question for what it's
+// for). This one answers "what does what I'm actually paying right now
+// cost, and how did it get here" — active subscriptions only, and the line
+// moves with every genuine price change, including down if one ever
+// genuinely fell.
+//
+// Restricted to active subscriptions and one shared currency (this active
+// set's own primary currency, splitByPrimaryCurrency) — same "never
+// fabricate a cross-currency total" rule every other portfolio sum in this
+// file follows. A subscription that's canceled at any point during the
+// reconstructed window isn't counted for ANY month, including ones before
+// it was canceled — an honest gap, not a claim about total historical
+// spend: this table tracks current status, not a statusChangedAt, so there
+// is no real timestamp to reconstruct "was it active in March" from (see
+// schema.ts's own subscriptions table comment).
+export function computeSpendHistory(
+  subscriptions: Subscription[],
+  priceHistoryBySubscriptionId: Map<string, SubscriptionPriceHistory[]>,
+  now: Date = new Date(),
+): SpendHistoryPoint[] {
+  const { currency, included: active } = splitByPrimaryCurrency(subscriptions.filter((s) => s.status === "active"));
+  if (!currency || active.length === 0) return [];
+
+  const historyBySubscription = new Map<string, SubscriptionPriceHistory[]>();
+  for (const subscription of active) {
+    const history = (priceHistoryBySubscriptionId.get(subscription.id) ?? []).filter((h) => h.currency === currency);
+    historyBySubscription.set(subscription.id, [...history].sort((a, b) => a.observedAt.getTime() - b.observedAt.getTime()));
+  }
+
+  const earliestCreatedAt = active.reduce((min, s) => (s.createdAt < min ? s.createdAt : min), active[0].createdAt);
+  const capStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (SPEND_HISTORY_MAX_MONTHS - 1), 1));
+  const trueStart = new Date(Date.UTC(earliestCreatedAt.getUTCFullYear(), earliestCreatedAt.getUTCMonth(), 1));
+  const start = trueStart > capStart ? trueStart : capStart;
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+
+  const points: SpendHistoryPoint[] = [];
+  const cursor = new Date(start);
+  while (cursor <= end) {
+    const monthEnd = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 0, 23, 59, 59, 999));
+    const cursorKey = spendHistoryMonthKey(cursor);
+    let totalMonthlyCents = 0;
+    const events: SpendHistoryEvent[] = [];
+
+    for (const subscription of active) {
+      if (subscription.createdAt > monthEnd) continue; // didn't exist yet as of this month
+
+      const history = historyBySubscription.get(subscription.id) ?? [];
+      // Latest history row observed at or before this month's end — "what
+      // this subscription actually cost as of this point in time," never
+      // today's price applied retroactively (same segment-aware discipline
+      // estimatePaidCents already applies). No matching row (before any
+      // history was captured for this subscription) falls back to its
+      // current stored price, same as estimatePaidCents' own fallback.
+      let asOf: SubscriptionPriceHistory | undefined;
+      for (let i = history.length - 1; i >= 0; i--) {
+        if (history[i].observedAt <= monthEnd) {
+          asOf = history[i];
+          break;
+        }
+      }
+      totalMonthlyCents += monthlyCents(asOf?.amountCents ?? subscription.amountCents, asOf?.billingCycle ?? subscription.billingCycle);
+
+      // Genuine price-change events landing inside this exact month —
+      // walking consecutive pairs, same discipline
+      // computeCreepingCostTrailing12Months already applies (including
+      // reusing its own computePriceChangeIfMeaningful bar), just without
+      // that function's 12-month/increases-only restriction: this is an
+      // honest record of what changed and when, in either direction.
+      for (let i = 1; i < history.length; i++) {
+        const later = history[i];
+        if (spendHistoryMonthKey(later.observedAt) !== cursorKey) continue;
+        const earlier = history[i - 1];
+        const change = computePriceChangeIfMeaningful(
+          { amountCents: earlier.amountCents, billingCycle: earlier.billingCycle, currency: earlier.currency },
+          { amountCents: later.amountCents, billingCycle: later.billingCycle, currency: later.currency },
+        );
+        if (!change) continue;
+        events.push({
+          subscriptionId: subscription.id,
+          subscriptionName: subscription.name,
+          fromCents: earlier.amountCents,
+          toCents: later.amountCents,
+          currency,
+          percentChange: change.percentChange,
+          annualDeltaCents: change.annualDeltaCents,
+          observedAtIso: later.observedAt.toISOString().slice(0, 10),
+        });
+      }
+    }
+
+    points.push({
+      monthIso: cursorKey,
+      monthLabel: spendHistoryMonthLabelFormatter.format(cursor),
+      totalMonthlyCents,
+      events: events.sort((a, b) => Math.abs(b.annualDeltaCents) - Math.abs(a.annualDeltaCents)),
+    });
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+  }
+  return points;
+}
+
+export interface SpendHistoryVisibility {
+  points: SpendHistoryPoint[];
+  hiddenMonths: number;
+}
+
+// Same "recent slice visible for Free, full depth for Pro" shape as
+// FREE_NOTIFICATION_HISTORY_LIMIT (notifications/queries.ts) — a strict
+// suffix of the Pro list (the most recent months), never a reshuffled or
+// sampled subset, so a Free caller's chart is always a truncated prefix of
+// what Pro sees rather than a different story.
+export function sliceSpendHistoryForPlan(points: SpendHistoryPoint[], isPremium: boolean): SpendHistoryVisibility {
+  if (isPremium || points.length <= FREE_SPEND_HISTORY_MONTHS) return { points, hiddenMonths: 0 };
+  return {
+    points: points.slice(points.length - FREE_SPEND_HISTORY_MONTHS),
+    hiddenMonths: points.length - FREE_SPEND_HISTORY_MONTHS,
+  };
 }

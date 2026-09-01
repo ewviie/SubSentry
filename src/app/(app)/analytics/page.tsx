@@ -7,7 +7,13 @@ import {
   computeRenewalsTimeline,
   computeTopMerchantsBySpend,
 } from "@/lib/subscriptions/analytics";
-import { computePortfolioPriceChanges, sumPortfolioPriceChanges, computeCreepingCostTrailing12Months } from "@/lib/subscriptions/price-history";
+import {
+  computePortfolioPriceChanges,
+  sumPortfolioPriceChanges,
+  computeCreepingCostTrailing12Months,
+  computeSpendHistory,
+  sliceSpendHistoryForPlan,
+} from "@/lib/subscriptions/price-history";
 import { PriceChangesCard } from "@/components/analytics/price-changes-card";
 import { splitByPrimaryCurrency } from "@/lib/subscriptions/money";
 import { getUpgradeUrl } from "@/lib/billing/plan";
@@ -72,6 +78,7 @@ export default async function AnalyticsPage() {
   const priceChangeEntries = computePortfolioPriceChanges(subscriptions, priceHistoryBySubscriptionId);
   const priceChangeTotal = sumPortfolioPriceChanges(priceChangeEntries);
   const creepingCost = computeCreepingCostTrailing12Months(subscriptions, priceHistoryBySubscriptionId);
+  const spendHistoryVisibility = sliceSpendHistoryForPlan(computeSpendHistory(subscriptions, priceHistoryBySubscriptionId), isPremium);
   // Each compute* above already restricts its own sums to this same primary
   // currency internally (see analytics.ts) — this is just the label for the
   // charts below, computed the same way (majority-by-count active
@@ -101,12 +108,24 @@ export default async function AnalyticsPage() {
         </Card>
       </MotionCard>
 
-      {/* Free, not gated behind isPremium: same "factual alert, not deep
-          intelligence" reasoning notifications/generate.ts's own
-          price_increase type documents — this is a real change that
-          already happened, not an optimization recommendation. */}
+      {/* The list and creeping-cost stat stay free, not gated behind
+          isPremium: same "factual alert, not deep intelligence" reasoning
+          notifications/generate.ts's own price_increase type documents —
+          this is a real change that already happened, not an optimization
+          recommendation. The trend chart's own lookback window is the one
+          part of this card Pro extends (sliceSpendHistoryForPlan,
+          price-history.ts) — "how far back can you see" is a legitimate
+          depth upgrade, not a restriction on today's facts. */}
       <MotionCard>
-        <PriceChangesCard entries={priceChangeEntries} total={priceChangeTotal} creepingCost={creepingCost} />
+        <PriceChangesCard
+          entries={priceChangeEntries}
+          total={priceChangeTotal}
+          creepingCost={creepingCost}
+          spendHistory={spendHistoryVisibility.points}
+          hiddenSpendHistoryMonths={spendHistoryVisibility.hiddenMonths}
+          upgradeUrl={upgradeUrl}
+          currency={currency}
+        />
       </MotionCard>
 
       <StaggerSection className="grid gap-4 lg:grid-cols-2" staggerChildren={0.07}>

@@ -7,6 +7,9 @@ import {
   computePortfolioPriceChanges,
   sumPortfolioPriceChanges,
   computeCreepingCostTrailing12Months,
+  computeSpendHistory,
+  sliceSpendHistoryForPlan,
+  FREE_SPEND_HISTORY_MONTHS,
 } from "./price-history";
 import type { Subscription, SubscriptionPriceHistory } from "@/lib/db/schema";
 
@@ -579,5 +582,129 @@ describe("computeCreepingCostTrailing12Months", () => {
   it("returns null for no subscriptions or no history", () => {
     expect(computeCreepingCostTrailing12Months([], new Map(), NOW)).toBeNull();
     expect(computeCreepingCostTrailing12Months([sub({ id: "x" })], new Map(), NOW)).toBeNull();
+  });
+});
+
+describe("computeSpendHistory", () => {
+  const NOW = new Date("2026-08-31T00:00:00Z");
+
+  it("returns an empty array when there are no active subscriptions", () => {
+    expect(computeSpendHistory([], new Map(), NOW)).toEqual([]);
+    expect(computeSpendHistory([sub({ status: "canceled" })], new Map(), NOW)).toEqual([]);
+  });
+
+  it("uses the current stored price for every month before any real history exists", () => {
+    const s = sub({ id: "no-history", createdAt: new Date("2026-06-01T00:00:00Z"), amountCents: 1000 });
+    const points = computeSpendHistory([s], new Map(), NOW);
+    expect(points.map((p) => p.monthIso)).toEqual(["2026-06", "2026-07", "2026-08"]);
+    for (const p of points) {
+      expect(p.totalMonthlyCents).toBe(1000);
+      expect(p.events).toEqual([]);
+    }
+  });
+
+  it("moves the total in the exact month a genuine price change was observed, and records the event there", () => {
+    const s = sub({ id: "increased", createdAt: new Date("2026-01-01T00:00:00Z"), amountCents: 1200 });
+    const history = new Map([
+      [
+        "increased",
+        [
+          row({ subscriptionId: "increased", amountCents: 1000, observedAt: new Date("2026-01-01T00:00:00Z") }),
+          row({ subscriptionId: "increased", amountCents: 1200, observedAt: new Date("2026-03-15T00:00:00Z") }),
+        ],
+      ],
+    ]);
+    const points = computeSpendHistory([s], history, new Date("2026-04-30T00:00:00Z"));
+    const byMonth = new Map(points.map((p) => [p.monthIso, p]));
+    expect(byMonth.get("2026-01")!.totalMonthlyCents).toBe(1000);
+    expect(byMonth.get("2026-02")!.totalMonthlyCents).toBe(1000);
+    expect(byMonth.get("2026-03")!.totalMonthlyCents).toBe(1200);
+    expect(byMonth.get("2026-03")!.events).toHaveLength(1);
+    expect(byMonth.get("2026-03")!.events[0]).toMatchObject({
+      subscriptionId: "increased",
+      fromCents: 1000,
+      toCents: 1200,
+      annualDeltaCents: 2400,
+    });
+    expect(byMonth.get("2026-04")!.totalMonthlyCents).toBe(1200);
+    expect(byMonth.get("2026-04")!.events).toEqual([]);
+  });
+
+  it("reflects a genuine decrease too — this is a real trend, not a one-directional watchdog metric", () => {
+    const s = sub({ id: "decreased", createdAt: new Date("2026-01-01T00:00:00Z"), amountCents: 800 });
+    const history = new Map([
+      [
+        "decreased",
+        [
+          row({ subscriptionId: "decreased", amountCents: 1000, observedAt: new Date("2026-01-01T00:00:00Z") }),
+          row({ subscriptionId: "decreased", amountCents: 800, observedAt: new Date("2026-02-01T00:00:00Z") }),
+        ],
+      ],
+    ]);
+    const points = computeSpendHistory([s], history, new Date("2026-02-28T00:00:00Z"));
+    const byMonth = new Map(points.map((p) => [p.monthIso, p]));
+    expect(byMonth.get("2026-01")!.totalMonthlyCents).toBe(1000);
+    expect(byMonth.get("2026-02")!.totalMonthlyCents).toBe(800);
+    expect(byMonth.get("2026-02")!.events[0].annualDeltaCents).toBeLessThan(0);
+  });
+
+  it("excludes canceled subscriptions from every month, including ones before they were canceled", () => {
+    const active = sub({ id: "active", createdAt: new Date("2026-01-01T00:00:00Z"), amountCents: 1000 });
+    const canceled = sub({ id: "canceled", status: "canceled", createdAt: new Date("2026-01-01T00:00:00Z"), amountCents: 5000 });
+    const points = computeSpendHistory([active, canceled], new Map(), new Date("2026-01-31T00:00:00Z"));
+    expect(points).toHaveLength(1);
+    expect(points[0].totalMonthlyCents).toBe(1000);
+  });
+
+  it("restricts to the active set's primary currency, excluding the other entirely", () => {
+    const usdA = sub({ id: "usd-a", currency: "usd", createdAt: new Date("2026-01-01T00:00:00Z"), amountCents: 1000 });
+    const usdB = sub({ id: "usd-b", currency: "usd", createdAt: new Date("2026-01-01T00:00:00Z"), amountCents: 500 });
+    const gbp = sub({ id: "gbp", currency: "gbp", createdAt: new Date("2026-01-01T00:00:00Z"), amountCents: 999999 });
+    const points = computeSpendHistory([usdA, usdB, gbp], new Map(), new Date("2026-01-31T00:00:00Z"));
+    expect(points[0].totalMonthlyCents).toBe(1500);
+  });
+
+  it("contributes nothing for a subscription in months before it was created", () => {
+    const early = sub({ id: "early", createdAt: new Date("2026-01-01T00:00:00Z"), amountCents: 1000 });
+    const late = sub({ id: "late", createdAt: new Date("2026-03-01T00:00:00Z"), amountCents: 2000 });
+    const points = computeSpendHistory([early, late], new Map(), new Date("2026-03-31T00:00:00Z"));
+    const byMonth = new Map(points.map((p) => [p.monthIso, p]));
+    expect(byMonth.get("2026-01")!.totalMonthlyCents).toBe(1000);
+    expect(byMonth.get("2026-02")!.totalMonthlyCents).toBe(1000);
+    expect(byMonth.get("2026-03")!.totalMonthlyCents).toBe(3000);
+  });
+
+  it("bounds lookback so a multi-year account doesn't render an unbounded chart", () => {
+    const s = sub({ id: "ancient", createdAt: new Date("2010-01-01T00:00:00Z"), amountCents: 1000 });
+    const points = computeSpendHistory([s], new Map(), NOW);
+    expect(points.length).toBe(24);
+    expect(points[points.length - 1].monthIso).toBe("2026-08");
+  });
+});
+
+describe("sliceSpendHistoryForPlan", () => {
+  function point(monthIso: string): ReturnType<typeof computeSpendHistory>[number] {
+    return { monthIso, monthLabel: monthIso, totalMonthlyCents: 1000, events: [] };
+  }
+
+  it("never hides anything from a premium caller", () => {
+    const points = Array.from({ length: FREE_SPEND_HISTORY_MONTHS + 10 }, (_, i) => point(`2026-${i}`));
+    const result = sliceSpendHistoryForPlan(points, true);
+    expect(result.points).toEqual(points);
+    expect(result.hiddenMonths).toBe(0);
+  });
+
+  it("shows everything for a free caller when there's nothing beyond the free window", () => {
+    const points = Array.from({ length: FREE_SPEND_HISTORY_MONTHS }, (_, i) => point(`2026-${i}`));
+    const result = sliceSpendHistoryForPlan(points, false);
+    expect(result.points).toEqual(points);
+    expect(result.hiddenMonths).toBe(0);
+  });
+
+  it("truncates a free caller to the most recent months as a strict suffix, never a reshuffled subset", () => {
+    const points = Array.from({ length: FREE_SPEND_HISTORY_MONTHS + 3 }, (_, i) => point(`2026-${i}`));
+    const result = sliceSpendHistoryForPlan(points, false);
+    expect(result.points).toEqual(points.slice(3));
+    expect(result.hiddenMonths).toBe(3);
   });
 });

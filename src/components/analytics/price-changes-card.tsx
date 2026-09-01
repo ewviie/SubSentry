@@ -2,8 +2,11 @@ import Link from "next/link";
 import { TrendingUp } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
+import { UpgradeInline } from "@/components/billing/upgrade-prompt";
+import { isBetaAllAccess } from "@/lib/billing/plan";
 import { formatCents } from "@/lib/subscriptions/money";
-import type { PortfolioPriceChangeEntry, PortfolioPriceChangeTotal } from "@/lib/subscriptions/price-history";
+import type { PortfolioPriceChangeEntry, PortfolioPriceChangeTotal, SpendHistoryPoint } from "@/lib/subscriptions/price-history";
+import { SpendTrendChart } from "./spend-trend-chart";
 
 // Product-value pass: turns subscriptionPriceHistory (Phase 9's own price-
 // capture table, previously only ever read per-subscription on its own
@@ -14,6 +17,10 @@ export function PriceChangesCard({
   entries,
   total,
   creepingCost,
+  spendHistory,
+  hiddenSpendHistoryMonths,
+  upgradeUrl,
+  currency,
 }: {
   entries: PortfolioPriceChangeEntry[];
   total: PortfolioPriceChangeTotal | null;
@@ -26,14 +33,37 @@ export function PriceChangesCard({
   // explicitly as an estimate of accumulated cost, never framed as money
   // the user could definitely get back — that's what /savings is for.
   creepingCost: PortfolioPriceChangeTotal | null;
+  // The trend line behind the "creeping cost" stat above — same real
+  // price-history rows, just charted month by month instead of summed into
+  // one figure. Already sliced to this plan's visible window
+  // (sliceSpendHistoryForPlan, price-history.ts) before it gets here; this
+  // component only needs to know how many earlier months were withheld, to
+  // render the upgrade tease.
+  spendHistory: SpendHistoryPoint[];
+  hiddenSpendHistoryMonths: number;
+  upgradeUrl: string | null;
+  currency: string | null;
 }) {
   return (
     <Card size="sm" className="shadow-elevation-low">
       <CardHeader>
         <CardTitle>Price changes</CardTitle>
-        <CardDescription>Subscriptions that genuinely got more expensive, biggest impact first.</CardDescription>
+        <CardDescription>How your active portfolio&apos;s cost has moved, and which subscriptions genuinely got more expensive.</CardDescription>
       </CardHeader>
       <CardContent>
+        <div className="mb-4">
+          <SpendTrendChart points={spendHistory} currency={currency ?? undefined} />
+          {hiddenSpendHistoryMonths > 0 ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Showing your most recent {spendHistory.length} months.{" "}
+              <UpgradeInline
+                label={`See all ${spendHistory.length + hiddenSpendHistoryMonths} months with Pro`}
+                beta={isBetaAllAccess()}
+                upgradeUrl={upgradeUrl}
+              />
+            </p>
+          ) : null}
+        </div>
         {/* Watchdog phase: "creeping cost," shown independently of the list
             below — computeCreepingCostTrailing12Months walks every
             consecutive price-history pair, not just each subscription's
