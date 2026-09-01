@@ -4,6 +4,7 @@ import {
   buildPriceChangeReviewCandidate,
   buildConnectionIssueCandidate,
   buildSpendIncreasedCandidate,
+  buildUnusualChargeCandidate,
 } from "./generate";
 import { computeSavingsRecommendations } from "@/lib/subscriptions/savings";
 import type { Subscription, SubscriptionPriceHistory } from "@/lib/db/schema";
@@ -157,6 +158,28 @@ describe("generateNotificationCandidates", () => {
     const stale = result.find((c) => c.type === "stale_subscription");
     expect(stale).toBeDefined();
     expect(stale!.subscriptionId).toBe(s.id);
+  });
+
+  it("stale_subscription body states a real, estimated accrued-cost figure — not just a day count", () => {
+    // $30.00/mo -> $1.00/day -> exactly $120.00 over exactly 120 days, a
+    // clean number chosen so the assertion below is exact, not approximate.
+    const s = sub({
+      name: "Forgotten Gym",
+      amountCents: 3000,
+      billingCycle: "monthly",
+      lastReviewedAt: new Date("2026-01-01T00:00:00Z"),
+    });
+    const result = generateNotificationCandidates({
+      subscriptions: [s],
+      priceHistoryBySubscriptionId: new Map(),
+      savingsRecommendations: [],
+      today: "2026-05-01", // exactly 120 days after 2026-01-01
+      isPremium: true,
+      dismissedRecommendationIds: new Set(),
+    });
+    const stale = result.find((c) => c.type === "stale_subscription");
+    expect(stale!.body).toContain("120 days");
+    expect(stale!.body).toContain("$120.00 spent since");
   });
 
   it("derives duplicate_subscription and savings_opportunity candidates from the caller's own savingsRecommendations, never recomputing detection", () => {
@@ -475,5 +498,49 @@ describe("buildSpendIncreasedCandidate", () => {
     const c = buildSpendIncreasedCandidate({ previousCents: 5000, previousCurrency: "usd", currentCents: 7000, currentCurrency: "usd" });
     expect(a!.dedupeKey).toBe(b!.dedupeKey); // same resulting total either way
     expect(a!.dedupeKey).not.toBe(c!.dedupeKey); // a genuinely different total
+  });
+});
+
+describe("buildUnusualChargeCandidate", () => {
+  const subscription = sub({ name: "Streamy", currency: "usd" });
+
+  it("states the real dollar range, not just the variance percentage", () => {
+    const candidate = buildUnusualChargeCandidate(subscription, {
+      amountCents: 1850,
+      amountVariancePct: 0.3,
+      transactions: [
+        { date: "2026-06-01", amountCents: 1299 },
+        { date: "2026-07-01", amountCents: 1650 },
+        { date: "2026-08-01", amountCents: 1850 },
+      ],
+    });
+    expect(candidate).not.toBeNull();
+    expect(candidate!.type).toBe("unusual_charge");
+    expect(candidate!.body).toContain("$12.99");
+    expect(candidate!.body).toContain("$18.50");
+    expect(candidate!.body).toContain("3 charges");
+  });
+
+  it("returns null below the variance threshold", () => {
+    const candidate = buildUnusualChargeCandidate(subscription, {
+      amountCents: 1000,
+      amountVariancePct: 0.05,
+      transactions: [{ date: "2026-08-01", amountCents: 1000 }],
+    });
+    expect(candidate).toBeNull();
+  });
+
+  it("dedupeKey is tied to the latest transaction date — a repeat sync with no new date is a harmless no-op", () => {
+    const detected = {
+      amountCents: 1850,
+      amountVariancePct: 0.3,
+      transactions: [
+        { date: "2026-06-01", amountCents: 1299 },
+        { date: "2026-08-01", amountCents: 1850 },
+      ],
+    };
+    const a = buildUnusualChargeCandidate(subscription, detected);
+    const b = buildUnusualChargeCandidate(subscription, detected);
+    expect(a!.dedupeKey).toBe(b!.dedupeKey);
   });
 });

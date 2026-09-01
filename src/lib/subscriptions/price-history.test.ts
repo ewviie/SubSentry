@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import {
   computeLatestPriceChange,
+  computePriceHistoryCreep,
   computePriceChangeIfMeaningful,
   estimatePaidCents,
   computePortfolioPriceChanges,
@@ -181,6 +182,81 @@ describe("computeLatestPriceChange", () => {
     // to a percentage a UI rounds to a whole number anyway ("+20%"). Close
     // to, not exactly, 20.
     expect(change?.percentChange).toBeCloseTo(20.07, 1);
+  });
+});
+
+describe("computePriceHistoryCreep", () => {
+  it("returns null for 0 or 1 rows", () => {
+    expect(computePriceHistoryCreep([])).toBeNull();
+    expect(computePriceHistoryCreep([row({})])).toBeNull();
+  });
+
+  it("returns null for exactly one genuine change — computeLatestPriceChange already tells that story", () => {
+    const history = [
+      row({ id: "a", amountCents: 1000, observedAt: new Date("2026-01-01T00:00:00Z") }),
+      row({ id: "b", amountCents: 1200, observedAt: new Date("2026-06-01T00:00:00Z") }),
+    ];
+    expect(computePriceHistoryCreep(history)).toBeNull();
+  });
+
+  it("detects the multi-change story: first vs. current, with a real change count", () => {
+    const history = [
+      row({ id: "a", amountCents: 1000, observedAt: new Date("2026-01-01T00:00:00Z"), source: "initial" }),
+      row({ id: "b", amountCents: 1200, observedAt: new Date("2026-04-01T00:00:00Z"), source: "user_edit" }),
+      row({ id: "c", amountCents: 1500, observedAt: new Date("2026-08-01T00:00:00Z"), source: "user_edit" }),
+    ];
+    const creep = computePriceHistoryCreep(history);
+    expect(creep).toEqual({
+      firstCents: 1000,
+      firstBillingCycle: "monthly",
+      firstObservedAtIso: "2026-01-01",
+      currentCents: 1500,
+      currentBillingCycle: "monthly",
+      currency: "usd",
+      changeCount: 2,
+      percentChange: 50,
+      annualDeltaCents: 6000,
+    });
+  });
+
+  it("returns null when two changes net back to the starting price — a real fact, but not a 'creep' story", () => {
+    const history = [
+      row({ id: "a", amountCents: 1000, observedAt: new Date("2026-01-01T00:00:00Z") }),
+      row({ id: "b", amountCents: 1500, observedAt: new Date("2026-04-01T00:00:00Z") }),
+      row({ id: "c", amountCents: 1000, observedAt: new Date("2026-08-01T00:00:00Z") }),
+    ];
+    expect(computePriceHistoryCreep(history)).toBeNull();
+  });
+
+  it("returns null when the first and current rows are in different currencies — never compares across currencies", () => {
+    const history = [
+      row({ id: "a", amountCents: 1000, currency: "gbp", observedAt: new Date("2026-01-01T00:00:00Z") }),
+      row({ id: "b", amountCents: 1200, currency: "gbp", observedAt: new Date("2026-04-01T00:00:00Z") }),
+      row({ id: "c", amountCents: 1500, currency: "usd", observedAt: new Date("2026-08-01T00:00:00Z") }),
+    ];
+    expect(computePriceHistoryCreep(history)).toBeNull();
+  });
+
+  it("skips a currency-mismatched intermediate row when counting genuine changes, rather than aborting", () => {
+    const history = [
+      row({ id: "a", amountCents: 1000, currency: "usd", observedAt: new Date("2026-01-01T00:00:00Z") }),
+      row({ id: "b", amountCents: 999, currency: "gbp", observedAt: new Date("2026-03-01T00:00:00Z") }),
+      row({ id: "c", amountCents: 1200, currency: "usd", observedAt: new Date("2026-05-01T00:00:00Z") }),
+      row({ id: "d", amountCents: 1500, currency: "usd", observedAt: new Date("2026-08-01T00:00:00Z") }),
+    ];
+    const creep = computePriceHistoryCreep(history);
+    expect(creep).not.toBeNull();
+    expect(creep!.changeCount).toBe(2); // a -> c, c -> d (a -> b and b -> c both skipped: currency mismatch)
+  });
+
+  it("is order-independent — unsorted input is sorted internally by observedAt", () => {
+    const history = [
+      row({ id: "c", amountCents: 1500, observedAt: new Date("2026-08-01T00:00:00Z") }),
+      row({ id: "a", amountCents: 1000, observedAt: new Date("2026-01-01T00:00:00Z") }),
+      row({ id: "b", amountCents: 1200, observedAt: new Date("2026-04-01T00:00:00Z") }),
+    ];
+    expect(computePriceHistoryCreep(history)?.firstCents).toBe(1000);
+    expect(computePriceHistoryCreep(history)?.currentCents).toBe(1500);
   });
 });
 

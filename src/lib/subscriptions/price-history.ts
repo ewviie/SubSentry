@@ -97,6 +97,90 @@ export function computeLatestPriceChange(history: SubscriptionPriceHistory[]): P
   return null;
 }
 
+export interface PriceHistoryCreep {
+  firstCents: number;
+  firstBillingCycle: Subscription["billingCycle"];
+  firstObservedAtIso: string;
+  currentCents: number;
+  currentBillingCycle: Subscription["billingCycle"];
+  currency: string;
+  // How many separate genuine amount changes make up this creep — the
+  // reason this function exists at all: computeLatestPriceChange already
+  // tells the most-recent-change story, but a subscription that stepped up
+  // three separate times over two years has a bigger, truer story than its
+  // single latest step alone. Always >= 2 on a non-null return (see the
+  // gate below) — a single change is already fully told by
+  // computeLatestPriceChange, so this deliberately stays silent for one.
+  changeCount: number;
+  percentChange: number;
+  annualDeltaCents: number;
+}
+
+// Retention pass: "this has gone up 3 times since you started tracking it"
+// — the multi-change story PriceHistoryNote's own computeLatestPriceChange
+// literally cannot tell (it only ever compares the two most recent genuine
+// values). Every figure here reads directly from subscriptionPriceHistory
+// rows that already exist for this exact reason; nothing here is a new data
+// source, just a different aggregation of the same one. Same "never
+// fabricate, never compare across currencies" discipline as
+// computeLatestPriceChange above — deliberately not sharing that function's
+// backward-walk loop (that one answers "what's the nearest genuine prior
+// value," this one answers "what's the very first one," a different
+// question with a simpler forward pass).
+export function computePriceHistoryCreep(history: SubscriptionPriceHistory[]): PriceHistoryCreep | null {
+  if (history.length < 2) return null;
+  const sorted = [...history].sort((a, b) => a.observedAt.getTime() - b.observedAt.getTime());
+  const first = sorted[0];
+  const current = sorted[sorted.length - 1];
+  if (first.currency !== current.currency) return null; // never compare across currencies
+
+  const firstMonthly = monthlyCents(first.amountCents, first.billingCycle);
+  const currentMonthly = monthlyCents(current.amountCents, current.billingCycle);
+  if (firstMonthly === 0) return null; // percent change undefined, same as computeLatestPriceChange
+
+  // Count genuine transitions only, walking forward against the last row
+  // actually counted (not always the immediately-preceding array index) —
+  // a currency-mismatched row (a transient data-entry glitch, a temporary
+  // regional-pricing quirk) is skipped without breaking the comparison
+  // chain around it, so a genuine change on either side of it is still
+  // counted against its real same-currency neighbor. Same defensive
+  // posture computeLatestPriceChange's own backward walk documents, applied
+  // forward here.
+  let changeCount = 0;
+  let last = first;
+  for (let i = 1; i < sorted.length; i++) {
+    const curr = sorted[i];
+    if (curr.currency !== last.currency) continue;
+    if (monthlyCents(curr.amountCents, curr.billingCycle) !== monthlyCents(last.amountCents, last.billingCycle)) {
+      changeCount++;
+    }
+    last = curr;
+  }
+  // Fewer than 2 genuine changes means there's exactly one change —
+  // computeLatestPriceChange already tells that single-change story on its
+  // own; this function's whole reason to exist is the multi-change case a
+  // single "from -> to" pair can't represent.
+  if (changeCount < 2) return null;
+  // A genuine net move is still required even with 2+ changes: two changes
+  // that land back on the starting figure (up, then back down) are a real
+  // fact, but "this has crept up" would misdescribe it — that's a
+  // different, more complex story ("changed twice, net unchanged") this
+  // function doesn't try to tell.
+  if (firstMonthly === currentMonthly) return null;
+
+  return {
+    firstCents: first.amountCents,
+    firstBillingCycle: first.billingCycle,
+    firstObservedAtIso: first.observedAt.toISOString().slice(0, 10),
+    currentCents: current.amountCents,
+    currentBillingCycle: current.billingCycle,
+    currency: current.currency,
+    changeCount,
+    percentChange: ((currentMonthly - firstMonthly) / firstMonthly) * 100,
+    annualDeltaCents: annualCents(current.amountCents, current.billingCycle) - annualCents(first.amountCents, first.billingCycle),
+  };
+}
+
 export interface PricePoint {
   amountCents: number;
   billingCycle: Subscription["billingCycle"];

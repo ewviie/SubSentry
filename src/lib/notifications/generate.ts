@@ -1,6 +1,6 @@
 import type { Subscription, SubscriptionPriceHistory } from "@/lib/db/schema";
 import type { PriceChangeProposal } from "@/lib/imports/types";
-import { formatCents } from "@/lib/subscriptions/money";
+import { formatCents, monthlyCents } from "@/lib/subscriptions/money";
 import { daysUntilRenewal } from "@/lib/subscriptions/filters";
 import { findStaleSubscriptions, STALE_THRESHOLD_DAYS } from "@/lib/subscriptions/staleness";
 import { computePortfolioPriceChanges } from "@/lib/subscriptions/price-history";
@@ -156,12 +156,23 @@ function staleCandidates(input: GenerateNotificationsInput): NotificationCandida
     // per day — the "don't spam" requirement, satisfied by construction
     // rather than by a separate rate limit.
     const bucket = Math.floor((daysSinceReviewed - STALE_THRESHOLD_DAYS) / 30);
+    // Retention pass: a real dollar figure, not just a day count — "you
+    // haven't reviewed this in 200 days" doesn't tell anyone whether that
+    // matters; "roughly $199.80 spent since" does. Estimated from the
+    // subscription's own monthly-equivalent rate (money.ts's monthlyCents,
+    // the same conversion every other cross-cycle figure in this app
+    // already uses), not a fabricated number — "roughly" and "estimated"
+    // stay in the copy on purpose, since this assumes the subscription kept
+    // charging at its current recorded rate the whole time, which this app
+    // has no per-day transaction proof of for a manually tracked subscription.
+    const estimatedSpentCents = Math.round((monthlyCents(subscription.amountCents, subscription.billingCycle) / 30) * daysSinceReviewed);
+    const spentLine = ` Roughly ${formatCents(estimatedSpentCents, subscription.currency)} spent since.`;
     return {
       type: "stale_subscription" as const,
       title: `Still using ${subscription.name}?`,
       body: everReviewed
-        ? `You haven't reviewed this in ${daysSinceReviewed} days.`
-        : `Added ${daysSinceReviewed} days ago and never reviewed.`,
+        ? `You haven't reviewed this in ${daysSinceReviewed} days.${spentLine}`
+        : `Added ${daysSinceReviewed} days ago and never reviewed.${spentLine}`,
       severity: "info" as const,
       impactCents: subscription.amountCents,
       currency: subscription.currency,
@@ -294,15 +305,28 @@ const UNUSUAL_CHARGE_VARIANCE_THRESHOLD_PCT = 0.15;
 
 export function buildUnusualChargeCandidate(
   subscription: Subscription,
-  detected: { amountCents: number; amountVariancePct: number; transactions: { date: string }[] },
+  detected: { amountCents: number; amountVariancePct: number; transactions: { date: string; amountCents: number }[] },
 ): NotificationCandidate | null {
   if (detected.amountVariancePct < UNUSUAL_CHARGE_VARIANCE_THRESHOLD_PCT) return null;
   const latestDate = [...detected.transactions].map((t) => t.date).sort().at(-1);
   if (!latestDate) return null;
+  // Retention pass: a real dollar range, not just "vary by more than 15%"
+  // — the exact figures were always present in `detected.transactions`
+  // (sync-transactions.ts's own RawTransaction), just never read by this
+  // function. "Vary by X%" makes someone do the arithmetic themselves;
+  // "ranged from $12.99 to $18.50" is the fact they'd actually check their
+  // bank statement to confirm.
+  const amounts = detected.transactions.map((t) => t.amountCents);
+  const minCents = Math.min(...amounts);
+  const maxCents = Math.max(...amounts);
+  const rangeLine =
+    minCents === maxCents
+      ? "" // defensive only — amountVariancePct already gated out a truly flat set of amounts above
+      : ` Ranged from ${formatCents(minCents, subscription.currency)} to ${formatCents(maxCents, subscription.currency)} over your last ${amounts.length} charge${amounts.length === 1 ? "" : "s"}.`;
   return {
     type: "unusual_charge",
     title: `${subscription.name}'s charges look irregular`,
-    body: `Recent amounts for this subscription vary by more than ${Math.round(UNUSUAL_CHARGE_VARIANCE_THRESHOLD_PCT * 100)}% from one charge to the next — worth a look at your bank activity.`,
+    body: `Recent amounts for this subscription vary by more than ${Math.round(UNUSUAL_CHARGE_VARIANCE_THRESHOLD_PCT * 100)}% from one charge to the next.${rangeLine}`,
     severity: "warning",
     impactCents: detected.amountCents,
     currency: subscription.currency,

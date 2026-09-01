@@ -1,7 +1,7 @@
 import { TrendingUp, TrendingDown, History } from "lucide-react";
 import { formatCents } from "@/lib/subscriptions/money";
 import { BILLING_CYCLE_LABELS } from "@/lib/subscriptions/labels";
-import { computeLatestPriceChange } from "@/lib/subscriptions/price-history";
+import { computeLatestPriceChange, computePriceHistoryCreep } from "@/lib/subscriptions/price-history";
 import type { SubscriptionPriceHistory } from "@/lib/db/schema";
 
 // Phase 9. The detail-page half of price-history capture (see schema.ts's
@@ -19,6 +19,11 @@ export function PriceHistoryNote({
   trackedSinceLabel: string;
 }) {
   const change = computeLatestPriceChange(history);
+  // Retention pass: the multi-change story, shown alongside (never instead
+  // of) the latest single change above — computePriceHistoryCreep itself
+  // stays silent for fewer than 2 genuine changes, so this only ever
+  // renders for a subscription that's actually moved more than once.
+  const creep = computePriceHistoryCreep(history);
 
   if (!change) {
     return (
@@ -65,6 +70,15 @@ export function PriceHistoryNote({
             ? `. That's an additional ${formatCents(change.annualDeltaCents, change.currency)}/year.`
             : `. That's ${formatCents(Math.abs(change.annualDeltaCents), change.currency)}/year less.`}
         </p>
+        {creep ? (
+          <p className="mt-2 border-t border-current/10 pt-2 text-muted-foreground">
+            It&apos;s changed price {creep.changeCount} times since you started tracking it on {creep.firstObservedAtIso} —{" "}
+            {formatCents(creep.firstCents, creep.currency)} → {formatCents(creep.currentCents, creep.currency)} overall
+            {creep.annualDeltaCents > 0
+              ? `, now ${formatCents(creep.annualDeltaCents, creep.currency)}/year more than when you started.`
+              : `, now ${formatCents(Math.abs(creep.annualDeltaCents), creep.currency)}/year less than when you started.`}
+          </p>
+        ) : null}
       </div>
     </div>
   );
