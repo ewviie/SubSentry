@@ -1,6 +1,7 @@
 import { sendTransactionalEmail, appBaseUrl } from "@/lib/auth/email";
 import { formatCents } from "./money";
 import { escapeHtml } from "./renewal-reminders";
+import { PRO_FEATURES } from "@/lib/billing/pro-features";
 import type { PriceChangeCandidate } from "./price-history";
 import type { WeeklyDigestSummary } from "./digest";
 
@@ -96,6 +97,73 @@ export async function sendPriceIncreaseEmail(params: {
     },
     "price-increase",
     subscriptionUrl,
+  );
+}
+
+// 90-day retention audit (security lens): the one place this app's plan
+// entitlement can silently drop — Stripe canceling/ending a subscription
+// (stripe-webhook.ts's own customer.subscription.deleted handler) — had no
+// user-facing signal at all before this. The consequence isn't cosmetic:
+// automatic connected-account sync (connected-account-sync-job.ts) is
+// Pro-gated, so a downgraded user's "watchdog" stops running with nothing
+// telling them it happened — exactly the "silently stop being protected"
+// failure mode this app's own prior council-review passes already found
+// and fixed for a broken bank connection (connection_issue), just not yet
+// for this trigger. Fires once, from the webhook handler, only on a real
+// pro -> free transition (never for an account that was already free) —
+// see stripe-webhook.ts's own comment on how that's guaranteed.
+function buildPlanDowngradedHtml(): string {
+  const logoUrl = new URL("/logo-mark.png", appBaseUrl()).toString();
+  const settingsUrl = new URL("/settings", appBaseUrl()).toString();
+  const featureItems = PRO_FEATURES.map((f) => `<li style="margin:0 0 4px;">${escapeHtml(f)}</li>`).join("");
+  return `
+<div style="background-color:#f4f4f5;padding:32px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <div style="max-width:480px;margin:0 auto;background-color:#ffffff;border-radius:12px;padding:40px 32px;">
+    <img src="${logoUrl}" width="32" height="32" alt="SubSentry" style="display:block;border-radius:9999px;margin-bottom:24px;" />
+    <p style="margin:0 0 8px;font-size:15px;line-height:1.5;color:#18181b;">
+      Your SubSentry Pro subscription has ended, and your account is back on the Free plan.
+    </p>
+    <p style="margin:0 0 8px;font-size:13px;line-height:1.5;color:#71717a;">
+      Everything you've already tracked stays exactly as it is — nothing is deleted. These go back to Free limits:
+    </p>
+    <ul style="margin:0 0 24px;padding:0 0 0 18px;font-size:13px;line-height:1.5;color:#71717a;">${featureItems}</ul>
+    <p style="margin:0 0 24px;font-size:13px;line-height:1.5;color:#71717a;">
+      Most notably: automatic daily monitoring of any connected bank or email account is now paused. You can still
+      sync manually anytime from Settings — SubSentry just won't check on its own until you're back on Pro.
+    </p>
+    <div style="text-align:center;margin:0 0 24px;">
+      <a href="${settingsUrl}" style="display:inline-block;background-color:${EMERALD};color:#fafafa;text-decoration:none;font-size:15px;font-weight:600;padding:12px 28px;border-radius:8px;">
+        Go to Settings
+      </a>
+    </div>
+    <p style="margin:0;font-size:13px;line-height:1.5;color:#71717a;">
+      Questions? <a href="mailto:${SUPPORT_EMAIL}" style="color:${EMERALD};">Contact support</a>.
+    </p>
+  </div>
+</div>`.trim();
+}
+
+function buildPlanDowngradedText(): string {
+  const settingsUrl = new URL("/settings", appBaseUrl()).toString();
+  return [
+    "Your SubSentry Pro subscription has ended, and your account is back on the Free plan.",
+    "Everything you've already tracked stays exactly as it is — nothing is deleted. These go back to Free limits:",
+    ...PRO_FEATURES.map((f) => `- ${f}`),
+    "",
+    "Most notably: automatic daily monitoring of any connected bank or email account is now paused. You can still sync manually anytime from Settings — SubSentry just won't check on its own until you're back on Pro.",
+    "",
+    `Settings: ${settingsUrl}`,
+    "",
+    `Questions? Contact support (${SUPPORT_EMAIL}).`,
+  ].join("\n");
+}
+
+export async function sendPlanDowngradedEmail(to: string): Promise<void> {
+  const settingsUrl = new URL("/settings", appBaseUrl()).toString();
+  await sendTransactionalEmail(
+    { to, subject: "Your SubSentry plan changed to Free", html: buildPlanDowngradedHtml(), text: buildPlanDowngradedText() },
+    "plan-downgraded",
+    settingsUrl,
   );
 }
 

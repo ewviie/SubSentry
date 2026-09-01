@@ -1,8 +1,10 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { checkoutSessions, stripeEvents, users } from "@/lib/db/schema";
+import { sendPlanDowngradedEmail } from "@/lib/subscriptions/notification-emails";
+import { logServerError } from "@/lib/observability/log-error";
 
 // No Stripe SDK dependency — this is the whole verification algorithm Stripe
 // documents: https://docs.stripe.com/webhooks#verify-manually. Doing it by
@@ -94,7 +96,14 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // its ownership check and prompt UI confirmation remain exactly as useful
 // as before.
 export async function processStripeEvent(event: StripeEvent): Promise<void> {
-  await db.transaction(async (tx) => {
+  // Set only by the customer.subscription.deleted branch below, and only on
+  // a genuine pro -> free transition (never for an account already on
+  // free) — see that branch's own comment. Returned from the transaction
+  // (rather than closed over and mutated) so the downgrade email can never
+  // be sent for a write that then rolled back, and so a slow/failed send
+  // (network to the SMTP host, not this app's own DB) can never hold the
+  // transaction open.
+  const downgradedTo = await db.transaction(async (tx): Promise<{ email: string; emailVerified: boolean } | null> => {
     // Idempotency: Stripe retries delivery on anything but a fast 2xx, and
     // can redeliver the same event id. Recording it first and bailing on a
     // conflict means a retried delivery never runs activation logic twice.
@@ -109,7 +118,7 @@ export async function processStripeEvent(event: StripeEvent): Promise<void> {
       .onConflictDoNothing()
       .returning({ id: stripeEvents.id });
 
-    if (inserted.length === 0) return;
+    if (inserted.length === 0) return null;
 
     if (event.type === "checkout.session.completed") {
       const session = event.data.object;
@@ -168,11 +177,42 @@ export async function processStripeEvent(event: StripeEvent): Promise<void> {
     // Matched by customer id, not subscription id: this app never stores a
     // Stripe subscription id (see schema.ts's stripeCustomerId comment), and
     // the Payment Link flow only ever creates one subscription per customer.
+    //
+    // 90-day retention audit fix: the WHERE clause now also requires
+    // `plan = "pro"` (previously unconditional) so `.returning()` tells us
+    // whether this was a REAL transition, not a no-op re-write of an
+    // account that was already free (a redelivered/out-of-order event, or
+    // some other path having already flipped it). That's what
+    // `downgradedTo` above is keyed on — the plan itself still ends up
+    // "free" either way, this only changes whether the write counts as
+    // "genuinely just downgraded" for the email below.
     if (event.type === "customer.subscription.deleted") {
       const customerId = event.data.object.customer;
       if (customerId) {
-        await tx.update(users).set({ plan: "free", updatedAt: new Date() }).where(eq(users.stripeCustomerId, customerId));
+        const [downgraded] = await tx
+          .update(users)
+          .set({ plan: "free", updatedAt: new Date() })
+          .where(and(eq(users.stripeCustomerId, customerId), eq(users.plan, "pro")))
+          .returning({ email: users.email, emailVerified: users.emailVerified });
+        if (downgraded) return downgraded;
       }
     }
+
+    return null;
   });
+
+  // Outside the transaction — see downgradedTo's own comment above for why.
+  // Same "unverified email never receives mail, a send failure never
+  // surfaces as a webhook error" posture every other post-write email in
+  // this app already follows (connected-account-sync-job.ts's own
+  // sendPriceIncreaseEmail call is the direct precedent) — Stripe only
+  // cares that this endpoint returned 2xx, which the DB write above already
+  // guaranteed regardless of what happens to the email.
+  if (downgradedTo && downgradedTo.emailVerified) {
+    try {
+      await sendPlanDowngradedEmail(downgradedTo.email);
+    } catch (error) {
+      logServerError("billing.stripe-webhook.plan-downgraded-email-failed", error);
+    }
+  }
 }
