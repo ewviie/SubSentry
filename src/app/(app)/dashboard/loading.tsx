@@ -23,7 +23,7 @@ function SectionHeadingSkeleton({ weight = "primary" }: { weight?: "primary" | "
 }
 
 // One shape, reused everywhere below a real card on this page is just a
-// title over a few lines (BiggestOpportunityCard, RenewalForecastCard, the
+// title over a few lines (AttentionPanel, RenewalForecastCard, the
 // Savings opportunities and Analytics grids), kept as one skeleton instead
 // of a bespoke one per card so this file stops silently drifting out of
 // sync with the real layout the way it did before (see git history: this
@@ -58,7 +58,7 @@ export default function DashboardLoading() {
       </div>
 
       {/* Financial overview: one OverviewPanel (monthly spend + health on
-          the left, savings callout on the right), BiggestOpportunityCard,
+          the left, savings callout on the right), AttentionPanel,
           then Insights' own 2/3-col card grid. */}
       <div className="space-y-6">
         <SectionHeadingSkeleton />

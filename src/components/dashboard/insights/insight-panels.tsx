@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Route } from "next";
-import { Sparkles, ShieldCheck, TrendingUp, CalendarClock, AlertTriangle, Gauge, Target } from "lucide-react";
+import { Sparkles, ShieldCheck, TrendingUp, CalendarClock, AlertTriangle, Gauge } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,6 @@ import { UpgradeCard, UpgradeInline } from "@/components/billing/upgrade-prompt"
 import { isBetaAllAccess } from "@/lib/billing/plan";
 import { formatCents } from "@/lib/subscriptions/money";
 import { getSavingsPriority, PRIORITY_LABEL, PRIORITY_BADGE_VARIANT, splitSavingsRecommendationsByPlan } from "@/lib/subscriptions/savings";
-import { computeBiggestOpportunity, type BiggestOpportunity } from "@/lib/insights-engine/biggest-opportunity";
 import { cn } from "@/lib/utils";
 import type { EngineOutput, HealthDimensionStatus, HealthDimensionResult } from "@/lib/insights-engine";
 import type { Subscription } from "@/lib/db/schema";
@@ -152,82 +151,6 @@ export function RenewalForecastCard({
           emptyTitle="Nothing renewing soon"
           emptyDescription="Nothing renews in the next 30 days."
         />
-      </CardContent>
-    </Card>
-  );
-}
-
-// North Star Part 9: a single, committed answer to "what's my biggest
-// opportunity," distinct from Savings opportunities/Quick wins' ranked
-// lists just below it: this is the one thing to look at if a user reads
-// nothing else on the page. See computeBiggestOpportunity's own header
-// comment for the exact ranking (confirmed saving > cash-flow risk >
-// reviewable saving > highest-cost subscription). Every candidate there is
-// read from `output`, not recomputed, so this can never disagree with what
-// the rest of the dashboard already says about the same fact.
-//
-// The card's own chrome (border/glow/ring), not just the dollar figure, is
-// tone-aware. The emerald "this matters, and it's a win" glow SavingsCard's
-// hasSavings state uses is only earned by amountTone: "positive" (a
-// confirmed saving). Raised in local-council review (Maintainability lens):
-// the first version of this fix only recolored the number, leaving the
-// glowing emerald frame around a cash-flow warning or a plain "here's your
-// biggest expense" fact: exactly the "real money read as a win" conflation
-// this whole card exists to avoid, just moved from the number to the frame
-// around it.
-const OPPORTUNITY_CHROME: Record<BiggestOpportunity["amountTone"], string> = {
-  positive: "relative overflow-hidden border-emerald/30 shadow-elevation-glow ring-1 ring-emerald/20",
-  neutral: "relative overflow-hidden shadow-elevation-low",
-};
-
-export function BiggestOpportunityCard({ output }: { output: EngineOutput }) {
-  const opportunity = computeBiggestOpportunity(output);
-  if (!opportunity) return null;
-  return (
-    <Card className={OPPORTUNITY_CHROME[opportunity.amountTone]}>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-          <Target
-            className={cn("size-4", opportunity.amountTone === "positive" ? "text-emerald" : "text-muted-foreground")}
-            aria-hidden="true"
-          />
-          Your biggest opportunity
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="break-words font-heading text-xl font-semibold">{opportunity.title}</p>
-            <p className="mt-1 text-sm text-muted-foreground">{opportunity.description}</p>
-          </div>
-          {/* 0 only for the (currently unreachable, since renewal_risk always
-              sets a real renewalForecast total) defensive case: guarded
-              anyway rather than ever rendering "$0.00" as if it meant
-              something. */}
-          {opportunity.amountCents > 0 ? (
-            <p
-              className={cn(
-                "shrink-0 font-mono text-2xl font-semibold tabular-nums",
-                opportunity.amountTone === "positive" ? "text-emerald" : "text-foreground",
-              )}
-            >
-              {formatCents(opportunity.amountCents, opportunity.currency)}
-              <span className="ml-1 text-sm font-normal text-muted-foreground">{opportunity.amountLabel}</span>
-            </p>
-          ) : null}
-        </div>
-        <p className="text-xs text-muted-foreground">
-          <span className="font-medium">Why we&apos;re showing this:</span> {opportunity.whyShown}
-        </p>
-        <Button
-          size="sm"
-          variant="outline"
-          className="w-fit"
-          render={<Link href={opportunity.actionHref as Route} />}
-          nativeButton={false}
-        >
-          {opportunity.actionLabel} →
-        </Button>
       </CardContent>
     </Card>
   );
