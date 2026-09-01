@@ -11,6 +11,7 @@ export const PRO_MONTHLY_PRICE = "£4.99";
 
 export const PRO_FEATURES = [
   "Unlimited active subscriptions",
+  "Automatic daily watchdog sync for connected accounts",
   "Full Health Score across all 5 factors",
   "Every savings opportunity",
   "Optimization recommendations",

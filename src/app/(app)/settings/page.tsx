@@ -247,7 +247,19 @@ export default async function SettingsPage() {
             <Card className="shadow-elevation-low">
               <CardHeader>
                 <CardTitle>Connected accounts</CardTitle>
-                <CardDescription>Bank and email connections used to detect subscriptions automatically.</CardDescription>
+                {/* Monetization pass: automatic, scheduled watchdog sync is
+                    the Pro axis (see connected-account-sync-job.ts's own
+                    header comment) — this line is the one place that fact
+                    reaches a user looking directly at their connections,
+                    framed as what Pro adds ("keeps watching automatically"),
+                    never as "this doesn't work" for Free. Manual sync via
+                    Import Center is unaffected either way — nothing here
+                    claims otherwise. */}
+                <CardDescription>
+                  {isPaid
+                    ? "Bank and email connections used to detect subscriptions automatically."
+                    : "Bank and email connections — sync manually anytime from Import Center. Pro keeps watching automatically every day, so you don't have to."}
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 {emailConnection ? (

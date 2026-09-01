@@ -6,6 +6,7 @@ import { listBankConnectionsForSync, markBankConnectionSynced } from "./bank-con
 import { listEmailConnectionsForSync, markEmailConnectionSynced } from "./email-connections";
 import { syncPlaidTransactions, syncTrueLayerTransactions, syncGmailTransactions } from "./sync-transactions";
 import { listSubscriptions, updateSubscription } from "@/lib/subscriptions/queries";
+import { hasPaidAccess } from "@/lib/billing/plan";
 import { centsToAmountString } from "@/lib/subscriptions/money";
 import { sendPriceIncreaseEmail } from "@/lib/subscriptions/notification-emails";
 import { insertNotifications } from "@/lib/notifications/queries";
@@ -58,9 +59,34 @@ import { logServerError } from "@/lib/observability/log-error";
 //   priceHistorySource: "import_update" tag, same idempotency (an
 //   unchanged price writes nothing new). Running this job twice over
 //   identical bank data is a no-op the second time, by construction.
+// - Product-value pass, monetization: this whole job is Pro-only once the
+//   beta ends — see the hasPaidAccess check in runConnectedAccountSyncJob
+//   below. Gated per-connection, using each connection's OWNING user's own
+//   plan (never the calling context's session, since a cron has none) —
+//   hasPaidAccess(plan) is the same core function every other gate in this
+//   app is built on, so BETA_ALL_ACCESS (lib/billing/plan.ts) is honored
+//   automatically with no special-casing here: during the beta every user
+//   passes, exactly like today. Deliberately NOT resolveHasPaidAccess
+//   (lib/dev/plan-preview.ts) — that reads a dev-only cookie off the
+//   *current browser request*, which has no meaning for a cron iterating
+//   many different users' own connections; using it here would let
+//   whichever developer happens to have a preview cookie set leak into
+//   every other user's automatic sync eligibility.
+//
+//   Manual sync (api/imports/{plaid,truelayer,gmail}/sync) is untouched
+//   and stays free for everyone at every plan, beta or not — this job is
+//   the only thing gated, matching "automatic, unattended, scheduled
+//   sync" as the Pro axis, not "sync" itself. Detection signals are
+//   identical either way; only whether they run without a click is gated.
 export interface ConnectedAccountSyncResult {
   accountsProcessed: number;
   accountsSkipped: number;
+  // Free-plan accounts (post-beta) skipped before ever calling the
+  // provider — no API call spent on an account this job won't act on.
+  // Always 0 during the beta, since hasPaidAccess is true for every plan
+  // then; a real, non-zero value here only becomes possible once
+  // BETA_ALL_ACCESS is flipped off.
+  accountsSkippedFreePlan: number;
   priceIncreasesApplied: number;
   unusualChargesFlagged: number;
   // Council-review fix, silent-failure path #2: a real proposal detected,
@@ -118,8 +144,15 @@ async function getUserSyncPrefs(userId: string): Promise<UserSyncPrefs | null> {
 // every provider (bank or email) — the provider-specific fetch/refresh
 // logic lives in sync-transactions.ts; this is what happens once that
 // fetch has already produced a DetectedSubscription[] for one user.
+//
+// Takes `prefs` directly rather than lazily fetching it internally (the
+// pre-monetization-gate shape of this function) — runConnectedAccountSyncJob
+// now always fetches it first anyway, to make the Pro-plan gate decision
+// before ever calling this function, so a second conditional fetch here
+// would just be re-deriving something the caller already has.
 async function processDetectedSubscriptions(
   userId: string,
+  prefs: UserSyncPrefs,
   detected: DetectedSubscription[],
   existingSubscriptions: Subscription[],
 ): Promise<{ priceIncreasesApplied: number; unusualChargesFlagged: number; priceChangesForReview: number }> {
@@ -129,7 +162,6 @@ async function processDetectedSubscriptions(
   if (detected.length === 0) return { priceIncreasesApplied, unusualChargesFlagged, priceChangesForReview };
 
   const existingById = new Map(existingSubscriptions.map((s) => [s.id, s]));
-  let prefs: UserSyncPrefs | null | undefined; // lazy, only fetched if actually needed this run
 
   for (const item of detected) {
     if (!item.isDuplicateOfExistingId) continue; // brand-new merchant — left for manual review, see this file's own header comment
@@ -137,9 +169,6 @@ async function processDetectedSubscriptions(
     if (!existing || existing.status !== "active") continue;
 
     if (item.priceChangeProposal && item.confidence === "high") {
-      if (prefs === undefined) prefs = await getUserSyncPrefs(userId);
-      if (!prefs) continue;
-
       const result = await updateSubscription(userId, item.isDuplicateOfExistingId, prefs.plan, {
         amount: centsToAmountString(item.priceChangeProposal.detectedAmountCents),
         billingCycle: item.priceChangeProposal.detectedBillingCycle,
@@ -209,6 +238,7 @@ export async function runConnectedAccountSyncJob(): Promise<ConnectedAccountSync
   const result: ConnectedAccountSyncResult = {
     accountsProcessed: 0,
     accountsSkipped: 0,
+    accountsSkippedFreePlan: 0,
     priceIncreasesApplied: 0,
     unusualChargesFlagged: 0,
     priceChangesForReview: 0,
@@ -229,6 +259,31 @@ export async function runConnectedAccountSyncJob(): Promise<ConnectedAccountSync
     // (a DB error mid-write), so one bad account can never take down the
     // rest of the loop either way.
     try {
+      // Monetization gate: checked first, before any provider API call or
+      // subscriptions read, so a gated-out account costs this run nothing
+      // beyond one small users-table lookup — see this file's own header
+      // comment for the full "why hasPaidAccess, not resolveHasPaidAccess"
+      // reasoning. A missing user row (should be unreachable — the FK on
+      // bank_connections.userId cascades on delete) fails safe as "skip,"
+      // same as any other unexpected-state case in this loop.
+      const prefs = await getUserSyncPrefs(connection.userId);
+      if (!prefs) {
+        result.accountsSkipped++;
+        continue;
+      }
+      if (!hasPaidAccess(prefs.plan)) {
+        result.accountsSkippedFreePlan++;
+        // Still marked synced (unlike an actual sync failure below, which
+        // deliberately does NOT bump this) — a free-plan connection has
+        // nothing to retry, and leaving lastSyncedAt un-bumped would let it
+        // sit at the front of listBankConnectionsForSync's own nulls-first,
+        // oldest-synced-first fair-rotation ordering forever, potentially
+        // crowding every real Pro connection out of a bounded run once free
+        // accounts genuinely outnumber Pro ones post-beta.
+        await markBankConnectionSynced(connection.id);
+        continue;
+      }
+
       const existingSubscriptions = await listSubscriptions(connection.userId);
       const outcome =
         connection.provider === "plaid"
@@ -257,6 +312,7 @@ export async function runConnectedAccountSyncJob(): Promise<ConnectedAccountSync
 
       const { priceIncreasesApplied, unusualChargesFlagged, priceChangesForReview } = await processDetectedSubscriptions(
         connection.userId,
+        prefs,
         outcome.result.detected,
         existingSubscriptions,
       );
@@ -273,6 +329,18 @@ export async function runConnectedAccountSyncJob(): Promise<ConnectedAccountSync
 
   for (const connection of emailConnections) {
     try {
+      const prefs = await getUserSyncPrefs(connection.userId);
+      if (!prefs) {
+        result.accountsSkipped++;
+        continue;
+      }
+      if (!hasPaidAccess(prefs.plan)) {
+        result.accountsSkippedFreePlan++;
+        // Same fair-rotation reasoning as the bank loop above.
+        await markEmailConnectionSynced(connection.id);
+        continue;
+      }
+
       const existingSubscriptions = await listSubscriptions(connection.userId);
       const outcome = await syncGmailTransactions(connection, existingSubscriptions);
 
@@ -286,6 +354,7 @@ export async function runConnectedAccountSyncJob(): Promise<ConnectedAccountSync
 
       const { priceIncreasesApplied, unusualChargesFlagged, priceChangesForReview } = await processDetectedSubscriptions(
         connection.userId,
+        prefs,
         outcome.result.detected,
         existingSubscriptions,
       );

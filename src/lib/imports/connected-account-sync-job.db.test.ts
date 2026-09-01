@@ -34,6 +34,24 @@ vi.mock("./sync-transactions", () => ({
   syncGmailTransactions: syncGmailMock,
 }));
 
+// Monetization gate coverage: hasPaidAccess is mocked (not the real
+// BETA_ALL_ACCESS constant, which this suite must never touch — see
+// plan.ts's own comment on why it's a hardcoded, not env-driven, flag)
+// specifically so tests can exercise the "after beta" free-vs-pro branch
+// this file's own job now has, alongside the real, current beta-on
+// behavior (plan.test.ts already covers hasPaidAccess's own beta logic in
+// isolation; this only proves the sync job correctly *consults* it).
+// Defaults to `true` in beforeEach — the same effectively-always-true
+// state hasPaidAccess(plan) actually returns today — so every
+// pre-existing test in this file that predates the gate keeps passing
+// unchanged; only the tests in the "Pro-only automatic sync" describe
+// block below override it.
+const { hasPaidAccessMock } = vi.hoisted(() => ({ hasPaidAccessMock: vi.fn() }));
+vi.mock("@/lib/billing/plan", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/billing/plan")>();
+  return { ...actual, hasPaidAccess: hasPaidAccessMock };
+});
+
 const ENV_KEYS = ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM"] as const;
 let savedEnv: Record<string, string | undefined>;
 
@@ -82,6 +100,8 @@ describe.skipIf(!hasDb)("connected-account sync job (DB integration)", () => {
     syncGmailMock.mockReset();
     syncTrueLayerMock.mockResolvedValue({ ok: true, result: { detected: [], warnings: [], skippedRowCount: 0 } });
     syncGmailMock.mockResolvedValue({ ok: true, result: { detected: [], warnings: [], skippedRowCount: 0 } });
+    hasPaidAccessMock.mockReset();
+    hasPaidAccessMock.mockReturnValue(true); // the real, current beta-on state — see this mock's own header comment
   });
 
   afterEach(async () => {
@@ -95,11 +115,11 @@ describe.skipIf(!hasDb)("connected-account sync job (DB integration)", () => {
     }
   });
 
-  async function makeUser() {
+  async function makeUser(plan: "free" | "pro" = "free") {
     const stamp = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const [row] = await db
       .insert(schema.users)
-      .values({ email: `sync-job-test-${stamp}@example.com`, passwordHash: "test-hash-not-real", emailVerified: true })
+      .values({ email: `sync-job-test-${stamp}@example.com`, passwordHash: "test-hash-not-real", emailVerified: true, plan })
       .returning();
     createdUserIds.push(row.id);
     return row.id;
@@ -479,6 +499,165 @@ describe.skipIf(!hasDb)("connected-account sync job (DB integration)", () => {
       const notificationsB = await db.select().from(schema.notifications).where(eq(schema.notifications.userId, userB));
       expect(notificationsA).toHaveLength(0); // userA's connection was healthy — nothing to flag
       expect(notificationsB.filter((n) => n.type === "connection_issue")).toHaveLength(1); // only userB, whose connection actually broke
+    });
+  });
+
+  describe("automatic sync is Pro-only after beta (monetization gate)", () => {
+    it("beta all-access: a free-plan user's connection still syncs normally — hasPaidAccess(plan) is true for every plan", async () => {
+      // hasPaidAccessMock defaults to true in beforeEach — the real,
+      // current BETA_ALL_ACCESS=true behavior — deliberately NOT
+      // overridden in this test, so this proves the sync job doesn't add
+      // any of its own free/pro special-casing on top of what
+      // hasPaidAccess already decided.
+      const userId = await makeUser("free");
+      await makeBankConnection(userId, "plaid");
+      const sub = await queries.createSubscription(userId, {
+        name: "Netflix",
+        amount: "20.00",
+        currency: "usd",
+        billingCycle: "monthly",
+        category: "streaming",
+        nextRenewalDate: "2099-01-01",
+        status: "active",
+      });
+      syncPlaidMock.mockResolvedValue({
+        ok: true,
+        result: {
+          detected: [
+            detectedSub({
+              isDuplicateOfExistingId: sub.id,
+              confidence: "high",
+              priceChangeProposal: {
+                existingSubscriptionId: sub.id,
+                existingName: "Netflix",
+                existingAmountCents: 2000,
+                existingBillingCycle: "monthly",
+                currency: "usd",
+                detectedAmountCents: 2500,
+                detectedBillingCycle: "monthly",
+                percentChange: 25,
+                annualDeltaCents: 6000,
+              },
+            }),
+          ],
+          warnings: [],
+          skippedRowCount: 0,
+        },
+      });
+
+      const result = await syncJob.runConnectedAccountSyncJob();
+      expect(result.accountsSkippedFreePlan).toBe(0);
+      expect(result.priceIncreasesApplied).toBeGreaterThanOrEqual(1);
+      const history = await queries.getPriceHistory(userId, sub.id);
+      expect(history).toHaveLength(2); // the auto-apply genuinely went through
+    });
+
+    it("post-beta: a free-plan user's connection is skipped before any provider call, a pro user's still syncs", async () => {
+      hasPaidAccessMock.mockImplementation((plan: string) => plan === "pro");
+
+      const freeUserId = await makeUser("free");
+      const proUserId = await makeUser("pro");
+      await makeBankConnection(freeUserId, "plaid");
+      const proConn = await makeBankConnection(proUserId, "truelayer");
+      const proSub = await queries.createSubscription(proUserId, {
+        name: "Adobe",
+        amount: "50.00",
+        currency: "usd",
+        billingCycle: "monthly",
+        category: "software",
+        nextRenewalDate: "2099-01-01",
+        status: "active",
+      });
+
+      // If the free user's connection is (incorrectly) reached, this
+      // would produce a real, detectable side effect — proving the gate
+      // fired BEFORE the provider was ever called, not just that no
+      // notification happened to result.
+      syncPlaidMock.mockRejectedValue(new Error("should never be called for a free-plan connection"));
+      syncTrueLayerMock.mockImplementation(async (connection: { id: string }) =>
+        connection.id === proConn.id
+          ? {
+              ok: true,
+              result: {
+                detected: [
+                  detectedSub({
+                    isDuplicateOfExistingId: proSub.id,
+                    confidence: "high",
+                    priceChangeProposal: {
+                      existingSubscriptionId: proSub.id,
+                      existingName: "Adobe",
+                      existingAmountCents: 5000,
+                      existingBillingCycle: "monthly",
+                      currency: "usd",
+                      detectedAmountCents: 5500,
+                      detectedBillingCycle: "monthly",
+                      percentChange: 10,
+                      annualDeltaCents: 6000,
+                    },
+                  }),
+                ],
+                warnings: [],
+                skippedRowCount: 0,
+              },
+            }
+          : { ok: true, result: { detected: [], warnings: [], skippedRowCount: 0 } },
+      );
+
+      const result = await syncJob.runConnectedAccountSyncJob();
+      expect(result.accountsSkippedFreePlan).toBeGreaterThanOrEqual(1);
+      expect(syncPlaidMock).not.toHaveBeenCalled(); // the gate fired before the provider call, not after
+      expect(result.priceIncreasesApplied).toBeGreaterThanOrEqual(1); // the pro user's own sync still went through
+
+      const proHistory = await queries.getPriceHistory(proUserId, proSub.id);
+      expect(proHistory).toHaveLength(2);
+    });
+
+    it("a gated-out free-plan connection still has lastSyncedAt bumped, so it doesn't permanently crowd the fair-rotation queue", async () => {
+      hasPaidAccessMock.mockImplementation((plan: string) => plan === "pro");
+      const userId = await makeUser("free");
+      const conn = await makeBankConnection(userId, "plaid");
+
+      await syncJob.runConnectedAccountSyncJob();
+
+      const [refreshed] = await db.select().from(schema.bankConnections).where(eq(schema.bankConnections.id, conn.id));
+      expect(refreshed.lastSyncedAt).not.toBeNull();
+    });
+
+    it("ownership: a free user's data is never touched even when a same-run pro user's sync succeeds (IDOR/isolation)", async () => {
+      hasPaidAccessMock.mockImplementation((plan: string) => plan === "pro");
+      const freeUserId = await makeUser("free");
+      const proUserId = await makeUser("pro");
+      const freeSub = await queries.createSubscription(freeUserId, {
+        name: "Netflix",
+        amount: "20.00",
+        currency: "usd",
+        billingCycle: "monthly",
+        category: "streaming",
+        nextRenewalDate: "2099-01-01",
+        status: "active",
+      });
+      await makeBankConnection(freeUserId, "plaid");
+      const proConn = await makeBankConnection(proUserId, "truelayer");
+      syncPlaidMock.mockResolvedValue({ ok: true, result: { detected: [], warnings: [], skippedRowCount: 0 } }); // unreachable in practice — gated before this
+      syncTrueLayerMock.mockImplementation(async (connection: { id: string }) =>
+        connection.id === proConn.id
+          ? { ok: false, reason: "reconnect_required" }
+          : { ok: true, result: { detected: [], warnings: [], skippedRowCount: 0 } },
+      );
+
+      await syncJob.runConnectedAccountSyncJob();
+
+      // The pro user's broken connection produced its own notification —
+      // it must never leak onto the free user's account.
+      const freeNotifications = await db.select().from(schema.notifications).where(eq(schema.notifications.userId, freeUserId));
+      const proNotifications = await db.select().from(schema.notifications).where(eq(schema.notifications.userId, proUserId));
+      expect(freeNotifications).toHaveLength(0);
+      expect(proNotifications.filter((n) => n.type === "connection_issue")).toHaveLength(1);
+
+      // And the free user's own subscription/price-history is completely
+      // untouched by a run that gated their connection out.
+      const freeHistory = await queries.getPriceHistory(freeUserId, freeSub.id);
+      expect(freeHistory).toHaveLength(1); // still just "initial"
     });
   });
 });

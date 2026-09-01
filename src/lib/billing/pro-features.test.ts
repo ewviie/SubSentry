@@ -20,6 +20,7 @@ describe("PRO_FEATURES", () => {
   it("lists exactly the real Pro benefits, in order, with no invented items", () => {
     expect(PRO_FEATURES).toEqual([
       "Unlimited active subscriptions",
+      "Automatic daily watchdog sync for connected accounts",
       "Full Health Score across all 5 factors",
       "Every savings opportunity",
       "Optimization recommendations",
