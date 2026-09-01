@@ -16,6 +16,8 @@ const TYPE_LABEL: Record<Notification["type"], string> = {
   savings_opportunity: "savings opportunity",
   duplicate_subscription: "duplicate",
   renewal_lapsed: "possibly lapsed",
+  connection_issue: "connection issue",
+  price_change_review: "price change to review",
 };
 
 // The dashboard's "What needs your attention" panel — product-value pass,

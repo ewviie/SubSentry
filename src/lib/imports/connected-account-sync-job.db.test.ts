@@ -290,6 +290,89 @@ describe.skipIf(!hasDb)("connected-account sync job (DB integration)", () => {
     expect(result.priceIncreasesApplied).toBe(0);
     const history = await queries.getPriceHistory(userId, sub.id);
     expect(history).toHaveLength(1); // still just the "initial" row
+
+    // Council-review fix: the medium-confidence proposal is preserved as a
+    // reviewable notification instead of being silently discarded — this
+    // is the actual regression this fix targets, not just "nothing was
+    // auto-applied" (which was already true before the fix too).
+    expect(result.priceChangesForReview).toBe(1);
+    const [notification] = await db.select().from(schema.notifications).where(eq(schema.notifications.userId, userId));
+    expect(notification).toMatchObject({ type: "price_change_review", subscriptionId: sub.id, severity: "info" });
+  });
+
+  it("a medium-confidence proposal detected twice (two daily syncs) produces exactly one review notification", async () => {
+    const userId = await makeUser();
+    await makeBankConnection(userId);
+    const sub = await queries.createSubscription(userId, {
+      name: "Dropbox",
+      amount: "10.00",
+      currency: "usd",
+      billingCycle: "monthly",
+      category: "software",
+      nextRenewalDate: "2099-01-01",
+      status: "active",
+    });
+    const proposal = {
+      existingSubscriptionId: sub.id,
+      existingName: "Dropbox",
+      existingAmountCents: 1000,
+      existingBillingCycle: "monthly" as const,
+      currency: "usd",
+      detectedAmountCents: 1200,
+      detectedBillingCycle: "monthly" as const,
+      percentChange: 20,
+      annualDeltaCents: 2400,
+    };
+    syncPlaidMock.mockResolvedValue({
+      ok: true,
+      result: { detected: [detectedSub({ isDuplicateOfExistingId: sub.id, confidence: "medium", priceChangeProposal: proposal })], warnings: [], skippedRowCount: 0 },
+    });
+
+    await syncJob.runConnectedAccountSyncJob();
+    const secondResult = await syncJob.runConnectedAccountSyncJob();
+
+    expect(secondResult.priceChangesForReview).toBe(1); // still "flagged" this run (see the counter's own comment) —
+    const notifications = await db.select().from(schema.notifications).where(eq(schema.notifications.userId, userId));
+    expect(notifications.filter((n) => n.type === "price_change_review")).toHaveLength(1); // but genuinely idempotent: only one row ever exists
+  });
+
+  it("a genuine subsequent price change (a different detected amount) produces a second, distinct review notification", async () => {
+    const userId = await makeUser();
+    await makeBankConnection(userId);
+    const sub = await queries.createSubscription(userId, {
+      name: "Dropbox",
+      amount: "10.00",
+      currency: "usd",
+      billingCycle: "monthly",
+      category: "software",
+      nextRenewalDate: "2099-01-01",
+      status: "active",
+    });
+    const baseProposal = {
+      existingSubscriptionId: sub.id,
+      existingName: "Dropbox",
+      existingAmountCents: 1000,
+      existingBillingCycle: "monthly" as const,
+      currency: "usd",
+      detectedBillingCycle: "monthly" as const,
+      percentChange: 20,
+      annualDeltaCents: 2400,
+    };
+
+    syncPlaidMock.mockResolvedValueOnce({
+      ok: true,
+      result: { detected: [detectedSub({ isDuplicateOfExistingId: sub.id, confidence: "medium", priceChangeProposal: { ...baseProposal, detectedAmountCents: 1200 } })], warnings: [], skippedRowCount: 0 },
+    });
+    await syncJob.runConnectedAccountSyncJob();
+
+    syncPlaidMock.mockResolvedValueOnce({
+      ok: true,
+      result: { detected: [detectedSub({ isDuplicateOfExistingId: sub.id, confidence: "medium", priceChangeProposal: { ...baseProposal, detectedAmountCents: 1500 } })], warnings: [], skippedRowCount: 0 },
+    });
+    await syncJob.runConnectedAccountSyncJob();
+
+    const notifications = await db.select().from(schema.notifications).where(eq(schema.notifications.userId, userId));
+    expect(notifications.filter((n) => n.type === "price_change_review")).toHaveLength(2); // genuinely new evidence, not permanently suppressed
   });
 
   it("flags an unusual charge for an existing subscription with irregular amounts, without applying anything", async () => {
@@ -326,5 +409,76 @@ describe.skipIf(!hasDb)("connected-account sync job (DB integration)", () => {
 
     const [notification] = await db.select().from(schema.notifications).where(eq(schema.notifications.userId, userId));
     expect(notification).toMatchObject({ type: "unusual_charge", subscriptionId: sub.id });
+  });
+
+  describe("connection_issue notifications (council-review fix, silent-failure path #1)", () => {
+    it("a reconnect_required failure surfaces as a real, actionable notification", async () => {
+      const userId = await makeUser();
+      const conn = await makeBankConnection(userId, "truelayer");
+      syncTrueLayerMock.mockResolvedValue({ ok: false, reason: "reconnect_required" });
+
+      const result = await syncJob.runConnectedAccountSyncJob();
+      expect(result.connectionIssuesFlagged).toBeGreaterThanOrEqual(1);
+      expect(result.accountsSkipped).toBeGreaterThanOrEqual(1);
+
+      const [notification] = await db.select().from(schema.notifications).where(eq(schema.notifications.userId, userId));
+      expect(notification).toMatchObject({ type: "connection_issue", severity: "warning", actionHref: "/settings", subscriptionId: null });
+      // dedupeKey scoped to this specific connection — see generate.ts's
+      // own comment on why (a user could have more than one connection).
+      expect(notification.dedupeKey).toContain(conn.id);
+    });
+
+    it("a decrypt_error failure is also surfaced — same user-facing remediation as reconnect_required", async () => {
+      const userId = await makeUser();
+      await makeBankConnection(userId, "plaid");
+      syncPlaidMock.mockResolvedValue({ ok: false, reason: "decrypt_error" });
+
+      const result = await syncJob.runConnectedAccountSyncJob();
+      expect(result.connectionIssuesFlagged).toBeGreaterThanOrEqual(1);
+      const [notification] = await db.select().from(schema.notifications).where(eq(schema.notifications.userId, userId));
+      expect(notification.type).toBe("connection_issue");
+    });
+
+    it("a transient provider_error is deliberately NOT surfaced as a reconnect notification — nothing to reconnect, next run retries it automatically", async () => {
+      const userId = await makeUser();
+      await makeBankConnection(userId, "plaid");
+      syncPlaidMock.mockResolvedValue({ ok: false, reason: "provider_error" });
+
+      const result = await syncJob.runConnectedAccountSyncJob();
+      expect(result.connectionIssuesFlagged).toBe(0);
+      const notifications = await db.select().from(schema.notifications).where(eq(schema.notifications.userId, userId));
+      expect(notifications).toHaveLength(0);
+    });
+
+    it("running the sync twice against the same broken connection produces exactly one notification (idempotent, no daily spam)", async () => {
+      const userId = await makeUser();
+      await makeBankConnection(userId, "plaid");
+      syncPlaidMock.mockResolvedValue({ ok: false, reason: "reconnect_required" });
+
+      await syncJob.runConnectedAccountSyncJob();
+      await syncJob.runConnectedAccountSyncJob();
+
+      const notifications = await db.select().from(schema.notifications).where(eq(schema.notifications.userId, userId));
+      expect(notifications.filter((n) => n.type === "connection_issue")).toHaveLength(1);
+    });
+
+    it("a broken connection's notification reaches only its own owning user, never another user's (IDOR/ownership)", async () => {
+      const userA = await makeUser();
+      const userB = await makeUser();
+      await makeBankConnection(userA, "plaid");
+      const connB = await makeBankConnection(userB, "truelayer");
+
+      syncPlaidMock.mockResolvedValue({ ok: true, result: { detected: [], warnings: [], skippedRowCount: 0 } }); // userA's own sync is healthy
+      syncTrueLayerMock.mockImplementation(async (connection: { id: string }) =>
+        connection.id === connB.id ? { ok: false, reason: "reconnect_required" } : { ok: true, result: { detected: [], warnings: [], skippedRowCount: 0 } },
+      );
+
+      await syncJob.runConnectedAccountSyncJob();
+
+      const notificationsA = await db.select().from(schema.notifications).where(eq(schema.notifications.userId, userA));
+      const notificationsB = await db.select().from(schema.notifications).where(eq(schema.notifications.userId, userB));
+      expect(notificationsA).toHaveLength(0); // userA's connection was healthy — nothing to flag
+      expect(notificationsB.filter((n) => n.type === "connection_issue")).toHaveLength(1); // only userB, whose connection actually broke
+    });
   });
 });

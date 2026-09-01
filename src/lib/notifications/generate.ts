@@ -1,4 +1,5 @@
 import type { Subscription, SubscriptionPriceHistory } from "@/lib/db/schema";
+import type { PriceChangeProposal } from "@/lib/imports/types";
 import { formatCents } from "@/lib/subscriptions/money";
 import { daysUntilRenewal } from "@/lib/subscriptions/filters";
 import { findStaleSubscriptions, STALE_THRESHOLD_DAYS } from "@/lib/subscriptions/staleness";
@@ -313,5 +314,106 @@ export function buildUnusualChargeCandidate(
     // (a new date) does, the same "new evidence still notifies" posture
     // price_increase's own dedupeKey already follows.
     dedupeKey: `unusual_charge:${subscription.id}:${latestDate}`,
+  };
+}
+
+// Council-review fix (silent-failure path #2): a genuine price-change
+// proposal detected during automatic sync that does NOT meet the
+// confidence: "high" bar connected-account-sync-job.ts requires to
+// auto-apply — previously computed and then discarded with no record at
+// all (a real DETECTION -> INSIGHT dead end, not a UX nitpick: a clean
+// medium-confidence match is exactly the realistic case that clears
+// neither the auto-apply gate nor buildUnusualChargeCandidate's variance
+// bar above, since a clean price step has LOW variance by construction).
+//
+// Deliberately never writes to subscriptions/subscriptionPriceHistory —
+// this is a reviewable finding only, same "detection without a
+// human-confirmed write" boundary the Import Center's own review step
+// already established for every other unconfirmed proposal. The user acts
+// on it the same way they'd act on any other detail-page finding: by
+// looking at the real numbers and, if they agree, editing the amount
+// themselves via the subscription's own existing edit form — no new
+// one-click "confirm" affordance is added here.
+//
+// dedupeKey is tied to the exact detected value (not a date or a bucket):
+// the same medium-confidence proposal, re-detected on every subsequent
+// daily sync while nothing about it changes, produces exactly one
+// notification, not one per day. If the detected amount changes again —
+// genuinely new evidence — that's a new dedupeKey and a new notification,
+// the same posture every other candidate in this file follows.
+export function buildPriceChangeReviewCandidate(
+  subscription: Subscription,
+  proposal: PriceChangeProposal,
+): NotificationCandidate {
+  const direction = proposal.percentChange > 0 ? "up" : "down";
+  return {
+    type: "price_change_review",
+    title: `${subscription.name} may have changed to ${formatCents(proposal.detectedAmountCents, proposal.currency)}`,
+    body: `Your bank shows a different amount than what's on record (${formatCents(subscription.amountCents, subscription.currency)}) — looks like it moved ${direction}, but not confident enough to update automatically. Worth a look.`,
+    severity: "info",
+    // Math.abs: annualDeltaCents is signed (a decrease is negative) but
+    // impactCents has a non-negative DB check constraint (schema.ts) — the
+    // sign is already carried by `direction` in the copy above, not lost.
+    impactCents: Math.abs(proposal.annualDeltaCents),
+    currency: proposal.currency,
+    subscriptionId: subscription.id,
+    actionHref: `/subscriptions/${subscription.id}`,
+    dedupeKey: `price_change_review:${subscription.id}:${proposal.detectedAmountCents}:${proposal.detectedBillingCycle}`,
+  };
+}
+
+// Council-review fix (silent-failure path #1): a bank/email connection
+// that failed to sync with reconnect_required or decrypt_error
+// (sync-transactions.ts) — previously logged server-side only, so a dead
+// connection silently stopped protecting the user with no signal anywhere
+// in the product that automatic detection had quietly paused for that
+// account. provider_error (a transient API/network failure) is
+// deliberately NOT covered by this builder — that's retried automatically
+// on the next scheduled run and isn't something reconnecting would fix, so
+// surfacing it as an actionable "reconnect" notification would be
+// misleading.
+//
+// Bucketed by a real time window (not a permanent one-shot, and not a
+// daily re-notify either): the sync cron runs daily and a persistently
+// broken connection is retried every run, so without bucketing this would
+// either never re-remind (a one-shot dedupeKey) or spam once a day
+// (a dedupeKey with no time component at all). Seven days matches this
+// module's own staleCandidates/lapsedRenewalCandidates precedent for "a
+// real, ongoing problem re-surfaces periodically, not constantly."
+const CONNECTION_ISSUE_REBUCKET_DAYS = 7;
+
+export type ConnectionProvider = "plaid" | "truelayer" | "gmail";
+export type ConnectionIssueReason = "reconnect_required" | "decrypt_error";
+
+const CONNECTION_PROVIDER_LABEL: Record<ConnectionProvider, string> = {
+  plaid: "Plaid",
+  truelayer: "TrueLayer",
+  gmail: "Gmail",
+};
+
+const CONNECTION_ISSUE_REASON_COPY: Record<ConnectionIssueReason, string> = {
+  reconnect_required: "expired",
+  decrypt_error: "can no longer be read",
+};
+
+export function buildConnectionIssueCandidate(params: {
+  connectionId: string;
+  provider: ConnectionProvider;
+  reason: ConnectionIssueReason;
+  now?: Date;
+}): NotificationCandidate {
+  const now = params.now ?? new Date();
+  const bucket = Math.floor(now.getTime() / (CONNECTION_ISSUE_REBUCKET_DAYS * 86_400_000));
+  const providerLabel = CONNECTION_PROVIDER_LABEL[params.provider];
+  return {
+    type: "connection_issue",
+    title: `Your ${providerLabel} connection needs attention`,
+    body: `SubSentry couldn't sync your ${providerLabel} account — the connection ${CONNECTION_ISSUE_REASON_COPY[params.reason]}. Automatic detection is paused for this account until you reconnect.`,
+    severity: "warning",
+    impactCents: null,
+    currency: null,
+    subscriptionId: null,
+    actionHref: "/settings",
+    dedupeKey: `connection_issue:${params.connectionId}:${bucket}`,
   };
 }

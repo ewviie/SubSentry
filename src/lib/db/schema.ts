@@ -637,6 +637,26 @@ export const notifications = pgTable(
         // anyway, and any historical row already written with it stays
         // valid to read.
         "renewal_lapsed",
+        // Council-review fix: the two silent-failure paths. Both migration-
+        // free additions (see renewal_lapsed's own comment on why — this
+        // column has no DB check constraint).
+        //
+        // "connection_issue": a bank/email sync failed with
+        // reconnect_required or decrypt_error (sync-transactions.ts) — until
+        // this fix, that fact was logged server-side and never reached the
+        // user at all, so a dead connection silently stopped protecting
+        // them while the UI kept implying it was still watching.
+        "connection_issue",
+        // "price_change_review": a genuine price-change proposal
+        // (detection.ts's priceChangeProposal) detected during automatic
+        // sync at medium confidence — too uncertain to auto-apply (see
+        // connected-account-sync-job.ts's own confidence: "high" gate), but
+        // previously just discarded rather than ever shown to the user.
+        // Never written to subscriptionPriceHistory and never changes
+        // subscriptions.amountCents — a reviewable finding only, same
+        // "detection without a human-confirmed write" posture the Import
+        // Center's own review step already established.
+        "price_change_review",
       ],
     }).notNull(),
     title: text("title").notNull(),

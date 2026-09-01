@@ -1,4 +1,4 @@
-import { TrendingUp, CalendarClock, CalendarX, Clock, Copy, PiggyBank, AlertTriangle, type LucideIcon } from "lucide-react";
+import { TrendingUp, CalendarClock, CalendarX, Clock, Copy, PiggyBank, AlertTriangle, PlugZap, SearchCheck, type LucideIcon } from "lucide-react";
 import type { Notification } from "@/lib/db/schema";
 
 // Shared by every surface that renders a notification row (bell dropdown,
@@ -15,4 +15,6 @@ export const NOTIFICATION_TYPE_ICON: Record<Notification["type"], LucideIcon> = 
   savings_opportunity: PiggyBank,
   duplicate_subscription: Copy,
   renewal_lapsed: CalendarX,
+  connection_issue: PlugZap,
+  price_change_review: SearchCheck,
 };

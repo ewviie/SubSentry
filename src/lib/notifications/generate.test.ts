@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { generateNotificationCandidates } from "./generate";
+import { generateNotificationCandidates, buildPriceChangeReviewCandidate, buildConnectionIssueCandidate } from "./generate";
 import { computeSavingsRecommendations } from "@/lib/subscriptions/savings";
 import type { Subscription, SubscriptionPriceHistory } from "@/lib/db/schema";
+import type { PriceChangeProposal } from "@/lib/imports/types";
 
 let nextId = 1;
 function sub(overrides: Partial<Subscription> = {}): Subscription {
@@ -322,5 +323,86 @@ describe("generateNotificationCandidates", () => {
       expect(increases).toHaveLength(2);
       expect(increases.every((c) => !c.readAt)).toBe(true);
     });
+  });
+});
+
+// Council-review fix, silent-failure path #2: a medium-confidence
+// price-change proposal (real, detected, never meeting the auto-apply bar)
+// must be preserved as a reviewable finding, not discarded.
+describe("buildPriceChangeReviewCandidate", () => {
+  function proposal(overrides: Partial<PriceChangeProposal> = {}): PriceChangeProposal {
+    return {
+      existingSubscriptionId: "sub-1",
+      existingName: "Netflix",
+      existingAmountCents: 1999,
+      existingBillingCycle: "monthly",
+      currency: "usd",
+      detectedAmountCents: 2299,
+      detectedBillingCycle: "monthly",
+      percentChange: 15,
+      annualDeltaCents: 3600,
+      ...overrides,
+    };
+  }
+
+  it("produces a distinct type from price_increase (never implies the change was applied)", () => {
+    const s = sub({ id: "sub-1", name: "Netflix", amountCents: 1999 });
+    const candidate = buildPriceChangeReviewCandidate(s, proposal());
+    expect(candidate.type).toBe("price_change_review");
+    expect(candidate.subscriptionId).toBe("sub-1");
+    expect(candidate.severity).toBe("info"); // never "warning" — this is unconfirmed, price_increase (confirmed) is the warning-tier one
+  });
+
+  it("never writes a negative impactCents even for a detected decrease (schema's non-negative check constraint)", () => {
+    const s = sub({ id: "sub-1", amountCents: 1999 });
+    const candidate = buildPriceChangeReviewCandidate(s, proposal({ percentChange: -15, annualDeltaCents: -3600 }));
+    expect(candidate.impactCents).toBe(3600);
+    expect(candidate.body).toContain("down");
+  });
+
+  it("dedupeKey is stable across repeated identical detections but changes when the detected value changes", () => {
+    const s = sub({ id: "sub-1", amountCents: 1999 });
+    const first = buildPriceChangeReviewCandidate(s, proposal());
+    const repeat = buildPriceChangeReviewCandidate(s, proposal()); // same proposal, e.g. a second daily sync
+    const changedAgain = buildPriceChangeReviewCandidate(s, proposal({ detectedAmountCents: 2599 }));
+    expect(repeat.dedupeKey).toBe(first.dedupeKey);
+    expect(changedAgain.dedupeKey).not.toBe(first.dedupeKey);
+  });
+});
+
+// Council-review fix, silent-failure path #1: a broken bank/email
+// connection must reach the user as a real, actionable notification.
+describe("buildConnectionIssueCandidate", () => {
+  it("produces an actionable notification pointing at Settings", () => {
+    const candidate = buildConnectionIssueCandidate({ connectionId: "conn-1", provider: "plaid", reason: "reconnect_required" });
+    expect(candidate.type).toBe("connection_issue");
+    expect(candidate.severity).toBe("warning");
+    expect(candidate.actionHref).toBe("/settings");
+    expect(candidate.title).toContain("Plaid");
+  });
+
+  it("dedupeKey rebuckets over time — the same broken connection re-notifies weekly, not daily", () => {
+    const day0 = new Date("2026-08-31T00:00:00Z");
+    const day1 = new Date("2026-09-01T00:00:00Z"); // next day, same 7-day bucket
+    const day10 = new Date("2026-09-10T00:00:00Z"); // into the next bucket
+
+    const a = buildConnectionIssueCandidate({ connectionId: "conn-1", provider: "plaid", reason: "reconnect_required", now: day0 });
+    const b = buildConnectionIssueCandidate({ connectionId: "conn-1", provider: "plaid", reason: "reconnect_required", now: day1 });
+    const c = buildConnectionIssueCandidate({ connectionId: "conn-1", provider: "plaid", reason: "reconnect_required", now: day10 });
+
+    expect(b.dedupeKey).toBe(a.dedupeKey); // still within the same window — idempotent, no daily spam
+    expect(c.dedupeKey).not.toBe(a.dedupeKey); // still broken a week later — genuinely worth re-surfacing
+  });
+
+  it("dedupeKey is scoped to the specific connection, not just the provider", () => {
+    const a = buildConnectionIssueCandidate({ connectionId: "conn-1", provider: "plaid", reason: "reconnect_required" });
+    const b = buildConnectionIssueCandidate({ connectionId: "conn-2", provider: "plaid", reason: "reconnect_required" });
+    expect(a.dedupeKey).not.toBe(b.dedupeKey);
+  });
+
+  it("carries no impact figure — a broken connection has no honest dollar amount to attach", () => {
+    const candidate = buildConnectionIssueCandidate({ connectionId: "conn-1", provider: "gmail", reason: "decrypt_error" });
+    expect(candidate.impactCents).toBeNull();
+    expect(candidate.currency).toBeNull();
   });
 });
