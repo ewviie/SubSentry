@@ -47,18 +47,37 @@ export const users = pgTable("users", {
   // conventionally default renewal reminders on). The real containment is
   // the per-run cap + unsubscribe link, not this default.
   renewalRemindersEnabled: boolean("renewal_reminders_enabled").notNull().default(true),
-  // Notification preferences (product-value pass). Two different defaults
-  // on purpose: priceAlertEmailsEnabled defaults true, same "opt-out, not
-  // opt-in" convention renewalRemindersEnabled already uses — a price going
-  // up is exactly the kind of thing a subscription tracker exists to catch,
-  // so it should reach an inbox by default the same way a renewal heads-up
-  // already does. weeklyDigestEnabled defaults FALSE: this is a genuinely
-  // new, recurring email a user hasn't implicitly agreed to just by signing
-  // up (unlike the other two, which fire only around a real event), so it
-  // starts opt-in rather than silently enrolling every existing account in
-  // a new weekly email the moment this ships.
+  // Notification preferences (product-value pass). priceAlertEmailsEnabled
+  // defaults true, same "opt-out, not opt-in" convention renewalRemindersEnabled
+  // already uses — a price going up is exactly the kind of thing a
+  // subscription tracker exists to catch, so it should reach an inbox by
+  // default the same way a renewal heads-up already does.
+  //
+  // weeklyDigestEnabled: retention pass — flipped from its original `false`
+  // default to `true`. The original reasoning (a genuinely new, recurring
+  // email nobody had implicitly agreed to, so it should start opt-in rather
+  // than silently enrolling every existing account) was sound for accounts
+  // that already existed when this shipped — and stays honored: this is a
+  // column-level DEFAULT, which only governs rows that don't specify a
+  // value themselves. It never touches an existing user's already-stored
+  // `false` (an ALTER COLUMN ... SET DEFAULT does not rewrite existing
+  // rows, and no signup code path sets this column explicitly — grep
+  // confirms it). For every NEW signup going forward, though, "genuinely
+  // new email nobody agreed to" no longer applies: it's just this app's
+  // normal onboarding default, the same as the other two notification
+  // toggles. The retention brief's own finding is what forced this: the
+  // weekly-digest cron (weekly-digest-job.ts) is the ONLY thing that runs
+  // detection for a user who never opens the app again after setup — with
+  // this off by default, that watchdog loop was theoretical for the
+  // overwhelming majority of new users, not real. It has a one-click,
+  // no-login unsubscribe link in every email (see weekly-digest-job.ts's
+  // own buildDigestUnsubscribeUrl), the same "never make unsubscribing
+  // intentionally difficult" posture renewal-reminders.ts's own default-true
+  // toggle already established, plus a per-run recipient cap (see
+  // findDigestCandidates) and the existing isDigestWorthSending gate — a
+  // week with nothing real to report still sends nothing.
   priceAlertEmailsEnabled: boolean("price_alert_emails_enabled").notNull().default(true),
-  weeklyDigestEnabled: boolean("weekly_digest_enabled").notNull().default(false),
+  weeklyDigestEnabled: boolean("weekly_digest_enabled").notNull().default(true),
   // How many days before a renewal the reminder email (renewal-reminders.ts)
   // should fire — replaces the previously-fixed REMINDER_WINDOW_MAX_DAYS=3
   // for the *lead time* a user sees, while the underlying claim/send job
@@ -79,6 +98,24 @@ export const users = pgTable("users", {
   // last time this user's digest went out" — so a single nullable
   // timestamp column on users is the right shape, not a whole new table.
   lastDigestSentAt: timestamp("last_digest_sent_at", { withTimezone: true }),
+  // Retention pass: the portfolio's total monthly cost (computeMonthlyTotal,
+  // digest.ts) as of the last digest run, so the next run can honestly say
+  // "your subscriptions cost $X more/less per month than last time" — the
+  // brief's own flagship "money found" example, and a figure creepingCost
+  // (a trailing-12-month, confirmed-price-changes-only annualized figure)
+  // doesn't answer, since it never reflects a subscription simply being
+  // added or removed. Both columns are set together and read together
+  // (weekly-digest-job.ts); currency is stored alongside the cents rather
+  // than assumed stable, so a portfolio whose primary currency changed
+  // between two digests is detected and the comparison is honestly skipped
+  // instead of silently mixing currencies (see buildSpendIncreasedCandidate's
+  // own comment in notifications/generate.ts). Updated on every digest run
+  // this user was actually evaluated in — including a week with nothing to
+  // report — never on a run that failed before reaching that point (same
+  // "a failed send must not silently disappear" posture lastDigestSentAt's
+  // own update sites already follow).
+  lastDigestMonthlyCents: integer("last_digest_monthly_cents"),
+  lastDigestCurrency: text("last_digest_currency"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
@@ -657,6 +694,18 @@ export const notifications = pgTable(
         // "detection without a human-confirmed write" posture the Import
         // Center's own review step already established.
         "price_change_review",
+        // Retention pass: the portfolio's total monthly cost went up
+        // between one weekly digest and the next (weekly-digest-job.ts,
+        // comparing against users.lastDigestMonthlyCents) — the brief's own
+        // "Your recurring spending increased by $X/month" example. Reflects
+        // any real change to the total (a price increase, a new
+        // subscription, a reactivation), not just a confirmed per-subscription
+        // price change the way price_increase does; see
+        // buildSpendIncreasedCandidate (notifications/generate.ts) for the
+        // minimum-delta/matching-currency gating that keeps this from firing
+        // on rounding noise or a currency-mix change. Migration-free, same
+        // as every other addition to this list above.
+        "spend_increased",
       ],
     }).notNull(),
     title: text("title").notNull(),

@@ -64,6 +64,8 @@ export const getSession = cache(async (): Promise<{ user: SafeUser } | null> => 
       weeklyDigestEnabled: users.weeklyDigestEnabled,
       renewalReminderLeadDays: users.renewalReminderLeadDays,
       lastDigestSentAt: users.lastDigestSentAt,
+      lastDigestMonthlyCents: users.lastDigestMonthlyCents,
+      lastDigestCurrency: users.lastDigestCurrency,
       createdAt: users.createdAt,
       updatedAt: users.updatedAt,
       expiresAt: sessions.expiresAt,

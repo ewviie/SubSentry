@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { computeWeeklyDigestSummary, isDigestWorthSending } from "./digest";
+import { computeWeeklyDigestSummary, computeMonthlyTotal, isDigestWorthSending } from "./digest";
 import type { Subscription, SubscriptionPriceHistory, Notification } from "@/lib/db/schema";
 
 let nextId = 1;
@@ -91,6 +91,7 @@ describe("computeWeeklyDigestSummary", () => {
     expect(summary.monthlyCents).toBeGreaterThan(0);
     expect(summary.currency).toBe("usd");
     expect(summary.upcomingRenewalsCount).toBe(1);
+    expect(summary.upcomingRenewalsCents).toBe(renewingSoon.amountCents);
     expect(summary.creepingCostAnnualDeltaCents).toBeGreaterThan(0);
     expect(summary.newNotificationCounts.price_increase).toBe(1);
     expect(summary.newNotificationCounts.savings_opportunity).toBe(1);
@@ -103,9 +104,26 @@ describe("computeWeeklyDigestSummary", () => {
     const summary = computeWeeklyDigestSummary([], new Map(), [], NOW);
     expect(summary.monthlyCents).toBe(0);
     expect(summary.upcomingRenewalsCount).toBe(0);
+    expect(summary.upcomingRenewalsCents).toBe(0);
     expect(summary.creepingCostAnnualDeltaCents).toBeNull();
     expect(summary.totalNewNotifications).toBe(0);
     expect(summary.topPriorityNotification).toBeNull();
+  });
+
+  it("upcomingRenewalsCents sums only the primary-currency renewals, never mixing currencies", () => {
+    const usdMajority = [
+      sub({ amountCents: 1000, currency: "usd", nextRenewalDate: "2026-09-02" }),
+      sub({ amountCents: 2000, currency: "usd", nextRenewalDate: "2026-09-03" }),
+      // A third usd sub, not renewing soon, so it counts toward `currency`
+      // (the majority) but must NOT be added to the renewal total.
+      sub({ amountCents: 999_999, currency: "usd", nextRenewalDate: "2099-01-01" }),
+    ];
+    const gbpOutlier = sub({ amountCents: 500, currency: "gbp", nextRenewalDate: "2026-09-03" });
+    const summary = computeWeeklyDigestSummary([...usdMajority, gbpOutlier], new Map(), [], NOW);
+    expect(summary.currency).toBe("usd");
+    // Only the two soon-renewing usd subscriptions count — not the
+    // far-future usd one, and not the gbp one (real spend, wrong currency).
+    expect(summary.upcomingRenewalsCents).toBe(3000);
   });
 
   it("picks the highest-impact notification within the same severity as the top priority", () => {
@@ -113,6 +131,27 @@ describe("computeWeeklyDigestSummary", () => {
     const big = notif({ type: "duplicate_subscription", severity: "warning", impactCents: 5000, title: "Big one" });
     const summary = computeWeeklyDigestSummary([], new Map(), [small, big], NOW);
     expect(summary.topPriorityNotification?.title).toBe("Big one");
+  });
+});
+
+describe("computeMonthlyTotal", () => {
+  it("sums active subscriptions' monthly-equivalent cost in the primary currency", () => {
+    const result = computeMonthlyTotal([
+      sub({ amountCents: 1000, billingCycle: "monthly", currency: "usd" }),
+      sub({ amountCents: 1200, billingCycle: "yearly", currency: "usd" }), // -> 100/mo
+    ]);
+    expect(result.currency).toBe("usd");
+    expect(result.cents).toBe(1100);
+  });
+
+  it("excludes canceled subscriptions", () => {
+    const result = computeMonthlyTotal([sub({ amountCents: 1000, status: "canceled" })]);
+    expect(result.cents).toBe(0);
+    expect(result.currency).toBeNull();
+  });
+
+  it("returns a null currency and zero cents for an empty portfolio", () => {
+    expect(computeMonthlyTotal([])).toEqual({ cents: 0, currency: null });
   });
 });
 

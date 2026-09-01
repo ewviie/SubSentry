@@ -30,6 +30,11 @@ export interface WeeklyDigestSummary {
   monthlyCents: number;
   currency: string | null;
   upcomingRenewalsCount: number;
+  // Retention pass: the brief's own canonical example ("You have $X/month in
+  // subscriptions renewing soon") — a count alone doesn't answer "should I
+  // care." Same primary-currency-only honesty as monthlyCents: 0 whenever
+  // there's nothing upcoming, never a partial cross-currency sum.
+  upcomingRenewalsCents: number;
   creepingCostAnnualDeltaCents: number | null;
   creepingCostCurrency: string | null;
   newNotificationCounts: Partial<Record<Notification["type"], number>>;
@@ -46,6 +51,19 @@ export interface WeeklyDigestSummary {
 const UPCOMING_RENEWAL_WINDOW_DAYS = 7;
 const SEVERITY_RANK: Record<Notification["severity"], number> = { warning: 1, info: 0 };
 
+// Retention pass: the one figure both computeWeeklyDigestSummary below and
+// the weekly-digest job's own "did the total change since last time" check
+// (weekly-digest-job.ts) need — extracted so both read the exact same
+// number computed the exact same way, rather than the job re-deriving its
+// own copy of "sum active subscriptions in the primary currency" alongside
+// this function's already-existing one.
+export function computeMonthlyTotal(subscriptions: Subscription[]): { cents: number; currency: string | null } {
+  const active = subscriptions.filter((s) => s.status === "active");
+  const { currency, included: primaryActive } = splitByPrimaryCurrency(active);
+  const cents = primaryActive.reduce((sum, s) => sum + monthlyCents(s.amountCents, s.billingCycle), 0);
+  return { cents, currency };
+}
+
 export function computeWeeklyDigestSummary(
   subscriptions: Subscription[],
   priceHistoryBySubscriptionId: Map<string, SubscriptionPriceHistory[]>,
@@ -53,13 +71,19 @@ export function computeWeeklyDigestSummary(
   now: Date = new Date(),
 ): WeeklyDigestSummary {
   const active = subscriptions.filter((s) => s.status === "active");
-  const { currency, included: primaryActive } = splitByPrimaryCurrency(active);
-  const monthlyTotal = primaryActive.reduce((sum, s) => sum + monthlyCents(s.amountCents, s.billingCycle), 0);
+  const { cents: monthlyTotal, currency } = computeMonthlyTotal(subscriptions);
 
-  const upcomingRenewalsCount = active.filter((s) => {
+  const upcomingActive = active.filter((s) => {
     const days = daysUntilRenewal(s);
     return days >= 0 && days <= UPCOMING_RENEWAL_WINDOW_DAYS;
-  }).length;
+  });
+  const upcomingRenewalsCount = upcomingActive.length;
+  // Same "one honest currency total" posture monthlyTotal above already
+  // uses: summed only across the upcoming subscriptions that are actually
+  // in this portfolio's primary currency, never added across currencies.
+  const upcomingRenewalsCents = upcomingActive
+    .filter((s) => s.currency === currency)
+    .reduce((sum, s) => sum + s.amountCents, 0);
 
   const creepingCost = computeCreepingCostTrailing12Months(subscriptions, priceHistoryBySubscriptionId, now);
 
@@ -76,6 +100,7 @@ export function computeWeeklyDigestSummary(
     monthlyCents: monthlyTotal,
     currency,
     upcomingRenewalsCount,
+    upcomingRenewalsCents,
     creepingCostAnnualDeltaCents: creepingCost?.annualDeltaCents ?? null,
     creepingCostCurrency: creepingCost?.currency ?? null,
     newNotificationCounts,

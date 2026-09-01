@@ -1,14 +1,58 @@
+import { createHmac, timingSafeEqual } from "crypto";
 import { and, asc, eq, isNull, lt, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
+import { appBaseUrl } from "@/lib/auth/email";
 import { listSubscriptions, getAllPriceHistoryForUser } from "./queries";
 import { computeSavingsRecommendations } from "./savings";
 import { getDismissedRecommendationIds } from "./dismissed-recommendations";
-import { computeWeeklyDigestSummary, isDigestWorthSending } from "./digest";
+import { computeWeeklyDigestSummary, computeMonthlyTotal, isDigestWorthSending } from "./digest";
 import { sendWeeklyDigestEmail } from "./notification-emails";
-import { syncNotifications, listNotificationsSince } from "@/lib/notifications/queries";
+import { syncNotifications, listNotificationsSince, insertNotifications } from "@/lib/notifications/queries";
+import { buildSpendIncreasedCandidate } from "@/lib/notifications/generate";
 import { resolveHasPaidAccess } from "@/lib/dev/plan-preview";
 import { logServerError } from "@/lib/observability/log-error";
+
+// ── Digest unsubscribe token (stateless, HMAC-signed) ───────────────────
+//
+// Same shape as renewal-reminders.ts's own unsubscribe token, deliberately
+// not shared with it (see that file's own comment on why verifyCronAuth and
+// verifyUnsubscribeToken stay separate helpers despite the similar shape):
+// a distinct purpose label ("weekly-digest-unsubscribe" vs "unsubscribe")
+// means the two tokens are cryptographically independent — a leaked digest
+// link can't be replayed against the renewal-reminders endpoint or vice
+// versa. Needed now that weeklyDigestEnabled defaults to true for new
+// signups (see schema.ts's own comment): a default-on email needs the same
+// "obvious/easy way to disable, no login required" floor renewal reminders
+// already have, not just the Settings toggle.
+function deriveDigestKey(purpose: string): Buffer | null {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return null;
+  return createHmac("sha256", secret).update(purpose).digest();
+}
+
+export function buildDigestUnsubscribeToken(userId: string): string | null {
+  const key = deriveDigestKey("weekly-digest-unsubscribe");
+  if (!key) return null;
+  return createHmac("sha256", key).update(userId).digest("hex");
+}
+
+export function verifyDigestUnsubscribeToken(userId: string, token: string): boolean {
+  const expected = buildDigestUnsubscribeToken(userId);
+  if (!expected) return false;
+  const expectedBuffer = Buffer.from(expected, "hex");
+  const actualBuffer = Buffer.from(token, "hex");
+  return expectedBuffer.length === actualBuffer.length && timingSafeEqual(expectedBuffer, actualBuffer);
+}
+
+export function buildDigestUnsubscribeUrl(userId: string): string | null {
+  const token = buildDigestUnsubscribeToken(userId);
+  if (!token) return null;
+  const url = new URL("/api/notifications/digest/unsubscribe", appBaseUrl());
+  url.searchParams.set("u", userId);
+  url.searchParams.set("t", token);
+  return url.toString();
+}
 
 // The weekly-digest cron job — see users.lastDigestSentAt's own schema
 // comment for why this is a single-column claim rather than a
@@ -36,12 +80,24 @@ export interface DigestCandidate {
   // from real notifications created since this timestamp, not re-derived
   // independently. Null on a user's first-ever digest.
   lastDigestSentAt: Date | null;
+  // Retention pass: the portfolio total as of the last digest — see
+  // users.lastDigestMonthlyCents's own schema comment. Both null on a
+  // user's first-ever digest (nothing to compare against yet).
+  lastDigestMonthlyCents: number | null;
+  lastDigestCurrency: string | null;
 }
 
 export async function findDigestCandidates(now: Date = new Date()): Promise<DigestCandidate[]> {
   const staleThreshold = new Date(now.getTime() - MIN_DAYS_BETWEEN_DIGESTS * 86_400_000);
   const rows = await db
-    .select({ userId: users.id, email: users.email, plan: users.plan, lastDigestSentAt: users.lastDigestSentAt })
+    .select({
+      userId: users.id,
+      email: users.email,
+      plan: users.plan,
+      lastDigestSentAt: users.lastDigestSentAt,
+      lastDigestMonthlyCents: users.lastDigestMonthlyCents,
+      lastDigestCurrency: users.lastDigestCurrency,
+    })
     .from(users)
     .where(
       and(
@@ -100,21 +156,51 @@ export async function runWeeklyDigestJob(now: Date = new Date()): Promise<Weekly
         dismissedRecommendationIds,
       });
 
+      // Retention pass: "your spend went up since last time" — the one
+      // comparison that needs an anchor from a PREVIOUS digest, so it's
+      // computed and (if it clears the bar) inserted here rather than inside
+      // generateNotificationCandidates above, the same "job-specific
+      // detection lives in its one owning job" posture buildUnusualChargeCandidate/
+      // buildConnectionIssueCandidate already follow in connected-account-sync-job.ts.
+      // Inserted BEFORE listNotificationsSince below so a fresh candidate
+      // this run is actually picked up by this same digest, not deferred to
+      // the next one.
+      const currentTotal = computeMonthlyTotal(subscriptions);
+      if (candidate.lastDigestMonthlyCents !== null && candidate.lastDigestCurrency !== null) {
+        const spendIncreasedCandidate = buildSpendIncreasedCandidate({
+          previousCents: candidate.lastDigestMonthlyCents,
+          previousCurrency: candidate.lastDigestCurrency,
+          currentCents: currentTotal.cents,
+          currentCurrency: currentTotal.currency ?? candidate.lastDigestCurrency,
+        });
+        if (spendIncreasedCandidate) {
+          await insertNotifications(candidate.userId, [spendIncreasedCandidate]);
+        }
+      }
+
       const since = candidate.lastDigestSentAt ?? new Date(now.getTime() - FIRST_DIGEST_LOOKBACK_DAYS * 86_400_000);
       const newNotifications = await listNotificationsSince(candidate.userId, since);
       const summary = computeWeeklyDigestSummary(subscriptions, priceHistoryBySubscriptionId, newNotifications, now);
+
+      // Same snapshot update either way (worth-sending or not) — this
+      // user's portfolio total was genuinely observed this run, so next
+      // run's comparison should anchor to it regardless of whether this run
+      // also happened to send an email. Never updated on a run that threw
+      // before reaching here (see the catch block below).
+      const snapshotUpdate = { lastDigestMonthlyCents: currentTotal.cents, lastDigestCurrency: currentTotal.currency };
 
       if (!isDigestWorthSending(summary)) {
         result.skippedEmpty++;
         // Still records the attempt (see below) — an account with nothing
         // to report this week shouldn't be re-checked again tomorrow, only
         // next week, same cadence as everyone else.
-        await db.update(users).set({ lastDigestSentAt: now }).where(eq(users.id, candidate.userId));
+        await db.update(users).set({ lastDigestSentAt: now, ...snapshotUpdate }).where(eq(users.id, candidate.userId));
         continue;
       }
 
-      await sendWeeklyDigestEmail(candidate.email, summary);
-      await db.update(users).set({ lastDigestSentAt: now }).where(eq(users.id, candidate.userId));
+      const unsubscribeUrl = buildDigestUnsubscribeUrl(candidate.userId);
+      await sendWeeklyDigestEmail(candidate.email, summary, unsubscribeUrl);
+      await db.update(users).set({ lastDigestSentAt: now, ...snapshotUpdate }).where(eq(users.id, candidate.userId));
       result.sent++;
     } catch (error) {
       result.failed++;

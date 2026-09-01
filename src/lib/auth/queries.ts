@@ -29,6 +29,10 @@ export async function setPriceAlertEmailsEnabled(userId: string, enabled: boolea
     .where(eq(users.id, userId));
 }
 
+// Retention pass: also the target of the digest's own one-click unsubscribe
+// link (api/notifications/digest/unsubscribe, HMAC-token-authenticated —
+// see weekly-digest-job.ts's verifyDigestUnsubscribeToken), same
+// shared-write reasoning setRenewalRemindersEnabled's own comment documents.
 export async function setWeeklyDigestEnabled(userId: string, enabled: boolean): Promise<void> {
   await db
     .update(users)

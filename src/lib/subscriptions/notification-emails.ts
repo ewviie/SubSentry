@@ -110,7 +110,11 @@ export async function sendPriceIncreaseEmail(params: {
 // routine-but-useful context (upcoming renewals, creeping cost), then the
 // one clear top action. Every line reads a real count/figure already on
 // `summary`; nothing here invents copy for a zero count.
-function buildDigestLines(summary: WeeklyDigestSummary, dashboardUrl: string): { html: string; text: string } {
+function buildDigestLines(
+  summary: WeeklyDigestSummary,
+  dashboardUrl: string,
+  unsubscribeUrl: string | null,
+): { html: string; text: string } {
   const rows: { html: string; text: string }[] = [];
   const counts = summary.newNotificationCounts;
 
@@ -120,9 +124,28 @@ function buildDigestLines(summary: WeeklyDigestSummary, dashboardUrl: string): {
     rows.push({ html: line, text: line });
   }
 
+  // Retention pass: same "flag it here, exact figure lives in 'Most worth
+  // reviewing' below" convention unusualCharges already uses — this line
+  // never invents its own copy of the dollar delta (buildDigestLines only
+  // has the count, not the notification's own title/body), so it either
+  // wins the topPriority slot below (real title/body, warning severity, a
+  // genuine dollar impact) or the reader clicks through to the dashboard.
+  if ((counts.spend_increased ?? 0) > 0) {
+    const line = "Your recurring spending went up since your last digest";
+    rows.push({ html: `<strong>${line}</strong>`, text: line });
+  }
+
   if (summary.upcomingRenewalsCount > 0) {
     const n = summary.upcomingRenewalsCount;
-    const line = `${n} renewal${n === 1 ? "" : "s"} coming up in the next 7 days`;
+    // Retention pass: the dollar figure, not just the count — "$X/month
+    // renewing soon" is what actually answers "should I care," the same
+    // reasoning digest.ts's own upcomingRenewalsCents comment documents.
+    // Only appended when there's a real total to show (summary.currency is
+    // null for an empty/all-canceled portfolio, which upcomingRenewalsCount
+    // being > 0 already rules out here, but the check stays explicit rather
+    // than assumed).
+    const amount = summary.currency ? ` (${formatCents(summary.upcomingRenewalsCents, summary.currency)})` : "";
+    const line = `${n} renewal${n === 1 ? "" : "s"} coming up in the next 7 days${amount}`;
     rows.push({ html: line, text: line });
   }
 
@@ -191,6 +214,7 @@ function buildDigestLines(summary: WeeklyDigestSummary, dashboardUrl: string): {
     <p style="margin:0;font-size:13px;line-height:1.5;color:#71717a;">
       Questions? <a href="mailto:${SUPPORT_EMAIL}" style="color:${EMERALD};">Contact support</a>. Turn this off anytime
       in Settings → Notifications.
+      ${unsubscribeUrl ? `<br /><a href="${unsubscribeUrl}" style="color:${EMERALD};">Unsubscribe from the weekly digest</a>.` : ""}
     </p>
   </div>
 </div>`.trim();
@@ -204,6 +228,7 @@ function buildDigestLines(summary: WeeklyDigestSummary, dashboardUrl: string): {
     `Open dashboard: ${dashboardUrl}`,
     "",
     `Questions? Contact support (${SUPPORT_EMAIL}). Turn this off anytime in Settings -> Notifications.`,
+    unsubscribeUrl ? `Unsubscribe from the weekly digest: ${unsubscribeUrl}` : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -211,9 +236,9 @@ function buildDigestLines(summary: WeeklyDigestSummary, dashboardUrl: string): {
   return { html, text };
 }
 
-export async function sendWeeklyDigestEmail(to: string, summary: WeeklyDigestSummary): Promise<void> {
+export async function sendWeeklyDigestEmail(to: string, summary: WeeklyDigestSummary, unsubscribeUrl: string | null): Promise<void> {
   const dashboardUrl = new URL("/dashboard", appBaseUrl()).toString();
-  const { html, text } = buildDigestLines(summary, dashboardUrl);
+  const { html, text } = buildDigestLines(summary, dashboardUrl, unsubscribeUrl);
   await sendTransactionalEmail(
     { to, subject: "Your week with SubSentry", html, text },
     "weekly-digest",

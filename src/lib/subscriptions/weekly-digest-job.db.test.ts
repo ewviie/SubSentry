@@ -18,7 +18,7 @@ vi.mock("nodemailer", () => ({
   default: { createTransport: (options: unknown) => createTransportMock(options) },
 }));
 
-const ENV_KEYS = ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM"] as const;
+const ENV_KEYS = ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM", "CRON_SECRET"] as const;
 let savedEnv: Record<string, string | undefined>;
 
 describe.skipIf(!hasDb)("weekly digest job (DB integration)", () => {
@@ -42,6 +42,7 @@ describe.skipIf(!hasDb)("weekly digest job (DB integration)", () => {
     process.env.SMTP_USER = "user@outlook.com";
     process.env.SMTP_PASSWORD = "pw";
     process.env.SMTP_FROM = "SubSentry <user@outlook.com>";
+    process.env.CRON_SECRET = "test-cron-secret";
     sendMailMock.mockReset();
     createTransportMock.mockClear();
     sendMailMock.mockResolvedValue({ messageId: "msg-1", accepted: ["x@example.com"], rejected: [] });
@@ -155,6 +156,89 @@ describe.skipIf(!hasDb)("weekly digest job (DB integration)", () => {
 
     const [refreshed] = await db.select().from(schema.users).where(eq(schema.users.id, user.id));
     expect(refreshed.lastDigestSentAt).not.toBeNull();
+  });
+
+  it("first-ever digest sets the monthly-cost snapshot but generates no spend_increased notification (nothing to compare against yet)", async () => {
+    const user = await makeUser(); // lastDigestMonthlyCents/lastDigestCurrency both null
+    await queries.createSubscription(user.id, {
+      name: "Netflix",
+      amount: "15.00",
+      currency: "usd",
+      billingCycle: "monthly",
+      category: "streaming",
+      nextRenewalDate: "2099-01-01",
+      status: "active",
+    });
+
+    await digestJob.runWeeklyDigestJob();
+
+    const [refreshed] = await db.select().from(schema.users).where(eq(schema.users.id, user.id));
+    expect(refreshed.lastDigestMonthlyCents).toBe(1500);
+    expect(refreshed.lastDigestCurrency).toBe("usd");
+
+    const notifs = await db.select().from(schema.notifications).where(eq(schema.notifications.userId, user.id));
+    expect(notifs.some((n) => n.type === "spend_increased")).toBe(false);
+  });
+
+  it("generates a real spend_increased notification and sends when the portfolio total genuinely grew since the last digest", async () => {
+    const user = await makeUser({ lastDigestMonthlyCents: 1500, lastDigestCurrency: "usd", lastDigestSentAt: new Date(Date.now() - 8 * 86_400_000) });
+    await queries.createSubscription(user.id, {
+      name: "Netflix",
+      amount: "15.00",
+      currency: "usd",
+      billingCycle: "monthly",
+      category: "streaming",
+      nextRenewalDate: "2099-01-01",
+      status: "active",
+    });
+    await queries.createSubscription(user.id, {
+      name: "New Gym Membership",
+      amount: "40.00",
+      currency: "usd",
+      billingCycle: "monthly",
+      category: "other",
+      nextRenewalDate: "2099-01-01",
+      status: "active",
+    });
+
+    const result = await digestJob.runWeeklyDigestJob();
+    expect(result.sent).toBeGreaterThanOrEqual(1);
+    expect(sendMailMock).toHaveBeenCalled();
+
+    const notifs = await db.select().from(schema.notifications).where(eq(schema.notifications.userId, user.id));
+    const spendIncreased = notifs.find((n) => n.type === "spend_increased");
+    expect(spendIncreased).toBeDefined();
+    expect(spendIncreased?.impactCents).toBe(4000); // 5500 (new total) - 1500 (previous)
+
+    const [refreshed] = await db.select().from(schema.users).where(eq(schema.users.id, user.id));
+    expect(refreshed.lastDigestMonthlyCents).toBe(5500);
+    expect(refreshed.lastDigestCurrency).toBe("usd");
+
+    // The digest email itself carries a real unsubscribe link now that
+    // weeklyDigestEnabled defaults to true — not just a Settings pointer.
+    const emailArgs = sendMailMock.mock.calls.at(-1)?.[0];
+    expect(emailArgs?.html).toContain("/api/notifications/digest/unsubscribe");
+  });
+
+  it("does not generate a spend_increased notification when the total didn't meaningfully grow", async () => {
+    const user = await makeUser({ lastDigestMonthlyCents: 1500, lastDigestCurrency: "usd", lastDigestSentAt: new Date(Date.now() - 8 * 86_400_000) });
+    await queries.createSubscription(user.id, {
+      name: "Netflix",
+      amount: "15.00",
+      currency: "usd",
+      billingCycle: "monthly",
+      category: "streaming",
+      nextRenewalDate: "2099-01-01",
+      status: "active",
+    });
+
+    await digestJob.runWeeklyDigestJob();
+
+    const notifs = await db.select().from(schema.notifications).where(eq(schema.notifications.userId, user.id));
+    expect(notifs.some((n) => n.type === "spend_increased")).toBe(false);
+
+    const [refreshed] = await db.select().from(schema.users).where(eq(schema.users.id, user.id));
+    expect(refreshed.lastDigestMonthlyCents).toBe(1500);
   });
 
   it("does not advance lastDigestSentAt when the send fails", async () => {

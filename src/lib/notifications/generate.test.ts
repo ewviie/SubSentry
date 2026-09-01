@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { generateNotificationCandidates, buildPriceChangeReviewCandidate, buildConnectionIssueCandidate } from "./generate";
+import {
+  generateNotificationCandidates,
+  buildPriceChangeReviewCandidate,
+  buildConnectionIssueCandidate,
+  buildSpendIncreasedCandidate,
+} from "./generate";
 import { computeSavingsRecommendations } from "@/lib/subscriptions/savings";
 import type { Subscription, SubscriptionPriceHistory } from "@/lib/db/schema";
 import type { PriceChangeProposal } from "@/lib/imports/types";
@@ -404,5 +409,71 @@ describe("buildConnectionIssueCandidate", () => {
     const candidate = buildConnectionIssueCandidate({ connectionId: "conn-1", provider: "gmail", reason: "decrypt_error" });
     expect(candidate.impactCents).toBeNull();
     expect(candidate.currency).toBeNull();
+  });
+});
+
+describe("buildSpendIncreasedCandidate", () => {
+  it("produces a warning notification with the real delta when spend genuinely increased", () => {
+    const candidate = buildSpendIncreasedCandidate({
+      previousCents: 5000,
+      previousCurrency: "usd",
+      currentCents: 6000,
+      currentCurrency: "usd",
+    });
+    expect(candidate).not.toBeNull();
+    expect(candidate!.type).toBe("spend_increased");
+    expect(candidate!.severity).toBe("warning");
+    expect(candidate!.impactCents).toBe(1000);
+    expect(candidate!.currency).toBe("usd");
+    expect(candidate!.title).toContain("$10.00 more");
+    expect(candidate!.subscriptionId).toBeNull();
+  });
+
+  it("returns null for a decrease — good news is never surfaced as a watchdog interrupt", () => {
+    const candidate = buildSpendIncreasedCandidate({
+      previousCents: 6000,
+      previousCurrency: "usd",
+      currentCents: 5000,
+      currentCurrency: "usd",
+    });
+    expect(candidate).toBeNull();
+  });
+
+  it("returns null for an unchanged total", () => {
+    const candidate = buildSpendIncreasedCandidate({
+      previousCents: 5000,
+      previousCurrency: "usd",
+      currentCents: 5000,
+      currentCurrency: "usd",
+    });
+    expect(candidate).toBeNull();
+  });
+
+  it("returns null for a sub-threshold increase (rounding noise, not real creep)", () => {
+    const candidate = buildSpendIncreasedCandidate({
+      previousCents: 5000,
+      previousCurrency: "usd",
+      currentCents: 5010, // 10 cents — below the $0.50 floor
+      currentCurrency: "usd",
+    });
+    expect(candidate).toBeNull();
+  });
+
+  it("returns null when the primary currency changed between digests — never compares across currencies", () => {
+    const candidate = buildSpendIncreasedCandidate({
+      previousCents: 5000,
+      previousCurrency: "usd",
+      currentCents: 500_000, // would look like a huge increase if compared naively
+      currentCurrency: "gbp",
+    });
+    expect(candidate).toBeNull();
+  });
+
+  it("dedupeKey is tied to the exact new total — the same total re-detected next week is a harmless no-op", () => {
+    const a = buildSpendIncreasedCandidate({ previousCents: 5000, previousCurrency: "usd", currentCents: 6000, currentCurrency: "usd" });
+    const b = buildSpendIncreasedCandidate({ previousCents: 5500, previousCurrency: "usd", currentCents: 6000, currentCurrency: "usd" });
+    const c = buildSpendIncreasedCandidate({ previousCents: 5000, previousCurrency: "usd", currentCents: 7000, currentCurrency: "usd" });
+    expect(a!.dedupeKey).toBe(b!.dedupeKey); // same resulting total either way
+    expect(a!.dedupeKey).not.toBe(c!.dedupeKey); // a genuinely different total
   });
 });
