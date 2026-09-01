@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { bankConnections, type BankConnection } from "@/lib/db/schema";
 import { encryptToken, decryptToken } from "@/lib/security/token-encryption";
@@ -96,6 +96,27 @@ export async function updateBankConnectionTokensIfUnchanged(
     .where(and(eq(bankConnections.id, id), eq(bankConnections.accessTokenEncrypted, previousAccessTokenEncrypted)))
     .returning({ id: bankConnections.id });
   return result.length > 0;
+}
+
+// Watchdog phase: the cross-user candidate query for the automatic sync
+// cron — same "bounded per-run scan, fair rotation via nulls-first oldest-
+// synced ordering" shape weekly-digest-job.ts's own findDigestCandidates
+// already established for the digest cron. Every other query in this file
+// is scoped to one caller's own userId (session-authenticated interactive
+// routes); this is the one legitimate cross-user read, and it belongs here
+// (not duplicated in the sync job) since it's this table's own query.
+const SYNC_CANDIDATES_PER_RUN = 200;
+
+export async function listBankConnectionsForSync(limit = SYNC_CANDIDATES_PER_RUN): Promise<BankConnection[]> {
+  return db
+    .select()
+    .from(bankConnections)
+    .orderBy(sql`${bankConnections.lastSyncedAt} asc nulls first`, asc(bankConnections.id))
+    .limit(limit);
+}
+
+export async function markBankConnectionSynced(id: string, syncedAt: Date = new Date()): Promise<void> {
+  await db.update(bankConnections).set({ lastSyncedAt: syncedAt }).where(eq(bankConnections.id, id));
 }
 
 export function decryptAccessToken(connection: BankConnection): string {

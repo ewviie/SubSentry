@@ -14,6 +14,7 @@ export function sub(overrides: Partial<Subscription>): Subscription {
     status: "active",
     notes: null,
     source: "manual",
+    lastReviewedAt: null,
     createdAt: new Date("2025-01-01T00:00:00Z"),
     updatedAt: new Date("2025-01-01T00:00:00Z"),
     ...overrides,

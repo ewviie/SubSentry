@@ -45,6 +45,8 @@ export function OverviewPanel({
   potentialYearlySavingsCents,
   duplicateInsights,
   healthScore,
+  creepingCostAnnualDeltaCents,
+  creepingCostCurrency,
 }: {
   monthlyTotalCents: number;
   annualTotalCents: number;
@@ -64,6 +66,14 @@ export function OverviewPanel({
   potentialYearlySavingsCents: number;
   duplicateInsights: ComputedInsight[];
   healthScore: HealthScoreResult | null;
+  // Watchdog phase — "creeping cost": real annualDeltaCents summed across
+  // every genuine price increase in the trailing 12 months (see
+  // price-history.ts's computeCreepingCostTrailing12Months). Null (not 0)
+  // whenever there's nothing to honestly report — no fabricated "$0.00"
+  // line implying "we checked and nothing happened" when the real answer
+  // might just be "not enough price history exists yet."
+  creepingCostAnnualDeltaCents: number | null;
+  creepingCostCurrency: string | null;
 }) {
   const hasSavings = potentialYearlySavingsCents > 0;
   const firstDuplicateSubscriptionId = duplicateInsights[0]?.subscriptionIds[1];
@@ -98,6 +108,17 @@ export function OverviewPanel({
                 <p className="mt-1 text-xs text-muted-foreground">
                   {otherCurrencyActiveCount} more active subscription{otherCurrencyActiveCount === 1 ? "" : "s"} in a
                   different currency, not included above.
+                </p>
+              ) : null}
+              {/* Watchdog phase: "creeping cost" — a supplementary line, not
+                  its own zone, so this stays additive rather than a
+                  redesign of an already-deliberately-composed panel. Only
+                  ever shown when real price-history data actually supports
+                  it (see the prop's own comment) — silent otherwise, never
+                  a fabricated "$0" implying nothing happened. */}
+              {creepingCostAnnualDeltaCents !== null && creepingCostCurrency ? (
+                <p className="mt-1 text-xs text-destructive">
+                  +{formatCents(creepingCostAnnualDeltaCents, creepingCostCurrency)}/yr from price increases in the last 12 months
                 </p>
               ) : null}
             </div>

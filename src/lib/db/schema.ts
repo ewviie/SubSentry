@@ -47,9 +47,46 @@ export const users = pgTable("users", {
   // conventionally default renewal reminders on). The real containment is
   // the per-run cap + unsubscribe link, not this default.
   renewalRemindersEnabled: boolean("renewal_reminders_enabled").notNull().default(true),
+  // Notification preferences (product-value pass). Two different defaults
+  // on purpose: priceAlertEmailsEnabled defaults true, same "opt-out, not
+  // opt-in" convention renewalRemindersEnabled already uses — a price going
+  // up is exactly the kind of thing a subscription tracker exists to catch,
+  // so it should reach an inbox by default the same way a renewal heads-up
+  // already does. weeklyDigestEnabled defaults FALSE: this is a genuinely
+  // new, recurring email a user hasn't implicitly agreed to just by signing
+  // up (unlike the other two, which fire only around a real event), so it
+  // starts opt-in rather than silently enrolling every existing account in
+  // a new weekly email the moment this ships.
+  priceAlertEmailsEnabled: boolean("price_alert_emails_enabled").notNull().default(true),
+  weeklyDigestEnabled: boolean("weekly_digest_enabled").notNull().default(false),
+  // How many days before a renewal the reminder email (renewal-reminders.ts)
+  // should fire — replaces the previously-fixed REMINDER_WINDOW_MAX_DAYS=3
+  // for the *lead time* a user sees, while the underlying claim/send job
+  // still only ever sends one email per renewal event (see renewal_reminders'
+  // own schema comment). Constrained to a short curated list (not free
+  // integer input) via the check constraint below and subscriptionInputSchema-
+  // style Zod validation at the write path — same "the app already validated
+  // this by construction" posture other enum-shaped text columns document
+  // in the check constraints already on this table.
+  renewalReminderLeadDays: integer("renewal_reminder_lead_days").notNull().default(3),
+  // Tracks the weekly-digest cron job's own "have I already sent this
+  // user's digest this week" state — the same reason renewalReminders got
+  // its own table rather than trusting the cron's schedule alone: a
+  // manually re-triggered run, a retried request, or a schedule that fires
+  // twice in one calendar week must never double-send. Unlike
+  // renewal_reminders (one row per renewal *event*, since a subscription
+  // can have many), a digest is a per-user, recurring, dateless fact — "the
+  // last time this user's digest went out" — so a single nullable
+  // timestamp column on users is the right shape, not a whole new table.
+  lastDigestSentAt: timestamp("last_digest_sent_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => [
+  check(
+    "users_renewal_reminder_lead_days_valid",
+    sql`${table.renewalReminderLeadDays} in (1, 3, 7, 14, 30)`,
+  ),
+]);
 
 export const sessions = pgTable(
   "sessions",
@@ -100,6 +137,23 @@ export const subscriptions = pgTable(
     source: text("source", { enum: SUBSCRIPTION_SOURCES })
       .notNull()
       .default("manual"),
+    // Product-value pass: "when did a human last actually look at this
+    // subscription's own page." Null for every subscription that existed
+    // before this column shipped and for one nobody has opened since — no
+    // fabricated backfill, same posture subscriptionPriceHistory's own
+    // comment documents for why that table doesn't invent history either.
+    // Deliberately NOT reusing updatedAt for this: updatedAt already moves
+    // on any write to this row, including ones a human never looked at (an
+    // import-confirmed price reconciliation, a future automated sync) — see
+    // filters.ts's own comment on why this app is otherwise careful not to
+    // introduce a persisted "reviewed" flag that could silently go stale or
+    // misreport what's actually true. This column avoids that trap by only
+    // ever being set from one real, deliberate signal: a GET of this
+    // subscription's own detail page (see subscriptions/[id]/page.tsx),
+    // which is the one page in this app whose entire purpose is reviewing a
+    // single subscription — not a passive dashboard glance, not a
+    // system-driven write.
+    lastReviewedAt: timestamp("last_reviewed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -247,11 +301,20 @@ export const bankConnections = pgTable(
     // its provider never populates these two columns.
     refreshTokenEncrypted: text("refresh_token_encrypted"),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
+    // Watchdog phase: mirrors emailConnections' own lastSyncedAt (see that
+    // column's comment) — distinct from updatedAt (which also moves on a
+    // token refresh). Drives the sync cron's own candidate ordering
+    // (oldest/never-synced first, nulls-first), the same fair-rotation
+    // reasoning weekly-digest-job.ts's own findDigestCandidates already
+    // documents: without this, a bounded per-run cap would always process
+    // the same connections first forever once account count exceeds it.
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index("bank_connections_user_idx").on(table.userId),
+    index("bank_connections_last_synced_idx").on(table.lastSyncedAt),
     // Scoped by userId, not just (provider, providerItemId) — the invariant
     // is "this user hasn't already linked this institution," not "no user
     // in the system has ever linked this exact id." A global-only unique
@@ -523,6 +586,94 @@ export const dismissedSavingsRecommendations = pgTable(
   ],
 );
 
+// Product-value pass: the persistent Notification/Intelligence Center. Every
+// row here is a real, already-detected conclusion this app can back up —
+// nothing is generated by this table's own write path; it only ever
+// persists what lib/notifications/generate.ts computed from data that's
+// already real (price history, savings recommendations, renewal dates,
+// review timestamps — see that file's own header comment for the full
+// "never fabricate" posture this mirrors from savings.ts/insights.ts).
+//
+// dedupeKey is what makes generation idempotent and spam-free: each
+// generator builds a key from the real event's own identity (e.g.
+// `price_increase:<subscriptionId>:<observedAtIso>`, mirroring
+// subscriptionPriceHistory's own row identity), so re-running generation on
+// every dashboard/notifications page load — the same "compute on read"
+// posture insights.ts/savings.ts already use — can never insert the same
+// real event twice. The unique index below is what makes that an atomic
+// onConflictDoNothing rather than a read-then-write race.
+//
+// subscriptionId is nullable with onDelete "set null" (not "cascade", unlike
+// every other subscriptions FK in this file): a notification is a historical
+// fact ("Adobe's price went up on this date") that stays true and worth
+// keeping in a user's own notification history even after the underlying
+// subscription is later deleted — only the deep link stops resolving, which
+// the UI handles by just not rendering a broken link, not by losing the
+// notification.
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    type: text("type", {
+      enum: [
+        "price_increase",
+        "upcoming_renewal",
+        "stale_subscription",
+        "unusual_charge",
+        "savings_opportunity",
+        "duplicate_subscription",
+        // Watchdog phase: an active subscription whose nextRenewalDate has
+        // passed without the date being updated — the one renewal-adjacent
+        // case actually worth an interrupt (see this file's own generate.ts
+        // comment on why plain upcoming renewals no longer generate a
+        // notification at all: they belong to the calendar/dashboard/digest,
+        // not a feed). "upcoming_renewal" is kept in this enum, unused going
+        // forward, rather than removed — this column has no DB check
+        // constraint (see the impactCents check below for the one that does
+        // exist), so dropping a value has no migration to make it safe
+        // anyway, and any historical row already written with it stays
+        // valid to read.
+        "renewal_lapsed",
+      ],
+    }).notNull(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    severity: text("severity", { enum: ["info", "warning"] }).notNull().default("info"),
+    // Real dollar figure behind this notification where one exists (a price
+    // increase's annual delta, a savings recommendation's impact) — null,
+    // not 0, for the types that genuinely have no dollar figure to show
+    // (stale_subscription), same "null is an honest gap, not a fabricated
+    // number" rule savings.ts's SavingsTease already follows.
+    impactCents: integer("impact_cents"),
+    currency: text("currency"),
+    subscriptionId: uuid("subscription_id").references(() => subscriptions.id, { onDelete: "set null" }),
+    // The deep-link path the UI should navigate to on click — e.g.
+    // "/subscriptions/{id}" or "/savings". A plain string, not reconstructed
+    // from subscriptionId at read time, so a notification whose subscription
+    // was since deleted still remembers where it used to point (and the UI
+    // can choose not to render it as a link once the subscription is gone,
+    // rather than guessing).
+    actionHref: text("action_href"),
+    dedupeKey: text("dedupe_key").notNull(),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("notifications_user_dedupe_idx").on(table.userId, table.dedupeKey),
+    index("notifications_user_created_idx").on(table.userId, table.createdAt),
+    // Partial, unread-only — same "keep the hot-path index small" reasoning
+    // subscriptions_active_renewal_idx already documents on itself: the
+    // unread count/list is read on every page load (it drives the bell
+    // badge), while read notifications, the overwhelming majority over
+    // time, never need to be found by this query again.
+    index("notifications_user_unread_idx").on(table.userId).where(sql`${table.readAt} is null`),
+    check("notifications_impact_cents_non_negative", sql`${table.impactCents} is null or ${table.impactCents} >= 0`),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
@@ -542,3 +693,5 @@ export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 export type SubscriptionPriceHistory = typeof subscriptionPriceHistory.$inferSelect;
 export type NewSubscriptionPriceHistory = typeof subscriptionPriceHistory.$inferInsert;
 export type DismissedSavingsRecommendation = typeof dismissedSavingsRecommendations.$inferSelect;
+export type Notification = typeof notifications.$inferSelect;
+export type NewNotification = typeof notifications.$inferInsert;

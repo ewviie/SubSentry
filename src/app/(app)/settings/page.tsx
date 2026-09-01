@@ -15,6 +15,8 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { EditNameForm } from "@/components/settings/edit-name-form";
 import { RenewalReminderToggle } from "@/components/settings/renewal-reminder-toggle";
+import { RenewalLeadDaysSelect } from "@/components/settings/renewal-lead-days-select";
+import { NotificationPreferenceToggle } from "@/components/settings/notification-preference-toggle";
 import { ManageBillingButton } from "@/components/billing/manage-billing-button";
 import { ConnectedAccountRow } from "@/components/settings/connected-account-row";
 import { DeleteAccountCard } from "@/components/settings/delete-account-card";
@@ -85,11 +87,6 @@ export default async function SettingsPage() {
       </div>
 
       <StaggerSection className="mt-6 space-y-5" staggerChildren={0.06}>
-        {/* Notifications folded into Account rather than its own full card:
-            a whole card's worth of header/title/description chrome spent
-            on a single toggle read as more "settings page" than the one
-            line of actual content underneath it warranted. Same section,
-            a divider instead of a second card border. */}
         <MotionCard>
           <Card className="shadow-elevation-low">
             <CardHeader>
@@ -108,8 +105,39 @@ export default async function SettingsPage() {
                 <span className="truncate" title={user.email}>{user.email}</span>
               </div>
             </CardContent>
-            <CardContent className="border-t border-border pt-4">
+          </Card>
+        </MotionCard>
+
+        {/* Product-value pass: this used to be one checkbox folded into the
+            Account card above ("a whole card's worth of chrome for one line
+            of content"). It's genuinely four independent controls now
+            (renewal reminders + their lead time, price-alert emails, the
+            weekly digest) — enough to earn its own card the same way Plan &
+            billing already has one, rather than keep stretching Account's
+            own rationale past the point it was actually true. */}
+        <MotionCard>
+          <Card className="shadow-elevation-low">
+            <CardHeader>
+              <CardTitle>Notifications</CardTitle>
+              <CardDescription>What SubSentry emails you about, and how far ahead.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4 text-sm">
               <RenewalReminderToggle initialEnabled={user.renewalRemindersEnabled} />
+              <RenewalLeadDaysSelect initialValue={user.renewalReminderLeadDays} />
+            </CardContent>
+            <CardContent className="space-y-4 border-t border-border pt-4 text-sm">
+              <NotificationPreferenceToggle
+                field="priceAlertEmailsEnabled"
+                label="Price increase emails"
+                description="Get an email when a tracked subscription's price genuinely goes up."
+                initialEnabled={user.priceAlertEmailsEnabled}
+              />
+              <NotificationPreferenceToggle
+                field="weeklyDigestEnabled"
+                label="Weekly digest"
+                description="A short weekly summary: spend, renewals, price changes, and savings found."
+                initialEnabled={user.weeklyDigestEnabled}
+              />
             </CardContent>
           </Card>
         </MotionCard>

@@ -1,0 +1,2 @@
+ALTER TABLE "bank_connections" ADD COLUMN "last_synced_at" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "bank_connections_last_synced_idx" ON "bank_connections" USING btree ("last_synced_at");

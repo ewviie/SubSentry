@@ -2,8 +2,16 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "crons": [
     {
+      "path": "/api/cron/sync-connected-accounts",
+      "schedule": "0 6 * * *"
+    },
+    {
       "path": "/api/cron/renewal-reminders",
       "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/cron/weekly-digest",
+      "schedule": "0 13 * * 1"
     }
   ]
 }

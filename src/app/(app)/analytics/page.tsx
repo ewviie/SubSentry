@@ -1,5 +1,5 @@
 import { requireUser } from "@/lib/auth/session";
-import { listSubscriptions } from "@/lib/subscriptions/queries";
+import { listSubscriptions, getAllPriceHistoryForUser } from "@/lib/subscriptions/queries";
 import {
   computeSpendBySource,
   computeSpendByBillingCycle,
@@ -7,6 +7,8 @@ import {
   computeRenewalsTimeline,
   computeTopMerchantsBySpend,
 } from "@/lib/subscriptions/analytics";
+import { computePortfolioPriceChanges, sumPortfolioPriceChanges, computeCreepingCostTrailing12Months } from "@/lib/subscriptions/price-history";
+import { PriceChangesCard } from "@/components/analytics/price-changes-card";
 import { splitByPrimaryCurrency } from "@/lib/subscriptions/money";
 import { getUpgradeUrl } from "@/lib/billing/plan";
 import { resolveHasPaidAccess } from "@/lib/dev/plan-preview";
@@ -26,7 +28,10 @@ import { BarChart3 } from "lucide-react";
 
 export default async function AnalyticsPage() {
   const user = await requireUser();
-  const subscriptions = await listSubscriptions(user.id);
+  const [subscriptions, priceHistoryBySubscriptionId] = await Promise.all([
+    listSubscriptions(user.id),
+    getAllPriceHistoryForUser(user.id),
+  ]);
   // Monetization pass, section 6: everything above this point (spend
   // growth, upcoming renewals, top subscriptions, spend by source, billing
   // cycles) stays exactly as free as it already was — "basic spend
@@ -64,6 +69,9 @@ export default async function AnalyticsPage() {
   const growth = computeGrowthOverTime(subscriptions);
   const renewals = computeRenewalsTimeline(subscriptions);
   const topMerchants = computeTopMerchantsBySpend(subscriptions);
+  const priceChangeEntries = computePortfolioPriceChanges(subscriptions, priceHistoryBySubscriptionId);
+  const priceChangeTotal = sumPortfolioPriceChanges(priceChangeEntries);
+  const creepingCost = computeCreepingCostTrailing12Months(subscriptions, priceHistoryBySubscriptionId);
   // Each compute* above already restricts its own sums to this same primary
   // currency internally (see analytics.ts) — this is just the label for the
   // charts below, computed the same way (majority-by-count active
@@ -91,6 +99,14 @@ export default async function AnalyticsPage() {
             <GrowthChart points={growth} currency={currency ?? undefined} />
           </CardContent>
         </Card>
+      </MotionCard>
+
+      {/* Free, not gated behind isPremium: same "factual alert, not deep
+          intelligence" reasoning notifications/generate.ts's own
+          price_increase type documents — this is a real change that
+          already happened, not an optimization recommendation. */}
+      <MotionCard>
+        <PriceChangesCard entries={priceChangeEntries} total={priceChangeTotal} creepingCost={creepingCost} />
       </MotionCard>
 
       <StaggerSection className="grid gap-4 lg:grid-cols-2" staggerChildren={0.07}>

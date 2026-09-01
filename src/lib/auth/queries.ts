@@ -21,3 +21,28 @@ export async function setRenewalRemindersEnabled(userId: string, enabled: boolea
     .set({ renewalRemindersEnabled: enabled, updatedAt: new Date() })
     .where(eq(users.id, userId));
 }
+
+export async function setPriceAlertEmailsEnabled(userId: string, enabled: boolean): Promise<void> {
+  await db
+    .update(users)
+    .set({ priceAlertEmailsEnabled: enabled, updatedAt: new Date() })
+    .where(eq(users.id, userId));
+}
+
+export async function setWeeklyDigestEnabled(userId: string, enabled: boolean): Promise<void> {
+  await db
+    .update(users)
+    .set({ weeklyDigestEnabled: enabled, updatedAt: new Date() })
+    .where(eq(users.id, userId));
+}
+
+// Validated against the same (1, 3, 7, 14, 30) set the DB check constraint
+// enforces (schema.ts) before this is ever called — see api/me/route.ts's
+// updateMeSchema — so this is defense-in-depth, not the first line of
+// validation.
+export async function setRenewalReminderLeadDays(userId: string, days: number): Promise<void> {
+  await db
+    .update(users)
+    .set({ renewalReminderLeadDays: days, updatedAt: new Date() })
+    .where(eq(users.id, userId));
+}

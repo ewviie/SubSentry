@@ -1,6 +1,7 @@
 import type { Subscription } from "@/lib/db/schema";
 import { monthlyCents, annualCents, formatCents, splitByPrimaryCurrency } from "./money";
 import { forEachLikelyDuplicatePair, computeFunctionalOverlapGroups, findSmallSubscriptionsCluster, smallSubscriptionsClusterTitle } from "./insights";
+import { findStaleSubscriptions } from "./staleness";
 
 // A dedicated, actionable savings engine — distinct from insights.ts's
 // dashboard-summary cards (which surface one headline number + a link to
@@ -15,12 +16,13 @@ import { forEachLikelyDuplicatePair, computeFunctionalOverlapGroups, findSmallSu
 // Same "deterministic, not fabricated" rule insights.ts already follows:
 // every dollar figure here comes from a real pairwise duplicate match, never
 // a guessed "you could probably save X%" estimate with no data behind it.
-export type SavingsRecommendationType = "duplicate" | "functional_overlap" | "small_subscriptions";
+export type SavingsRecommendationType = "duplicate" | "functional_overlap" | "small_subscriptions" | "stale";
 
 // Phase 8: "confirmed" is deterministic name-match evidence (the only type
 // this file ever credits with a real monthlySavingsCents); "review" means
 // real data supports *looking into it*, not that money is provably on the
-// table (functional overlap, or several small subscriptions adding up).
+// table (functional overlap, several small subscriptions adding up, or a
+// subscription nobody has reviewed in a long time).
 // Drives getSavingsPriority below — a review-only finding can be "medium"
 // impact if the dollar amount involved is large, but never "high": that
 // label is reserved for money a cancellation would deterministically
@@ -213,6 +215,36 @@ export function computeSavingsRecommendations(
       targetSubscriptionId: priciest.id,
       involvedSubscriptionIds: smallCluster.subscriptions.map((s) => s.id),
       currency: smallCluster.currency,
+    });
+  }
+
+  // 4. Stale — never reviewed, or not reviewed in a long time (see
+  // staleness.ts's own STALE_THRESHOLD_DAYS comment). Same "review, not a
+  // proven saving" tier as functional overlap/small subscriptions: nobody
+  // having looked at a subscription in 4+ months doesn't prove it's
+  // unwanted, only that it's worth a quick "still using this?" check —
+  // this app has no usage data to claim more than that. One recommendation
+  // per stale subscription (not grouped, unlike overlap/small-subscription
+  // clusters) since each is its own independent thing to individually
+  // decide on, not a collective pattern.
+  for (const { subscription, daysSinceReviewed, everReviewed } of findStaleSubscriptions(active, new Date(`${todayIso}T00:00:00Z`).getTime())) {
+    const monthly = monthlyCents(subscription.amountCents, subscription.billingCycle);
+    recommendations.push({
+      id: `stale-${subscription.id}`,
+      type: "stale",
+      title: `Still using ${subscription.name}?`,
+      description: everReviewed
+        ? `You haven't reviewed this in ${daysSinceReviewed} days. It costs ${formatCents(monthly, subscription.currency)}/mo — worth a quick check before it renews again.`
+        : `Added ${daysSinceReviewed} days ago and never reviewed. It costs ${formatCents(monthly, subscription.currency)}/mo — worth a quick check before it renews again.`,
+      actionLabel: `Review ${subscription.name}`,
+      monthlySavingsCents: 0,
+      annualSavingsCents: 0,
+      impactCents: monthly,
+      evidenceTier: "review",
+      urgencyDays: daysUntil(subscription.nextRenewalDate, todayIso),
+      targetSubscriptionId: subscription.id,
+      involvedSubscriptionIds: [subscription.id],
+      currency: subscription.currency,
     });
   }
 

@@ -24,6 +24,7 @@ function sub(overrides: Partial<Subscription>): Subscription {
     status: "active",
     notes: null,
     source: "manual",
+    lastReviewedAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,

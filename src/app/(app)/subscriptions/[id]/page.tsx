@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { after } from "next/server";
 import { requireUser } from "@/lib/auth/session";
-import { getSubscription, listSubscriptions, getAllPriceHistoryForUser } from "@/lib/subscriptions/queries";
+import { getSubscription, listSubscriptions, getAllPriceHistoryForUser, markSubscriptionReviewed } from "@/lib/subscriptions/queries";
 import { getDismissedRecommendationIds } from "@/lib/subscriptions/dismissed-recommendations";
 import { subscriptionIdSchema } from "@/lib/subscriptions/validation";
 import { computeInsights, computeFunctionalOverlapGroups } from "@/lib/subscriptions/insights";
@@ -50,6 +51,17 @@ export default async function SubscriptionDetailPage({
     getDismissedRecommendationIds(user.id),
   ]);
   if (!subscription) notFound();
+
+  // "When did I last review it?" — see schema.ts's own comment on
+  // lastReviewedAt for why this is the one deliberate write path for that
+  // column: a real GET of this exact page, nowhere else. after() (not a
+  // plain awaited call) so recording the view never adds latency to the
+  // page the user is actually waiting on — see Next's own docs on `after`
+  // for why this is the correct tool for a side effect that shouldn't block
+  // the response. Scoped to userId + id together (same as every other
+  // write in queries.ts), so this can never touch a row this session
+  // doesn't own even if called with a stale/tampered id.
+  after(() => markSubscriptionReviewed(user.id, subscription.id));
 
   // Same possible_overlap insight the subscriptions list already badges
   // "Possible duplicate" from (see filters.ts's getDuplicateFlaggedIds),

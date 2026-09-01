@@ -11,6 +11,8 @@ import { CheckoutActivator } from "@/components/billing/checkout-activator";
 import { SidebarNav } from "@/components/app-shell/sidebar-nav";
 import { MobileNav } from "@/components/app-shell/mobile-nav";
 import { HeaderQuickActions } from "@/components/app-shell/header-quick-actions";
+import { NotificationBell } from "@/components/notifications/notification-bell";
+import { getUnreadNotificationCount } from "@/lib/notifications/queries";
 import { PageTransition } from "@/components/app-shell/page-transition";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
@@ -39,6 +41,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // hard guarantee, not a cosmetic hide.
   const devPreviewAvailable = isDevPlanPreviewAvailable();
   const devPlanPreview = devPreviewAvailable ? await getDevPlanPreview() : null;
+  // Server-rendered so the badge count is correct on first paint, not a
+  // client-side flash of zero — the bell's own dropdown list is still
+  // fetched lazily client-side only once it's actually opened (see
+  // notification-bell.tsx). Never blocks on syncNotifications: that only
+  // runs from pages that already have the fuller data it needs
+  // (dashboard, /notifications) — this is a plain read of whatever's
+  // already there.
+  const unreadNotificationCount = await getUnreadNotificationCount(user.id);
 
   return (
     <div className="min-h-svh bg-background">
@@ -59,6 +69,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             </div>
             <div className="ml-auto flex items-center gap-3 sm:gap-2">
               <HeaderQuickActions />
+              <NotificationBell initialUnreadCount={unreadNotificationCount} />
               <Link
                 href="/settings"
                 aria-label={`Account: ${user.email}`}

@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { emailConnections, type EmailConnection } from "@/lib/db/schema";
 import { encryptToken, decryptToken } from "@/lib/security/token-encryption";
@@ -96,6 +96,19 @@ export async function updateEmailConnectionTokensIfUnchanged(
 
 export async function markEmailConnectionSynced(id: string): Promise<void> {
   await db.update(emailConnections).set({ lastSyncedAt: new Date() }).where(eq(emailConnections.id, id));
+}
+
+// Watchdog phase: same cross-user, fair-rotation candidate query
+// bank-connections.ts's own listBankConnectionsForSync documents — see its
+// comment for the full reasoning.
+const SYNC_CANDIDATES_PER_RUN = 200;
+
+export async function listEmailConnectionsForSync(limit = SYNC_CANDIDATES_PER_RUN): Promise<EmailConnection[]> {
+  return db
+    .select()
+    .from(emailConnections)
+    .orderBy(sql`${emailConnections.lastSyncedAt} asc nulls first`, asc(emailConnections.id))
+    .limit(limit);
 }
 
 export function decryptAccessToken(connection: EmailConnection): string {

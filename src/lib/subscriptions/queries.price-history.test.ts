@@ -83,6 +83,80 @@ describe.skipIf(!hasDb)("subscription price history", () => {
     expect(history[1]).toMatchObject({ amountCents: 1500, source: "user_edit" });
   });
 
+  it("updateSubscription returns a priceChange for a genuine increase, with the raw before/after amounts", async () => {
+    const sub = await queries.createSubscription(userA, {
+      name: "Price Increase Email Source Test",
+      amount: "10.00",
+      currency: "usd",
+      billingCycle: "monthly",
+      category: "other",
+      nextRenewalDate: "2099-01-01",
+      status: "active",
+    });
+
+    const result = await queries.updateSubscription(userA, sub.id, "free", { amount: "15.00" });
+    expect(result.kind).toBe("updated");
+    if (result.kind !== "updated") throw new Error("expected updated");
+    expect(result.priceChange).not.toBeNull();
+    expect(result.priceChange).toMatchObject({ fromCents: 1000, toCents: 1500, currency: "usd" });
+    expect(result.priceChange!.percentChange).toBeCloseTo(50, 3);
+  });
+
+  it("updateSubscription returns a priceChange with a negative percentChange for a decrease (the API route is what decides not to email on it, not this function)", async () => {
+    const sub = await queries.createSubscription(userA, {
+      name: "Decrease Test",
+      amount: "20.00",
+      currency: "usd",
+      billingCycle: "monthly",
+      category: "other",
+      nextRenewalDate: "2099-01-01",
+      status: "active",
+    });
+
+    const decreased = await queries.updateSubscription(userA, sub.id, "free", { amount: "10.00" });
+    if (decreased.kind !== "updated") throw new Error("expected updated");
+    expect(decreased.priceChange).not.toBeNull();
+    expect(decreased.priceChange!.percentChange).toBeLessThan(0);
+  });
+
+  it("updateSubscription returns priceChange: null for an unchanged price or a sub-threshold move", async () => {
+    const sub = await queries.createSubscription(userA, {
+      name: "No Increase Email Test",
+      amount: "10.00",
+      currency: "usd",
+      billingCycle: "monthly",
+      category: "other",
+      nextRenewalDate: "2099-01-01",
+      status: "active",
+    });
+
+    const unchanged = await queries.updateSubscription(userA, sub.id, "free", { amount: "10.00" });
+    if (unchanged.kind !== "updated") throw new Error("expected updated");
+    expect(unchanged.priceChange).toBeNull();
+
+    // Below computePriceChangeIfMeaningful's 3% materiality bar — a real
+    // change, but not one worth an email.
+    const negligible = await queries.updateSubscription(userA, sub.id, "free", { amount: "10.10" });
+    if (negligible.kind !== "updated") throw new Error("expected updated");
+    expect(negligible.priceChange).toBeNull();
+  });
+
+  it("updateSubscription returns priceChange: null when the edit doesn't touch price at all", async () => {
+    const sub = await queries.createSubscription(userA, {
+      name: "Rename Only Test",
+      amount: "10.00",
+      currency: "usd",
+      billingCycle: "monthly",
+      category: "other",
+      nextRenewalDate: "2099-01-01",
+      status: "active",
+    });
+
+    const result = await queries.updateSubscription(userA, sub.id, "free", { name: "Renamed" });
+    if (result.kind !== "updated") throw new Error("expected updated");
+    expect(result.priceChange).toBeNull();
+  });
+
   it("updateSubscription with only a billing-cycle change writes a 'user_edit' row (amountCents unchanged)", async () => {
     const sub = await queries.createSubscription(userA, {
       name: "Cycle Change Test",

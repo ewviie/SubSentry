@@ -81,3 +81,12 @@ export function daysUntilRenewal(subscription: Pick<Subscription, "nextRenewalDa
 // catch-up still reads correctly to the recipient.
 export const REMINDER_WINDOW_MIN_DAYS = 1;
 export const REMINDER_WINDOW_MAX_DAYS = 3;
+
+// Product-value pass: the customizable lead-time options a user can choose
+// in Settings (users.renewalReminderLeadDays), replacing the previously-
+// fixed REMINDER_WINDOW_MAX_DAYS=3 for how far ahead the reminder email
+// fires. Mirrored exactly by the DB check constraint on that column
+// (schema.ts) — this array is the one place both the API route's Zod schema
+// and the settings UI's <select> options read from, so the three can never
+// drift out of agreement about what's a valid choice.
+export const RENEWAL_REMINDER_LEAD_DAYS_OPTIONS = [1, 3, 7, 14, 30] as const;

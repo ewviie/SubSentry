@@ -24,6 +24,7 @@ function sub(overrides: Partial<Subscription>): Subscription {
     status: "active",
     notes: null,
     source: "manual",
+    lastReviewedAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -309,6 +310,46 @@ describe("computeSavingsRecommendations", () => {
     const overlap = result.find((r) => r.type === "functional_overlap")!;
     expect(overlap.impactCents).toBeGreaterThan(dup.impactCents); // overlap really is bigger in dollars
     expect(result.indexOf(dup)).toBeLessThan(result.indexOf(overlap)); // but confirmed still ranks first
+  });
+
+  describe("stale detection", () => {
+    it("flags an active subscription never reviewed and added long ago", () => {
+      const oldCreatedAt = new Date(Date.now() - 200 * 86_400_000);
+      const result = computeSavingsRecommendations([
+        sub({ name: "Old Gym", lastReviewedAt: null, createdAt: oldCreatedAt }),
+      ]);
+      const stale = result.find((r) => r.type === "stale");
+      expect(stale).toBeDefined();
+      expect(stale!.evidenceTier).toBe("review");
+      expect(stale!.monthlySavingsCents).toBe(0); // never a proven saving
+      expect(stale!.description).toContain("never reviewed");
+    });
+
+    it("flags an active subscription reviewed long ago, with different copy than never-reviewed", () => {
+      const oldReview = new Date(Date.now() - 150 * 86_400_000);
+      const result = computeSavingsRecommendations([
+        sub({ name: "Old News", lastReviewedAt: oldReview, createdAt: new Date(Date.now() - 400 * 86_400_000) }),
+      ]);
+      const stale = result.find((r) => r.type === "stale");
+      expect(stale).toBeDefined();
+      expect(stale!.description).toContain("haven't reviewed this in");
+      expect(stale!.description).not.toContain("never reviewed");
+    });
+
+    it("does not flag a recently-reviewed subscription", () => {
+      const result = computeSavingsRecommendations([
+        sub({ name: "Fresh", lastReviewedAt: new Date(), createdAt: new Date(Date.now() - 400 * 86_400_000) }),
+      ]);
+      expect(result.some((r) => r.type === "stale")).toBe(false);
+    });
+
+    it("ignores paused/canceled subscriptions regardless of staleness", () => {
+      const oldCreatedAt = new Date(Date.now() - 400 * 86_400_000);
+      const result = computeSavingsRecommendations([
+        sub({ name: "Canceled Thing", status: "canceled", lastReviewedAt: null, createdAt: oldCreatedAt }),
+      ]);
+      expect(result.some((r) => r.type === "stale")).toBe(false);
+    });
   });
 });
 

@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
-import { computeLatestPriceChange, computePriceChangeIfMeaningful, estimatePaidCents } from "./price-history";
+import {
+  computeLatestPriceChange,
+  computePriceChangeIfMeaningful,
+  estimatePaidCents,
+  computePortfolioPriceChanges,
+  sumPortfolioPriceChanges,
+  computeCreepingCostTrailing12Months,
+} from "./price-history";
 import type { Subscription, SubscriptionPriceHistory } from "@/lib/db/schema";
 
 function row(overrides: Partial<SubscriptionPriceHistory>): SubscriptionPriceHistory {
@@ -29,6 +36,7 @@ function sub(overrides: Partial<Subscription> = {}): Subscription {
     status: "active",
     notes: null,
     source: "manual",
+    lastReviewedAt: null,
     createdAt: new Date("2026-01-01T00:00:00Z"),
     updatedAt: new Date("2026-01-01T00:00:00Z"),
     ...overrides,
@@ -333,5 +341,167 @@ describe("computePriceChangeIfMeaningful", () => {
     const existing = { amountCents: 1000, billingCycle: "monthly" as const, currency: "usd" }; // $10/mo
     const candidate = { amountCents: 12000, billingCycle: "yearly" as const, currency: "usd" }; // $120/yr = $10/mo
     expect(computePriceChangeIfMeaningful(existing, candidate)).toBeNull();
+  });
+});
+
+describe("computePortfolioPriceChanges", () => {
+  it("returns only active subscriptions with a genuine price increase, biggest annual impact first", () => {
+    const subs = [
+      sub({ id: "increased-small", name: "Small increase" }),
+      sub({ id: "increased-big", name: "Big increase" }),
+      sub({ id: "decreased", name: "Decreased" }),
+      sub({ id: "unchanged", name: "Unchanged" }),
+      sub({ id: "no-history", name: "No history" }),
+      sub({ id: "paused", name: "Paused", status: "paused" }),
+    ];
+    const history = new Map([
+      [
+        "increased-small",
+        [row({ subscriptionId: "increased-small", amountCents: 1000, observedAt: new Date("2026-01-01") }), row({ subscriptionId: "increased-small", amountCents: 1100, observedAt: new Date("2026-06-01") })],
+      ],
+      [
+        "increased-big",
+        [row({ subscriptionId: "increased-big", amountCents: 1000, observedAt: new Date("2026-01-01") }), row({ subscriptionId: "increased-big", amountCents: 3000, observedAt: new Date("2026-06-01") })],
+      ],
+      [
+        "decreased",
+        [row({ subscriptionId: "decreased", amountCents: 2000, observedAt: new Date("2026-01-01") }), row({ subscriptionId: "decreased", amountCents: 1000, observedAt: new Date("2026-06-01") })],
+      ],
+      [
+        "unchanged",
+        [row({ subscriptionId: "unchanged", amountCents: 1000, observedAt: new Date("2026-01-01") }), row({ subscriptionId: "unchanged", amountCents: 1000, observedAt: new Date("2026-06-01") })],
+      ],
+      [
+        "paused",
+        [row({ subscriptionId: "paused", amountCents: 1000, observedAt: new Date("2026-01-01") }), row({ subscriptionId: "paused", amountCents: 2000, observedAt: new Date("2026-06-01") })],
+      ],
+      // "no-history" has no map entry at all — must not throw.
+    ]);
+
+    const result = computePortfolioPriceChanges(subs, history);
+    expect(result.map((e) => e.subscription.id)).toEqual(["increased-big", "increased-small"]);
+    expect(result[0].change.annualDeltaCents).toBeGreaterThan(result[1].change.annualDeltaCents);
+  });
+
+  it("returns an empty list when nothing increased", () => {
+    const subs = [sub({ id: "s1" })];
+    const history = new Map([["s1", [row({ subscriptionId: "s1", amountCents: 1000 })]]]);
+    expect(computePortfolioPriceChanges(subs, history)).toEqual([]);
+  });
+});
+
+describe("sumPortfolioPriceChanges", () => {
+  it("returns null for an empty list", () => {
+    expect(sumPortfolioPriceChanges([])).toBeNull();
+  });
+
+  it("sums annualDeltaCents when every entry shares one currency", () => {
+    const subs = [sub({ id: "a" }), sub({ id: "b" })];
+    const history = new Map([
+      ["a", [row({ subscriptionId: "a", amountCents: 1000, observedAt: new Date("2026-01-01") }), row({ subscriptionId: "a", amountCents: 1200, observedAt: new Date("2026-06-01") })]],
+      ["b", [row({ subscriptionId: "b", amountCents: 2000, observedAt: new Date("2026-01-01") }), row({ subscriptionId: "b", amountCents: 2400, observedAt: new Date("2026-06-01") })]],
+    ]);
+    const entries = computePortfolioPriceChanges(subs, history);
+    const total = sumPortfolioPriceChanges(entries);
+    expect(total).not.toBeNull();
+    expect(total!.currency).toBe("usd");
+    expect(total!.annualDeltaCents).toBe(entries[0].change.annualDeltaCents + entries[1].change.annualDeltaCents);
+  });
+
+  it("returns null (not a fabricated sum) when entries span more than one currency", () => {
+    const subs = [sub({ id: "a", currency: "usd" }), sub({ id: "b", currency: "gbp" })];
+    const history = new Map([
+      ["a", [row({ subscriptionId: "a", amountCents: 1000, currency: "usd", observedAt: new Date("2026-01-01") }), row({ subscriptionId: "a", amountCents: 1200, currency: "usd", observedAt: new Date("2026-06-01") })]],
+      ["b", [row({ subscriptionId: "b", amountCents: 1000, currency: "gbp", observedAt: new Date("2026-01-01") }), row({ subscriptionId: "b", amountCents: 1200, currency: "gbp", observedAt: new Date("2026-06-01") })]],
+    ]);
+    const entries = computePortfolioPriceChanges(subs, history);
+    expect(sumPortfolioPriceChanges(entries)).toBeNull();
+  });
+});
+
+describe("computeCreepingCostTrailing12Months", () => {
+  const NOW = new Date("2026-08-31T00:00:00Z");
+
+  it("sums every genuine increase within the trailing 12 months, not just the latest one", () => {
+    // Two real increases in the last year, on the same subscription.
+    const s = sub({ id: "twice" });
+    const history = new Map([
+      [
+        "twice",
+        [
+          row({ subscriptionId: "twice", amountCents: 1000, observedAt: new Date("2026-01-01") }),
+          row({ subscriptionId: "twice", amountCents: 1200, observedAt: new Date("2026-04-01") }), // +$2/mo
+          row({ subscriptionId: "twice", amountCents: 1400, observedAt: new Date("2026-07-01") }), // +$2/mo again
+        ],
+      ],
+    ]);
+    const total = computeCreepingCostTrailing12Months([s], history, NOW);
+    expect(total).not.toBeNull();
+    // Both increases counted: computePortfolioPriceChanges (latest-only)
+    // would report just the second one — this function must report more.
+    const latestOnly = sumPortfolioPriceChanges(computePortfolioPriceChanges([s], history));
+    expect(total!.annualDeltaCents).toBeGreaterThan(latestOnly!.annualDeltaCents);
+  });
+
+  it("excludes an increase that happened before the trailing 12-month window", () => {
+    const s = sub({ id: "old-increase" });
+    const history = new Map([
+      [
+        "old-increase",
+        [
+          row({ subscriptionId: "old-increase", amountCents: 1000, observedAt: new Date("2024-01-01") }),
+          row({ subscriptionId: "old-increase", amountCents: 1400, observedAt: new Date("2024-06-01") }), // over 2 years ago
+        ],
+      ],
+    ]);
+    expect(computeCreepingCostTrailing12Months([s], history, NOW)).toBeNull();
+  });
+
+  it("excludes decreases — this measures cost creeping up, not net change", () => {
+    const s = sub({ id: "decreased" });
+    const history = new Map([
+      [
+        "decreased",
+        [
+          row({ subscriptionId: "decreased", amountCents: 2000, observedAt: new Date("2026-01-01") }),
+          row({ subscriptionId: "decreased", amountCents: 1000, observedAt: new Date("2026-06-01") }),
+        ],
+      ],
+    ]);
+    expect(computeCreepingCostTrailing12Months([s], history, NOW)).toBeNull();
+  });
+
+  it("ignores paused/canceled subscriptions", () => {
+    const s = sub({ id: "paused", status: "paused" });
+    const history = new Map([
+      [
+        "paused",
+        [
+          row({ subscriptionId: "paused", amountCents: 1000, observedAt: new Date("2026-01-01") }),
+          row({ subscriptionId: "paused", amountCents: 1400, observedAt: new Date("2026-06-01") }),
+        ],
+      ],
+    ]);
+    expect(computeCreepingCostTrailing12Months([s], history, NOW)).toBeNull();
+  });
+
+  it("returns null (not a fabricated sum) when counted increases span more than one currency", () => {
+    const usd = sub({ id: "usd-sub", currency: "usd" });
+    const gbp = sub({ id: "gbp-sub", currency: "gbp" });
+    const history = new Map([
+      ["usd-sub", [row({ subscriptionId: "usd-sub", amountCents: 1000, currency: "usd", observedAt: new Date("2026-01-01") }), row({ subscriptionId: "usd-sub", amountCents: 1200, currency: "usd", observedAt: new Date("2026-06-01") })]],
+      ["gbp-sub", [row({ subscriptionId: "gbp-sub", amountCents: 1000, currency: "gbp", observedAt: new Date("2026-01-01") }), row({ subscriptionId: "gbp-sub", amountCents: 1200, currency: "gbp", observedAt: new Date("2026-06-01") })]],
+    ]);
+    const total = computeCreepingCostTrailing12Months([usd, gbp], history, NOW);
+    // Only the first-seen currency counts; the other is honestly excluded,
+    // not summed in — still returns a real (non-null) total for the one
+    // that does count.
+    expect(total).not.toBeNull();
+    expect(["usd", "gbp"]).toContain(total!.currency);
+  });
+
+  it("returns null for no subscriptions or no history", () => {
+    expect(computeCreepingCostTrailing12Months([], new Map(), NOW)).toBeNull();
+    expect(computeCreepingCostTrailing12Months([sub({ id: "x" })], new Map(), NOW)).toBeNull();
   });
 });

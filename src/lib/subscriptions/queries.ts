@@ -4,6 +4,7 @@ import { subscriptions, subscriptionPriceHistory, type Subscription, type Subscr
 import { MAX_ACTIVE_SUBSCRIPTIONS } from "@/lib/billing/plan";
 import { resolveHasReachedSubscriptionLimit } from "@/lib/dev/plan-preview";
 import { amountStringToCents, monthlyCents, annualCents, splitByPrimaryCurrency } from "./money";
+import { computePriceChangeIfMeaningful } from "./price-history";
 import type { SubscriptionInput, SubscriptionUpdate } from "./validation";
 import type { SubscriptionSource } from "./source";
 
@@ -40,6 +41,21 @@ export async function getSubscription(
     .where(and(eq(subscriptions.userId, userId), eq(subscriptions.id, id)))
     .limit(1);
   return row;
+}
+
+// The one write path for lastReviewedAt (schema.ts's own comment on that
+// column) — called from subscriptions/[id]/page.tsx on every real page
+// view. Deliberately does NOT bump `updatedAt` (unlike every other write in
+// this file) — updatedAt already means "this row's data last changed,"
+// and a review touches no data, just records that a human looked. Fire-
+// and-forget from the caller's point of view is fine (the page itself
+// doesn't need this to complete before rendering), but this function itself
+// still awaits the write — no reason to leave a dangling promise.
+export async function markSubscriptionReviewed(userId: string, id: string): Promise<void> {
+  await db
+    .update(subscriptions)
+    .set({ lastReviewedAt: new Date() })
+    .where(and(eq(subscriptions.userId, userId), eq(subscriptions.id, id)));
 }
 
 // One "initial" price-history row per newly-created subscription, however
@@ -170,10 +186,37 @@ export async function createSubscriptionsBulkWithLimitCheck(
   });
 }
 
+// Same shape as price-history.ts's own PriceChange (computeLatestPriceChange's
+// return type) — carries the raw before/after amounts, not just the
+// percent/annual-delta figures computePriceChangeIfMeaningful alone
+// produces, since the price-increase email needs "from $X to $Y," not just
+// "up 15%." observedAtIso is "today" here (the edit's own moment), the same
+// value the subscriptionPriceHistory row this same write just inserted
+// records via its own defaultNow() observedAt.
+export interface SubscriptionPriceChange {
+  fromCents: number;
+  fromBillingCycle: Subscription["billingCycle"];
+  toCents: number;
+  toBillingCycle: Subscription["billingCycle"];
+  currency: string;
+  observedAtIso: string;
+  percentChange: number;
+  annualDeltaCents: number;
+}
+
 export type SubscriptionUpdateResult =
   | { kind: "not_found" }
   | { kind: "plan" }
-  | { kind: "updated"; subscription: Subscription };
+  // priceChange is null whenever this edit didn't touch price at all, or
+  // the move was under computePriceChangeIfMeaningful's own materiality bar
+  // (< 3%, noise — see price-history.ts). This is a plain, computed fact
+  // returned to the caller (api/subscriptions/[id]/route.ts) — queries.ts
+  // itself never sends an email or has any opinion on notification
+  // preferences; that side effect belongs at the route layer, same
+  // separation this codebase's auth routes already keep
+  // (sendVerificationEmail is called from the signup route, never from
+  // inside a queries.ts-style data function).
+  | { kind: "updated"; subscription: Subscription; priceChange: SubscriptionPriceChange | null };
 
 export async function updateSubscription(
   userId: string,
@@ -218,7 +261,7 @@ export async function updateSubscription(
       .set(values)
       .where(and(eq(subscriptions.userId, userId), eq(subscriptions.id, id)))
       .returning();
-    return row ? { kind: "updated", subscription: row } : { kind: "not_found" };
+    return row ? { kind: "updated", subscription: row, priceChange: null } : { kind: "not_found" };
   }
 
   // The pre-edit read, the limit check, the update, and the price-history
@@ -264,6 +307,7 @@ export async function updateSubscription(
 
     if (!row) return { kind: "not_found" };
 
+    let priceChange: SubscriptionPriceChange | null = null;
     if (
       row.amountCents !== before.amountCents ||
       row.currency !== before.currency ||
@@ -277,9 +321,33 @@ export async function updateSubscription(
         currency: row.currency,
         source: input.priceHistorySource ?? "user_edit",
       });
+      // Same materiality bar (>=3%, currency-matched) the import-side
+      // reconciliation proposal already uses — a manual edit that
+      // genuinely raises the price deserves the same price-increase email
+      // an import-detected one would trigger, not a separate, looser rule.
+      // computePriceChangeIfMeaningful decides IF this counts; the raw
+      // before/after amounts (never returned by that function — it only
+      // ever produces percentChange/annualDeltaCents) are carried through
+      // here so the email can say "from $X to $Y," not just "up 15%."
+      const candidate = computePriceChangeIfMeaningful(
+        { amountCents: before.amountCents, billingCycle: before.billingCycle, currency: before.currency },
+        { amountCents: row.amountCents, billingCycle: row.billingCycle, currency: row.currency },
+      );
+      if (candidate) {
+        priceChange = {
+          fromCents: before.amountCents,
+          fromBillingCycle: before.billingCycle,
+          toCents: row.amountCents,
+          toBillingCycle: row.billingCycle,
+          currency: row.currency,
+          observedAtIso: new Date().toISOString().slice(0, 10),
+          percentChange: candidate.percentChange,
+          annualDeltaCents: candidate.annualDeltaCents,
+        };
+      }
     }
 
-    return { kind: "updated", subscription: row };
+    return { kind: "updated", subscription: row, priceChange };
   });
 }
 

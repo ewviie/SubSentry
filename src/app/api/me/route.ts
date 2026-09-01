@@ -1,7 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
-import { updateUserName, setRenewalRemindersEnabled } from "@/lib/auth/queries";
+import {
+  updateUserName,
+  setRenewalRemindersEnabled,
+  setPriceAlertEmailsEnabled,
+  setWeeklyDigestEnabled,
+  setRenewalReminderLeadDays,
+} from "@/lib/auth/queries";
+import { RENEWAL_REMINDER_LEAD_DAYS_OPTIONS } from "@/lib/subscriptions/filters";
 import { checkProfileUpdateRateLimit } from "@/lib/auth/rate-limit";
 import { readJsonBody, MAX_JSON_BODY_BYTES } from "@/lib/http/request-size";
 
@@ -10,24 +17,38 @@ export async function GET() {
   if (!session) {
     return NextResponse.json({ user: null });
   }
-  const { id, email, name, plan, renewalRemindersEnabled } = session.user;
-  return NextResponse.json({ user: { id, email, name, plan, renewalRemindersEnabled } });
+  const { id, email, name, plan, renewalRemindersEnabled, priceAlertEmailsEnabled, weeklyDigestEnabled, renewalReminderLeadDays } =
+    session.user;
+  return NextResponse.json({
+    user: { id, email, name, plan, renewalRemindersEnabled, priceAlertEmailsEnabled, weeklyDigestEnabled, renewalReminderLeadDays },
+  });
 }
 
-// Both fields optional, but at least one required (the .refine below) —
-// this one route now backs two independent Settings controls (name,
-// renewal-reminder toggle) that each send only the field they're changing;
-// a bare `{}` body isn't a meaningful update to reject with the same
-// "invalid_request" as truly malformed input, rather than silently a no-op
-// 200.
+// Every field optional, but at least one required (the .refine below) —
+// this one route backs every independent Settings notification control
+// (name, and now five preference toggles/selects) that each send only the
+// field they're changing; a bare `{}` body isn't a meaningful update to
+// reject with the same "invalid_request" as truly malformed input, rather
+// than silently a no-op 200.
 const updateMeSchema = z
   .object({
     name: z.string().trim().max(120).optional(),
     renewalRemindersEnabled: z.boolean().optional(),
+    priceAlertEmailsEnabled: z.boolean().optional(),
+    weeklyDigestEnabled: z.boolean().optional(),
+    renewalReminderLeadDays: z.number().refine((v) => (RENEWAL_REMINDER_LEAD_DAYS_OPTIONS as readonly number[]).includes(v), {
+      message: "Not a valid reminder window.",
+    }).optional(),
   })
-  .refine((data) => data.name !== undefined || data.renewalRemindersEnabled !== undefined, {
-    message: "No fields to update.",
-  });
+  .refine(
+    (data) =>
+      data.name !== undefined ||
+      data.renewalRemindersEnabled !== undefined ||
+      data.priceAlertEmailsEnabled !== undefined ||
+      data.weeklyDigestEnabled !== undefined ||
+      data.renewalReminderLeadDays !== undefined,
+    { message: "No fields to update." },
+  );
 
 export async function PATCH(request: Request) {
   const session = await getSession();
@@ -59,6 +80,15 @@ export async function PATCH(request: Request) {
   }
   if (parsed.data.renewalRemindersEnabled !== undefined) {
     await setRenewalRemindersEnabled(session.user.id, parsed.data.renewalRemindersEnabled);
+  }
+  if (parsed.data.priceAlertEmailsEnabled !== undefined) {
+    await setPriceAlertEmailsEnabled(session.user.id, parsed.data.priceAlertEmailsEnabled);
+  }
+  if (parsed.data.weeklyDigestEnabled !== undefined) {
+    await setWeeklyDigestEnabled(session.user.id, parsed.data.weeklyDigestEnabled);
+  }
+  if (parsed.data.renewalReminderLeadDays !== undefined) {
+    await setRenewalReminderLeadDays(session.user.id, parsed.data.renewalReminderLeadDays);
   }
   return NextResponse.json({ ok: true });
 }

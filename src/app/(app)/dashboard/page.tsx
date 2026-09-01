@@ -10,15 +10,17 @@ import { SectionHeading } from "@/components/dashboard/section-heading";
 import { QuickAddBar } from "@/components/subscriptions/quick-add-bar";
 import { InsightsSection } from "@/components/dashboard/insights-section";
 import { OverviewPanel } from "@/components/dashboard/overview-panel";
+import { computeCreepingCostTrailing12Months } from "@/lib/subscriptions/price-history";
 import { MotionCard } from "@/components/dashboard/motion-card";
 import { StaggerSection } from "@/components/dashboard/stagger-section";
 import { computeInsights, computePotentialSavingsMonthlyCents } from "@/lib/subscriptions/insights";
 import { FREE_PLAN_SUBSCRIPTION_LIMIT, getUpgradeUrl, isBetaAllAccess, shouldShowSubscriptionLimitBanner } from "@/lib/billing/plan";
 import { resolveHasPaidAccess } from "@/lib/dev/plan-preview";
 import { runInsightsEngine } from "@/lib/insights-engine";
+import { syncNotifications, getAttentionItems, getRecentActivitySummary } from "@/lib/notifications/queries";
+import { AttentionPanel } from "@/components/dashboard/attention-panel";
 import { UpgradeLimitBanner } from "@/components/billing/upgrade-prompt";
 import {
-  BiggestOpportunityCard,
   QuickWinsCard,
   PositiveHabitsCard,
   RenewalForecastCard,
@@ -48,6 +50,29 @@ export default async function DashboardPage() {
   const potentialSavingsMonthlyCents = computePotentialSavingsMonthlyCents(insights);
   const duplicateInsights = insights.filter((i) => i.potentialSavingsMonthlyCents !== undefined);
   const engineOutput = runInsightsEngine(data.subscriptions, isPremium, priceHistoryBySubscriptionId, dismissedRecommendationIds);
+  // Notification/Intelligence Center: generate this account's current
+  // notifications from data already loaded above — see generate.ts's own
+  // header comment for why nothing here is a second, independent detection
+  // pass. Awaited (not fire-and-forget) so a fresh finding is guaranteed
+  // persisted before the bell icon's own fetch on this same page render;
+  // insertNotifications' onConflictDoNothing makes repeat calls on every
+  // dashboard load cheap (a skipped no-op) once a finding already has a row.
+  await syncNotifications(user.id, {
+    subscriptions: data.subscriptions,
+    priceHistoryBySubscriptionId,
+    savingsRecommendations: engineOutput.savingsForecast.recommendations,
+    isPremium,
+    dismissedRecommendationIds,
+  });
+  // "Needs your attention" (see attention-panel.tsx's own comment) — reads
+  // what syncNotifications just persisted, so this always reflects the same
+  // findings the bell/notifications page would show, never a second
+  // detection pass.
+  const [attentionItems, activitySummary] = await Promise.all([
+    getAttentionItems(user.id),
+    getRecentActivitySummary(user.id),
+  ]);
+  const creepingCost = computeCreepingCostTrailing12Months(data.subscriptions, priceHistoryBySubscriptionId);
   // Insights and the Savings opportunities section below both ultimately
   // read from the same overlap/duplicate detection, left unfiltered here,
   // "Possible duplicate: Netflix and Netflix Premium" and "3 active
@@ -134,17 +159,19 @@ export default async function DashboardPage() {
             activeCount={data.activeCount}
             potentialYearlySavingsCents={potentialSavingsMonthlyCents * 12}
             duplicateInsights={duplicateInsights}
+            creepingCostAnnualDeltaCents={creepingCost?.annualDeltaCents ?? null}
+            creepingCostCurrency={creepingCost?.currency ?? null}
             healthScore={healthScore}
           />
         ) : null}
-        {/* North Star Part 3 ("what's my biggest opportunity?") gets a
-            direct, single-answer spot right under the overview panel.
-            Before this, the closest thing was scrolling all the way to
-            Savings opportunities/Quick wins further down and inferring it
-            yourself from two separate ranked lists. */}
+        {/* Product-value pass, round 2: replaces the old BiggestOpportunityCard
+            slot (savings-only) with the fuller cross-type attention panel —
+            see attention-panel.tsx's own comment. Net card count on the page
+            is unchanged; what's in this one slot just answers a bigger
+            question now. */}
         {hasActive ? (
           <MotionCard>
-            <BiggestOpportunityCard output={engineOutput} />
+            <AttentionPanel items={attentionItems} activitySummary={activitySummary} />
           </MotionCard>
         ) : null}
         <InsightsSection insights={dashboardInsights} />

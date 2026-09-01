@@ -1,10 +1,12 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { subscriptionIdSchema, subscriptionUpdateSchema } from "@/lib/subscriptions/validation";
 import { deleteSubscription, getSubscription, updateSubscription } from "@/lib/subscriptions/queries";
 import { checkSubscriptionMutateRateLimit } from "@/lib/subscriptions/rate-limit";
 import { readJsonBody, MAX_JSON_BODY_BYTES } from "@/lib/http/request-size";
 import { FREE_PLAN_SUBSCRIPTION_LIMIT } from "@/lib/billing/plan";
+import { sendPriceIncreaseEmail } from "@/lib/subscriptions/notification-emails";
+import { logServerError } from "@/lib/observability/log-error";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -76,6 +78,32 @@ export async function PATCH(request: Request, { params }: Params) {
         message: `You've reached the free plan limit of ${FREE_PLAN_SUBSCRIPTION_LIMIT} active subscriptions. Upgrade to Pro for unlimited tracking.`,
       },
       { status: 403 },
+    );
+  }
+
+  // Price-increase email — the one notification type that fires at
+  // write-time rather than being generated lazily on a later page load
+  // (see notification-emails.ts's own header comment). after() so a
+  // (possibly slow, possibly retried) SMTP send never adds latency to the
+  // save the user is actually waiting on; failures are logged, never
+  // thrown back into the response after it's already been sent to the
+  // client. Gated on both preferences a real user could have set
+  // (priceAlertEmailsEnabled, Settings → Notifications) and emailVerified —
+  // same "verified users only" posture renewal-reminders.ts's own cron job
+  // already applies, so this never mails an address nobody's confirmed
+  // ownership of.
+  if (result.priceChange && result.priceChange.percentChange > 0 && session.user.priceAlertEmailsEnabled && session.user.emailVerified) {
+    const { subscription, priceChange } = result;
+    after(() =>
+      sendPriceIncreaseEmail({
+        to: session.user.email,
+        subscriptionId: subscription.id,
+        name: subscription.name,
+        fromCents: priceChange.fromCents,
+        toCents: priceChange.toCents,
+        currency: priceChange.currency,
+        change: priceChange,
+      }).catch((error) => logServerError("subscriptions.price-increase-email", error, { subscriptionId: subscription.id })),
     );
   }
 

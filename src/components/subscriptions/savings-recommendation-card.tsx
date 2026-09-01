@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { AnimatePresence, motion } from "framer-motion";
-import { CircleCheck, CircleHelp, Copy, Layers, Coins, X } from "lucide-react";
+import { CircleCheck, CircleHelp, Copy, Layers, Coins, Clock, X } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,7 +17,7 @@ import {
 } from "@/lib/subscriptions/savings";
 import { fadeInUp, fadeQuick, liftOnHover, springSnappy } from "@/lib/motion";
 
-const TYPE_ICON = { duplicate: Copy, functional_overlap: Layers, small_subscriptions: Coins } as const;
+const TYPE_ICON = { duplicate: Copy, functional_overlap: Layers, small_subscriptions: Coins, stale: Clock } as const;
 
 export function SavingsRecommendationCard({ recommendation }: { recommendation: SavingsRecommendation }) {
   const [dismissed, setDismissed] = useState(false);

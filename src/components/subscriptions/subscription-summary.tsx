@@ -1,6 +1,6 @@
 import { formatCents, monthlyCents, annualCents as computeAnnualCents } from "@/lib/subscriptions/money";
 import { estimatePaidCents } from "@/lib/subscriptions/price-history";
-import { cn } from "@/lib/utils";
+import { cn, formatRelativeTime } from "@/lib/utils";
 import type { Subscription, SubscriptionPriceHistory } from "@/lib/db/schema";
 
 // This page used to be pure edit form: click into any one subscription and
@@ -44,8 +44,8 @@ export function SubscriptionSummary({
   return (
     <div
       className={cn(
-        "grid grid-cols-1 gap-3 border-b border-border pb-4 text-sm sm:grid-cols-3",
-        sharePercent !== null && "sm:grid-cols-4",
+        "grid grid-cols-1 gap-3 border-b border-border pb-4 text-sm sm:grid-cols-2 md:grid-cols-4",
+        sharePercent !== null && "md:grid-cols-5",
       )}
     >
       <div>
@@ -68,6 +68,16 @@ export function SubscriptionSummary({
           <p className="mt-0.5 text-xs text-muted-foreground">of total annual spend</p>
         </div>
       ) : null}
+      <div>
+        <p className="text-muted-foreground">Last reviewed</p>
+        {/* subscription.lastReviewedAt reflects the state BEFORE this page
+            view — see subscriptions/[id]/page.tsx's own comment: the write
+            that records *this* visit runs via after(), scheduled to happen
+            once the response is already on its way, so what's shown here
+            is honestly "the last time before now," never a self-referential
+            "just now" on every single load. */}
+        <p className="font-medium">{subscription.lastReviewedAt ? formatRelativeTime(subscription.lastReviewedAt) : "Never"}</p>
+      </div>
     </div>
   );
 }

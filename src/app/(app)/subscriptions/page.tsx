@@ -6,7 +6,7 @@ import { FREE_PLAN_SUBSCRIPTION_LIMIT, getUpgradeUrl, isBetaAllAccess, shouldSho
 import { resolveHasPaidAccess } from "@/lib/dev/plan-preview";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { SubscriptionsExplorer } from "@/components/subscriptions/subscriptions-explorer";
+import { SubscriptionsViewSwitcher } from "@/components/subscriptions/subscriptions-view-switcher";
 import { UpgradeLimitBanner } from "@/components/billing/upgrade-prompt";
 import { computeInsights } from "@/lib/subscriptions/insights";
 import { formatCents } from "@/lib/subscriptions/money";
@@ -101,7 +101,7 @@ export default async function SubscriptionsPage() {
       ) : null}
 
       <div className="mt-6">
-        <SubscriptionsExplorer subscriptions={data.subscriptions} insights={insights} />
+        <SubscriptionsViewSwitcher subscriptions={data.subscriptions} insights={insights} />
       </div>
     </div>
   );

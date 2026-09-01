@@ -7,20 +7,19 @@ test.afterAll(async () => {
   await closeDb();
 });
 
-// Phase 9: "Your biggest opportunity" — a single, committed spotlight
-// pick, distinct from the ranked Savings opportunities/Quick wins lists
-// further down the same page. Proves the real ranking (confirmed saving >
-// renewal-risk spike > review saving > highest-cost fallback — see
-// computeBiggestOpportunity's own header comment) actually reaches the
-// rendered dashboard, not just the unit-level fixtures in
-// biggest-opportunity.test.ts.
-test.describe("Dashboard — Your biggest opportunity", () => {
-  test("a confirmed duplicate above the high-impact threshold wins the spotlight", async ({ browser }) => {
+// Product-value pass, round 2: the dashboard's old single-answer
+// "Your biggest opportunity" spotlight (savings-only) was replaced by the
+// broader "Needs your attention" panel (attention-panel.tsx), which reads
+// real, persisted notifications spanning every detection type, not just
+// savings. Same real-world scenarios this file always tested, repointed to
+// where that intelligence actually surfaces now.
+test.describe("Dashboard — Needs your attention", () => {
+  test("a confirmed duplicate surfaces in the attention panel", async ({ browser }) => {
     const user = await createVerifiedUser(browser, "e2e-biggest-opp-duplicate");
 
     for (const [name, amount] of [
       ["Netflix", "8.00"],
-      ["Netflix Premium", "20.00"], // confirmed duplicate, crosses the $15/mo "high" bar
+      ["Netflix Premium", "20.00"], // confirmed duplicate
     ] as const) {
       const created = await apiFetch(user.page, "/api/subscriptions", {
         method: "POST",
@@ -30,17 +29,20 @@ test.describe("Dashboard — Your biggest opportunity", () => {
     }
 
     await user.page.goto("/dashboard");
-    const spotlight = user.page.locator("text=Your biggest opportunity").locator("..").locator("..");
-    await expect(spotlight.getByText(/look like duplicates/i)).toBeVisible();
-    await expect(spotlight.getByText(/confirmed duplicate is the most certain saving/i)).toBeVisible();
+    const panel = user.page.locator("text=Needs your attention").locator("..").locator("..");
+    await expect(panel.getByText(/look like duplicates/i)).toBeVisible();
 
     await user.page.context().close();
     await deleteTestUser(user.email);
   });
 
-  test("falls back to the highest-cost subscription and its share of spend when nothing else qualifies", async ({
-    browser,
-  }) => {
+  // Honesty check (the whole point of this product-value pass): three
+  // unrelated, freshly-added subscriptions with no genuine issue between
+  // them must show the real "nothing to flag" empty state, never a
+  // manufactured "look at your priciest subscription" nudge with no actual
+  // finding behind it — the old BiggestOpportunityCard's fallback behavior,
+  // deliberately not carried forward.
+  test("shows the honest empty state when nothing has actually been detected", async ({ browser }) => {
     const user = await createVerifiedUser(browser, "e2e-biggest-opp-fallback");
 
     for (const [name, amount] of [
@@ -56,11 +58,8 @@ test.describe("Dashboard — Your biggest opportunity", () => {
     }
 
     await user.page.goto("/dashboard");
-    const spotlight = user.page.locator("text=Your biggest opportunity").locator("..").locator("..");
-    await expect(spotlight.getByText("Adobe Creative Cloud")).toBeVisible();
-    await expect(spotlight.getByText(/largest recurring expense/i)).toBeVisible();
-    // 60 / (60+10+10) = 75%
-    await expect(spotlight.getByText(/75%/)).toBeVisible();
+    const panel = user.page.locator("text=Needs your attention").locator("..").locator("..");
+    await expect(panel.getByText(/all caught up/i)).toBeVisible();
 
     await user.page.context().close();
     await deleteTestUser(user.email);

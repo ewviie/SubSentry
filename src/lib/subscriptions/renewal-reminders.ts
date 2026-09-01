@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { renewalReminders, subscriptions, users, type Subscription } from "@/lib/db/schema";
 import { appBaseUrl, sendTransactionalEmail } from "@/lib/auth/email";
 import { formatCents, monthlyCents } from "./money";
-import { daysUntilRenewal, REMINDER_WINDOW_MIN_DAYS, REMINDER_WINDOW_MAX_DAYS } from "./filters";
+import { daysUntilRenewal, REMINDER_WINDOW_MIN_DAYS, REMINDER_WINDOW_MAX_DAYS, RENEWAL_REMINDER_LEAD_DAYS_OPTIONS } from "./filters";
 import { BILLING_CYCLE_LABELS } from "./labels";
 import { logServerError } from "@/lib/observability/log-error";
 
@@ -273,15 +273,31 @@ function addDaysUtcIso(days: number): string {
   return new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 }
 
+// Product-value pass: users.renewalReminderLeadDays lets each user pick a
+// longer lead time than the original fixed REMINDER_WINDOW_MAX_DAYS=3 (up
+// to RENEWAL_REMINDER_LEAD_DAYS_OPTIONS' max, 30 days). The DB-level window
+// below still only ever widens to that one shared maximum — a single
+// dated-range scan can use the existing subscriptions_active_renewal_idx
+// (schema.ts) regardless of how many different lead-time preferences exist
+// across users, whereas a genuinely per-user WHERE range would need a
+// per-row comparison the index can't serve. Each candidate's OWN
+// leadDays is then checked in application code (see the filter below) —
+// this trades a wider, still-indexed DB scan for a cheap in-memory filter,
+// rather than complicating the query itself per user.
+const MAX_LEAD_DAYS = Math.max(...RENEWAL_REMINDER_LEAD_DAYS_OPTIONS);
+
 // Explicit column list, not select(subscriptions)/select(users) — this
 // query already joins three tables; returning every column of each (including
 // ones this job never reads, like notes or passwordHash-adjacent user
 // fields) would be exactly the unnecessary-SELECT* the brief called out.
 // renewalRemindersEnabled/emailVerified are filtered on but not returned —
 // they're already true for every row that passes the WHERE clause.
+// leadDays IS returned, but only to drive the per-user filter immediately
+// below — never part of the ReminderCandidate shape every downstream
+// caller (claim/send) actually works with.
 export async function findReminderCandidates(now: Date = new Date()): Promise<ReminderCandidate[]> {
   const minDate = addDaysUtcIso(REMINDER_WINDOW_MIN_DAYS);
-  const maxDate = addDaysUtcIso(REMINDER_WINDOW_MAX_DAYS);
+  const maxDate = addDaysUtcIso(MAX_LEAD_DAYS);
   const staleThreshold = new Date(now.getTime() - STALE_CLAIM_MS);
 
   const rows = await db
@@ -294,6 +310,7 @@ export async function findReminderCandidates(now: Date = new Date()): Promise<Re
       currency: subscriptions.currency,
       billingCycle: subscriptions.billingCycle,
       nextRenewalDate: subscriptions.nextRenewalDate,
+      leadDays: users.renewalReminderLeadDays,
     })
     .from(subscriptions)
     .innerJoin(users, eq(subscriptions.userId, users.id))
@@ -323,7 +340,9 @@ export async function findReminderCandidates(now: Date = new Date()): Promise<Re
     .orderBy(asc(subscriptions.nextRenewalDate))
     .limit(MAX_CANDIDATES_PER_RUN);
 
-  return rows;
+  return rows
+    .filter((row) => daysUntilRenewal(row) <= row.leadDays)
+    .map(({ leadDays: _leadDays, ...candidate }) => candidate);
 }
 
 // ── Claim / send / mark-sent ─────────────────────────────────────────────

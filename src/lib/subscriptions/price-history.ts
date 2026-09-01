@@ -233,3 +233,128 @@ export function estimatePaidCents(subscription: Subscription, history: Subscript
   }
   return total;
 }
+
+export interface PortfolioPriceChangeEntry {
+  subscription: Subscription;
+  change: PriceChange;
+}
+
+// Product-value pass: the portfolio-wide view computeLatestPriceChange never
+// had one before — that function only ever answered "did THIS subscription's
+// price change," read one at a time on the subscription detail page. This
+// is the same real data (subscriptionPriceHistory), just asked across every
+// active subscription at once: "how many of my subscriptions got more
+// expensive, and by how much in total" — the Analytics "Price changes"
+// section and notification generation both need exactly this, and neither
+// should re-derive its own copy of "what counts as a genuine change" (that
+// stays computeLatestPriceChange's job, called here unchanged).
+//
+// Increases only (percentChange > 0) — a price decrease is real and worth
+// showing on that one subscription's own page, but "how much more you're
+// paying" is what this portfolio view exists to answer; mixing in
+// decreases would understate the real cost of the increases when summed.
+// Restricted to active subscriptions and, like every other portfolio total
+// in this codebase, to a single shared currency (the caller's active set's
+// primary currency) — never summed across currencies.
+export function computePortfolioPriceChanges(
+  subscriptions: Subscription[],
+  priceHistoryBySubscriptionId: Map<string, SubscriptionPriceHistory[]>,
+): PortfolioPriceChangeEntry[] {
+  const active = subscriptions.filter((s) => s.status === "active");
+  const entries: PortfolioPriceChangeEntry[] = [];
+  for (const subscription of active) {
+    const history = priceHistoryBySubscriptionId.get(subscription.id);
+    if (!history) continue;
+    const change = computeLatestPriceChange(history);
+    if (change && change.percentChange > 0) entries.push({ subscription, change });
+  }
+  // Biggest real annual impact first — the same "explainable, real-field
+  // tiebreak, never a black-box score" posture savings.ts's own
+  // prioritization comment documents.
+  return entries.sort((a, b) => b.change.annualDeltaCents - a.change.annualDeltaCents);
+}
+
+export interface PortfolioPriceChangeTotal {
+  annualDeltaCents: number;
+  currency: string;
+}
+
+// Sums annualDeltaCents across entries that share one currency (the
+// entries list's own first currency, same "primary currency" convention
+// splitByPrimaryCurrency uses elsewhere) — null when the increases found
+// span more than one currency, an honest gap rather than a fabricated
+// cross-currency sum, same rule computeRealizedSavings/
+// computeTotalPotentialSavingsMonthlyCents already follow.
+export function sumPortfolioPriceChanges(entries: PortfolioPriceChangeEntry[]): PortfolioPriceChangeTotal | null {
+  if (entries.length === 0) return null;
+  const currency = entries[0].change.currency;
+  if (!entries.every((e) => e.change.currency === currency)) return null;
+  return { annualDeltaCents: entries.reduce((sum, e) => sum + e.change.annualDeltaCents, 0), currency };
+}
+
+const CREEPING_COST_WINDOW_DAYS = 365;
+
+// "Creeping cost" (watchdog phase, product council recommendation): how
+// much additional recurring spending has accumulated from price increases
+// over the trailing 12 months. Deliberately a DIFFERENT computation from
+// computePortfolioPriceChanges above, not a reuse of its output: that
+// function (built for the price-change notification/analytics list) only
+// ever looks at each subscription's LATEST genuine change
+// (computeLatestPriceChange walks backward from the newest row) — a
+// subscription that increased twice in the last year would only count its
+// most recent increase there. This function instead walks every
+// CONSECUTIVE pair in a subscription's history and sums every genuine
+// (>=3%, same-currency — computePriceChangeIfMeaningful's own bar, reused
+// verbatim, not a second threshold) increase whose observedAt falls inside
+// the trailing window, so two real increases in one year are both counted,
+// not just the latest.
+//
+// Decreases are excluded (this measures cost creeping UP, the whole point
+// of the metric); a decrease inside the same window doesn't offset an
+// increase elsewhere — an honest choice, not an oversight: "how much has
+// crept in from increases" and "what's the net change" are different
+// questions, and conflating them would let a coincidental decrease on one
+// subscription mask a real, ongoing increase on another.
+//
+// Restricted to one shared currency across every counted increase (the
+// first counted entry's own currency) — same "never fabricate a
+// cross-currency total" rule every other portfolio sum in this file
+// follows; an increase in a different currency simply doesn't participate,
+// same disposition sumPortfolioPriceChanges already has.
+export function computeCreepingCostTrailing12Months(
+  subscriptions: Subscription[],
+  priceHistoryBySubscriptionId: Map<string, SubscriptionPriceHistory[]>,
+  now: Date = new Date(),
+): PortfolioPriceChangeTotal | null {
+  const windowStart = now.getTime() - CREEPING_COST_WINDOW_DAYS * 86_400_000;
+  const active = subscriptions.filter((s) => s.status === "active");
+
+  let currency: string | null = null;
+  let totalCents = 0;
+  let counted = false;
+
+  for (const subscription of active) {
+    const history = priceHistoryBySubscriptionId.get(subscription.id);
+    if (!history || history.length < 2) continue;
+    const sorted = [...history].sort((a, b) => a.observedAt.getTime() - b.observedAt.getTime());
+
+    for (let i = 1; i < sorted.length; i++) {
+      const later = sorted[i];
+      if (later.observedAt.getTime() < windowStart) continue; // the increase itself must have happened within the window
+      const earlier = sorted[i - 1];
+      const change = computePriceChangeIfMeaningful(
+        { amountCents: earlier.amountCents, billingCycle: earlier.billingCycle, currency: earlier.currency },
+        { amountCents: later.amountCents, billingCycle: later.billingCycle, currency: later.currency },
+      );
+      if (!change || change.percentChange <= 0) continue;
+
+      if (currency === null) currency = later.currency;
+      if (later.currency !== currency) continue; // honest gap, not a fabricated cross-currency sum — see this function's own header comment
+      totalCents += change.annualDeltaCents;
+      counted = true;
+    }
+  }
+
+  if (!counted || currency === null) return null;
+  return { annualDeltaCents: totalCents, currency };
+}
