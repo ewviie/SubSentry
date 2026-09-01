@@ -172,6 +172,38 @@ describe.skipIf(!hasDb)("renewal reminders (DB integration)", () => {
     expect(candidates.some((c) => c.subscriptionId === subscription.id)).toBe(false);
   });
 
+  // ── Renewal-time price reconfirmation ───────────────────────────────
+
+  it("includes a real 'your last charge was' line when price history shows a genuine prior price", async () => {
+    const user = await createTestUser();
+    const subscription = await createTestSubscription(user.id, { nextRenewalDate: isoDateOffset(2) });
+    // subscription.amountCents is 1599 (createTestSubscription's own
+    // fixed value) — two price-history rows, the latest matching that
+    // current price, so computeLatestPriceChange finds a genuine increase.
+    await db.insert(schema.subscriptionPriceHistory).values([
+      { subscriptionId: subscription.id, userId: user.id, amountCents: 1299, billingCycle: "monthly", currency: "usd", observedAt: new Date("2026-01-01"), source: "initial" },
+      { subscriptionId: subscription.id, userId: user.id, amountCents: 1599, billingCycle: "monthly", currency: "usd", observedAt: new Date("2026-06-01"), source: "user_edit" },
+    ]);
+
+    await reminders.runRenewalReminderJob();
+    const call = sendMailMock.mock.calls.find(([msg]) => msg.to === user.email);
+    expect(call).toBeDefined();
+    expect(call![0].html).toContain("Your last charge was $12.99");
+    expect(call![0].html).toContain("more");
+    expect(call![0].text).toContain("Your last charge was $12.99");
+  });
+
+  it("omits the price-reconfirmation line entirely when there's no recorded price history", async () => {
+    const user = await createTestUser();
+    await createTestSubscription(user.id, { nextRenewalDate: isoDateOffset(2) });
+
+    await reminders.runRenewalReminderJob();
+    const call = sendMailMock.mock.calls.find(([msg]) => msg.to === user.email);
+    expect(call).toBeDefined();
+    expect(call![0].html).not.toContain("Your last charge was");
+    expect(call![0].text).not.toContain("Your last charge was");
+  });
+
   // ── End-to-end send + idempotency ───────────────────────────────────
 
   it("sends exactly one email to the subscription's own owning user", async () => {

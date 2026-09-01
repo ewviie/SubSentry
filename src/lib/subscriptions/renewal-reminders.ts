@@ -6,6 +6,8 @@ import { appBaseUrl, sendTransactionalEmail } from "@/lib/auth/email";
 import { formatCents, monthlyCents } from "./money";
 import { daysUntilRenewal, REMINDER_WINDOW_MIN_DAYS, REMINDER_WINDOW_MAX_DAYS, RENEWAL_REMINDER_LEAD_DAYS_OPTIONS } from "./filters";
 import { BILLING_CYCLE_LABELS } from "./labels";
+import { getPriceHistoryForSubscriptionIds } from "./queries";
+import { computeLatestPriceChange, type PriceChange } from "./price-history";
 import { logServerError } from "@/lib/observability/log-error";
 
 // The full renewal-reminder job: find subscriptions approaching renewal,
@@ -73,6 +75,26 @@ interface ReminderContent {
   nextRenewalDate: string;
   subscriptionUrl: string;
   unsubscribeUrl: string | null;
+  // Retention pass: the deferred "renewal-time price reconfirmation" idea —
+  // set only when subscriptionPriceHistory actually shows a genuine prior
+  // price different from the current one (computeLatestPriceChange,
+  // price-history.ts). Absent (not a zero/same-price object) for a
+  // subscription with no recorded change, or none at all — the email reads
+  // exactly as it always has in that case, no filler line pretending there's
+  // history to report.
+  priceChange: PriceChange | null;
+}
+
+// "Your last charge was $15.49 — that's $30.00/year more (+16%) than
+// before." Reuses PriceHistoryNote's own established phrasing (that
+// component's "additional .../year" wording) rather than inventing a third
+// way to say the same thing across this app's three price-change surfaces
+// (the notification, the detail page, and now this email).
+function priceChangeLine(change: PriceChange): string {
+  const direction = change.annualDeltaCents > 0 ? "more" : "less";
+  const annualDelta = formatCents(Math.abs(change.annualDeltaCents), change.currency);
+  const percent = Math.abs(Math.round(change.percentChange));
+  return `Your last charge was ${formatCents(change.fromCents, change.currency)} — that's ${annualDelta}/year ${direction} (${percent}%) than before.`;
 }
 
 // Optional monthly-equivalent context for a non-monthly plan (brief item:
@@ -100,10 +122,17 @@ function buildRenewalReminderHtml(content: ReminderContent): string {
     <p style="margin:0 0 8px;font-size:15px;line-height:1.5;color:#18181b;">
       <strong>${name}</strong> renews on ${dateLabel} for <strong>${amount}</strong>.
     </p>
-    <p style="margin:0 0 24px;font-size:13px;line-height:1.5;color:#71717a;">
+    <p style="margin:0 0 ${content.priceChange ? "8px" : "24px"};font-size:13px;line-height:1.5;color:#71717a;">
       ${cycleContext(content.amountCents, content.currency, content.billingCycle)} SubSentry hasn't canceled or changed
       anything — this is just a heads-up before it renews.
     </p>
+    ${
+      content.priceChange
+        ? `<p style="margin:0 0 24px;font-size:13px;line-height:1.5;color:#71717a;">
+      ${priceChangeLine(content.priceChange)}
+    </p>`
+        : ""
+    }
     <div style="text-align:center;margin:0 0 24px;">
       <a href="${content.subscriptionUrl}" style="display:inline-block;background-color:${EMERALD};color:#fafafa;text-decoration:none;font-size:15px;font-weight:600;padding:12px 28px;border-radius:8px;">
         Review subscription
@@ -124,11 +153,9 @@ function buildRenewalReminderText(content: ReminderContent): string {
     `${content.name} renews on ${dateLabel} for ${amount}.`,
     cycleContext(content.amountCents, content.currency, content.billingCycle) +
       " SubSentry hasn't canceled or changed anything — this is just a heads-up before it renews.",
-    "",
-    `Review subscription: ${content.subscriptionUrl}`,
-    "",
-    `Questions? Contact support (${SUPPORT_EMAIL}).`,
   ];
+  if (content.priceChange) lines.push(priceChangeLine(content.priceChange));
+  lines.push("", `Review subscription: ${content.subscriptionUrl}`, "", `Questions? Contact support (${SUPPORT_EMAIL}).`);
   if (content.unsubscribeUrl) {
     lines.push(`Turn off renewal reminders: ${content.unsubscribeUrl}`);
   }
@@ -148,6 +175,7 @@ export async function sendRenewalReminderEmail(params: {
   nextRenewalDate: string;
   subscriptionId: string;
   unsubscribeUrl: string | null;
+  priceChange?: PriceChange | null;
 }): Promise<void> {
   const days = daysUntilRenewal({ nextRenewalDate: params.nextRenewalDate });
   const content: ReminderContent = {
@@ -158,6 +186,7 @@ export async function sendRenewalReminderEmail(params: {
     nextRenewalDate: params.nextRenewalDate,
     subscriptionUrl: buildSubscriptionUrl(params.subscriptionId),
     unsubscribeUrl: params.unsubscribeUrl,
+    priceChange: params.priceChange ?? null,
   };
   await sendTransactionalEmail(
     {
@@ -438,6 +467,16 @@ export async function runRenewalReminderJob(now: Date = new Date()): Promise<Ren
   const candidates = await findReminderCandidates(now);
   const result: RenewalReminderJobResult = { candidates: candidates.length, claimed: 0, sent: 0, failed: 0, skippedCap: 0 };
 
+  // Retention pass: one batched price-history fetch for the whole candidate
+  // set, not one query per candidate — see getPriceHistoryForSubscriptionIds'
+  // own comment (queries.ts) for why this can't be scoped by a single
+  // userId the way most other bulk reads in this app are. Fetched once,
+  // up front, and read from in-memory per candidate below; computed even
+  // for candidates that end up skipped by the claim race or the per-run
+  // cap, which is deliberately cheap to over-fetch rather than plumb the
+  // cap into this query too.
+  const priceHistoryBySubscriptionId = await getPriceHistoryForSubscriptionIds(candidates.map((c) => c.subscriptionId));
+
   for (const candidate of candidates) {
     if (result.sent + result.failed >= MAX_EMAILS_PER_RUN) {
       result.skippedCap++;
@@ -449,6 +488,7 @@ export async function runRenewalReminderJob(now: Date = new Date()): Promise<Ren
     result.claimed++;
 
     try {
+      const priceChange = computeLatestPriceChange(priceHistoryBySubscriptionId.get(candidate.subscriptionId) ?? []);
       await sendRenewalReminderEmail({
         to: candidate.userEmail,
         name: candidate.name,
@@ -458,6 +498,7 @@ export async function runRenewalReminderJob(now: Date = new Date()): Promise<Ren
         nextRenewalDate: candidate.nextRenewalDate,
         subscriptionId: candidate.subscriptionId,
         unsubscribeUrl: buildUnsubscribeUrl(candidate.userId),
+        priceChange,
       });
       await markReminderSent(reminderId, new Date());
       result.sent++;

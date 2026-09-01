@@ -3,6 +3,7 @@ import {
   computeSavingsRecommendations,
   computeTotalPotentialSavingsMonthlyCents,
   computeTotalPotentialSavingsYearlyCents,
+  computeTotalPotentialSavings,
   computeRealizedSavings,
   getSavingsPriority,
   splitSavingsRecommendationsByPlan,
@@ -444,6 +445,44 @@ describe("computeTotalPotentialSavingsYearlyCents", () => {
     const total = computeTotalPotentialSavingsYearlyCents(recommendations);
     expect(total).toBe(1500 * 12); // usd only, annualized
     expect(total).not.toBe(3500 * 12); // the pre-fix behavior: gbp blended in
+  });
+});
+
+// Retention pass: the combined {monthlyCents, yearlyCents, currency} reader
+// (weekly-digest-job.ts's own digest, which has no other reliable way to
+// know which currency a "potential savings" total is denominated in).
+describe("computeTotalPotentialSavings", () => {
+  it("reproduces both narrow totals plus the real currency they're in", () => {
+    const first = sub({ name: "Netflix", category: "streaming", amountCents: 1000, billingCycle: "monthly", currency: "usd" });
+    const second = sub({ name: "Netflix Premium", category: "streaming", amountCents: 1500, billingCycle: "monthly", currency: "usd" });
+    const recommendations = computeSavingsRecommendations([first, second]);
+
+    const combined = computeTotalPotentialSavings(recommendations);
+    expect(combined.monthlyCents).toBe(computeTotalPotentialSavingsMonthlyCents(recommendations));
+    expect(combined.yearlyCents).toBe(computeTotalPotentialSavingsYearlyCents(recommendations));
+    expect(combined.currency).toBe("usd");
+  });
+
+  it("returns a null currency alongside zero totals when there's nothing to count", () => {
+    expect(computeTotalPotentialSavings([])).toEqual({ monthlyCents: 0, yearlyCents: 0, currency: null });
+  });
+
+  it("never mislabels a non-primary-currency duplicate's savings with the wrong currency", () => {
+    // A clear usd majority (2 duplicate pairs) against a single gbp pair —
+    // same ratio computeTotalPotentialSavingsYearlyCents's own currency-
+    // safety test above uses, so the majority isn't a coin-flip tie-break.
+    const subs = [
+      sub({ name: "Netflix", amountCents: 500, currency: "usd" }),
+      sub({ name: "Netflix Premium", amountCents: 1000, currency: "usd" }),
+      sub({ name: "Spotify", amountCents: 300, currency: "usd" }),
+      sub({ name: "Spotify Premium", amountCents: 500, currency: "usd" }),
+      sub({ name: "Hulu", amountCents: 400, currency: "gbp" }),
+      sub({ name: "Hulu Plus", amountCents: 2000, currency: "gbp" }),
+    ];
+    const recommendations = computeSavingsRecommendations(subs);
+    const combined = computeTotalPotentialSavings(recommendations);
+    expect(combined.currency).toBe("usd");
+    expect(combined.monthlyCents).toBe(1500);
   });
 });
 

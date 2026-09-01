@@ -2,6 +2,7 @@ import type { Subscription, SubscriptionPriceHistory, Notification } from "@/lib
 import { monthlyCents, splitByPrimaryCurrency } from "./money";
 import { daysUntilRenewal } from "./filters";
 import { computeCreepingCostTrailing12Months } from "./price-history";
+import { computeTotalPotentialSavings, type SavingsRecommendation } from "./savings";
 
 // "Your week with SubSentry" — Watchdog phase rework. Previously this
 // re-derived "what's new" from subscriptions/priceHistory/savingsRecommendations
@@ -37,6 +38,30 @@ export interface WeeklyDigestSummary {
   upcomingRenewalsCents: number;
   creepingCostAnnualDeltaCents: number | null;
   creepingCostCurrency: string | null;
+  // Retention pass: the brief's own "Your recurring spending changed by
+  // $Y" — a passive, always-computed figure (like creepingCost above),
+  // deliberately separate from the spend_increased notification's own
+  // $0.50 minimum-delta gate (notifications/generate.ts). That gate exists
+  // to keep the notification feed free of rounding noise; this digest line
+  // has no such bar to clear, because a digest that's already worth
+  // sending (see isDigestWorthSending below) can honestly report "and your
+  // total didn't really move" as context, the same way creepingCost is
+  // shown even in a week its own figure is small. Null on a user's first
+  // digest (nothing to compare against) or when the portfolio's primary
+  // currency changed since the last one (never a cross-currency delta).
+  monthlyDeltaCents: number | null;
+  // Retention pass: "You could potentially save $X/year" — the exact
+  // figure /savings' own "Potential savings from duplicates" callout
+  // already shows (computeTotalPotentialSavings, savings.ts), read here
+  // rather than a second, looser estimate. Deliberately NOT the broader
+  // functional-overlap/small-cluster review-tier findings that function
+  // already excludes — see its own comment for why only confirmed
+  // duplicates get a dollar figure attached at all. Its own currency,
+  // tracked separately (same reason creepingCostCurrency is separate from
+  // `currency` above) — a duplicate pair can be in a currency that isn't
+  // this portfolio's overall primary one.
+  potentialSavingsYearlyCents: number;
+  potentialSavingsCurrency: string | null;
   newNotificationCounts: Partial<Record<Notification["type"], number>>;
   totalNewNotifications: number;
   // The single most-worth-mentioning new item this week, or null when
@@ -68,10 +93,15 @@ export function computeWeeklyDigestSummary(
   subscriptions: Subscription[],
   priceHistoryBySubscriptionId: Map<string, SubscriptionPriceHistory[]>,
   newNotifications: Notification[],
+  savingsRecommendations: SavingsRecommendation[],
+  // The prior digest's own observed total (users.lastDigestMonthlyCents/
+  // lastDigestCurrency) — null on a user's first-ever digest.
+  previous: { monthlyCents: number; currency: string } | null,
   now: Date = new Date(),
 ): WeeklyDigestSummary {
   const active = subscriptions.filter((s) => s.status === "active");
   const { cents: monthlyTotal, currency } = computeMonthlyTotal(subscriptions);
+  const monthlyDeltaCents = previous !== null && currency !== null && previous.currency === currency ? monthlyTotal - previous.monthlyCents : null;
 
   const upcomingActive = active.filter((s) => {
     const days = daysUntilRenewal(s);
@@ -86,6 +116,7 @@ export function computeWeeklyDigestSummary(
     .reduce((sum, s) => sum + s.amountCents, 0);
 
   const creepingCost = computeCreepingCostTrailing12Months(subscriptions, priceHistoryBySubscriptionId, now);
+  const potentialSavings = computeTotalPotentialSavings(savingsRecommendations);
 
   const newNotificationCounts: WeeklyDigestSummary["newNotificationCounts"] = {};
   for (const n of newNotifications) {
@@ -103,6 +134,9 @@ export function computeWeeklyDigestSummary(
     upcomingRenewalsCents,
     creepingCostAnnualDeltaCents: creepingCost?.annualDeltaCents ?? null,
     creepingCostCurrency: creepingCost?.currency ?? null,
+    monthlyDeltaCents,
+    potentialSavingsYearlyCents: potentialSavings.yearlyCents,
+    potentialSavingsCurrency: potentialSavings.currency,
     newNotificationCounts,
     totalNewNotifications: newNotifications.length,
     topPriorityNotification: topPriority ? { title: topPriority.title, body: topPriority.body } : null,
@@ -112,11 +146,12 @@ export function computeWeeklyDigestSummary(
 // Watchdog phase: "if there is nothing genuinely useful/new, don't send" —
 // the bar is now strictly "at least one real notification since the last
 // digest," not "has any recurring spend" (the old, much looser bar this
-// replaced). monthlyCents/upcomingRenewalsCount/creepingCost are still
-// shown in a digest that IS sent, but none of them alone justifies sending
-// one — a routine renewal list or an unchanging spend total, repeated
-// every week with nothing else, is exactly the "here's what you already
-// saw" spam this phase was told to avoid.
+// replaced). monthlyCents/upcomingRenewalsCount/creepingCost/monthlyDeltaCents/
+// potentialSavingsYearlyCents are all still shown in a digest that IS sent,
+// but none of them alone justifies sending one — a routine renewal list, an
+// unchanging spend total, or a standing savings opportunity nobody's acted
+// on yet, repeated every week with nothing else, is exactly the "here's
+// what you already saw" spam this phase was told to avoid.
 export function isDigestWorthSending(summary: WeeklyDigestSummary): boolean {
   return summary.totalNewNotifications > 0;
 }

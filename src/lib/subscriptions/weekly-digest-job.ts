@@ -180,7 +180,11 @@ export async function runWeeklyDigestJob(now: Date = new Date()): Promise<Weekly
 
       const since = candidate.lastDigestSentAt ?? new Date(now.getTime() - FIRST_DIGEST_LOOKBACK_DAYS * 86_400_000);
       const newNotifications = await listNotificationsSince(candidate.userId, since);
-      const summary = computeWeeklyDigestSummary(subscriptions, priceHistoryBySubscriptionId, newNotifications, now);
+      const previousTotal =
+        candidate.lastDigestMonthlyCents !== null && candidate.lastDigestCurrency !== null
+          ? { monthlyCents: candidate.lastDigestMonthlyCents, currency: candidate.lastDigestCurrency }
+          : null;
+      const summary = computeWeeklyDigestSummary(subscriptions, priceHistoryBySubscriptionId, newNotifications, savingsRecommendations, previousTotal, now);
 
       // Same snapshot update either way (worth-sending or not) — this
       // user's portfolio total was genuinely observed this run, so next

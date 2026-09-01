@@ -156,6 +156,12 @@ describe.skipIf(!hasDb)("weekly digest job (DB integration)", () => {
 
     const [refreshed] = await db.select().from(schema.users).where(eq(schema.users.id, user.id));
     expect(refreshed.lastDigestSentAt).not.toBeNull();
+
+    // Retention pass: a real confirmed duplicate carries a real, non-zero
+    // savings figure — the digest should say so, using the same total
+    // /savings' own "Potential savings from duplicates" callout shows.
+    const emailArgs = sendMailMock.mock.calls.find(([msg]) => msg.to === user.email)?.[0];
+    expect(emailArgs?.html).toContain("You could potentially save");
   });
 
   it("first-ever digest sets the monthly-cost snapshot but generates no spend_increased notification (nothing to compare against yet)", async () => {
@@ -218,6 +224,10 @@ describe.skipIf(!hasDb)("weekly digest job (DB integration)", () => {
     // weeklyDigestEnabled defaults to true — not just a Settings pointer.
     const emailArgs = sendMailMock.mock.calls.at(-1)?.[0];
     expect(emailArgs?.html).toContain("/api/notifications/digest/unsubscribe");
+    // Retention pass: "changed by $Y" appended to the total-spend line —
+    // $55.00/mo total, +$40.00 vs. the $15.00 previous snapshot.
+    expect(emailArgs?.html).toContain("$55.00");
+    expect(emailArgs?.html).toContain("+$40.00 vs. last time");
   });
 
   it("does not generate a spend_increased notification when the total didn't meaningfully grow", async () => {

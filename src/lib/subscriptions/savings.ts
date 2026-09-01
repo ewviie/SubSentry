@@ -333,6 +333,31 @@ export function computeTotalPotentialSavingsYearlyCents(recommendations: Savings
   );
 }
 
+// Retention pass: a caller that needs the currency this total is actually
+// denominated in (weekly-digest-job.ts's own digest, which has no other
+// reliable way to know it) — deliberately NOT re-derived by calling
+// splitByPrimaryCurrency on the caller's own recommendation list a second
+// time. primaryCurrencyDuplicateRecommendations' own dedup-by-target step
+// happens BEFORE its currency selection; re-running splitByPrimaryCurrency
+// on an un-deduped or differently-filtered list can pick a different
+// "majority" currency at the edges (e.g. a duplicate pair whose two raw
+// rows both count before dedup but only one counts after), which would
+// silently mislabel this exact total's currency. Reusing the one already-
+// correct code path both narrow totals above already call is what
+// guarantees this can never happen.
+export function computeTotalPotentialSavings(recommendations: SavingsRecommendation[]): {
+  monthlyCents: number;
+  yearlyCents: number;
+  currency: string | null;
+} {
+  const counted = primaryCurrencyDuplicateRecommendations(recommendations);
+  return {
+    monthlyCents: counted.reduce((sum, rec) => sum + rec.monthlySavingsCents, 0),
+    yearlyCents: counted.reduce((sum, rec) => sum + rec.annualSavingsCents, 0),
+    currency: counted[0]?.currency ?? null,
+  };
+}
+
 // The other half of "potential vs. actually happened" — everything above
 // this point in the file answers "what could you save"; this answers "what
 // have you actually stopped paying for." A canceled subscription's row is

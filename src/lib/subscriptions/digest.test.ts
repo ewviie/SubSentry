@@ -86,7 +86,7 @@ describe("computeWeeklyDigestSummary", () => {
       notif({ type: "savings_opportunity", severity: "info", impactCents: 500 }),
     ];
 
-    const summary = computeWeeklyDigestSummary([priceIncreased, renewingSoon], history, newNotifications, NOW);
+    const summary = computeWeeklyDigestSummary([priceIncreased, renewingSoon], history, newNotifications, [], null, NOW);
 
     expect(summary.monthlyCents).toBeGreaterThan(0);
     expect(summary.currency).toBe("usd");
@@ -101,11 +101,13 @@ describe("computeWeeklyDigestSummary", () => {
   });
 
   it("returns all-zero, null-safe fields for an empty portfolio with no new notifications", () => {
-    const summary = computeWeeklyDigestSummary([], new Map(), [], NOW);
+    const summary = computeWeeklyDigestSummary([], new Map(), [], [], null, NOW);
     expect(summary.monthlyCents).toBe(0);
     expect(summary.upcomingRenewalsCount).toBe(0);
     expect(summary.upcomingRenewalsCents).toBe(0);
     expect(summary.creepingCostAnnualDeltaCents).toBeNull();
+    expect(summary.monthlyDeltaCents).toBeNull();
+    expect(summary.potentialSavingsYearlyCents).toBe(0);
     expect(summary.totalNewNotifications).toBe(0);
     expect(summary.topPriorityNotification).toBeNull();
   });
@@ -119,7 +121,7 @@ describe("computeWeeklyDigestSummary", () => {
       sub({ amountCents: 999_999, currency: "usd", nextRenewalDate: "2099-01-01" }),
     ];
     const gbpOutlier = sub({ amountCents: 500, currency: "gbp", nextRenewalDate: "2026-09-03" });
-    const summary = computeWeeklyDigestSummary([...usdMajority, gbpOutlier], new Map(), [], NOW);
+    const summary = computeWeeklyDigestSummary([...usdMajority, gbpOutlier], new Map(), [], [], null, NOW);
     expect(summary.currency).toBe("usd");
     // Only the two soon-renewing usd subscriptions count — not the
     // far-future usd one, and not the gbp one (real spend, wrong currency).
@@ -129,8 +131,112 @@ describe("computeWeeklyDigestSummary", () => {
   it("picks the highest-impact notification within the same severity as the top priority", () => {
     const small = notif({ type: "duplicate_subscription", severity: "warning", impactCents: 100, title: "Small one" });
     const big = notif({ type: "duplicate_subscription", severity: "warning", impactCents: 5000, title: "Big one" });
-    const summary = computeWeeklyDigestSummary([], new Map(), [small, big], NOW);
+    const summary = computeWeeklyDigestSummary([], new Map(), [small, big], [], null, NOW);
     expect(summary.topPriorityNotification?.title).toBe("Big one");
+  });
+});
+
+describe("computeWeeklyDigestSummary — monthlyDeltaCents", () => {
+  it("is null on a user's first-ever digest (no previous snapshot)", () => {
+    const summary = computeWeeklyDigestSummary([sub({ amountCents: 1000 })], new Map(), [], [], null, NOW);
+    expect(summary.monthlyDeltaCents).toBeNull();
+  });
+
+  it("is a real signed delta against the previous digest's own total", () => {
+    const summary = computeWeeklyDigestSummary(
+      [sub({ amountCents: 1500, billingCycle: "monthly", currency: "usd" })],
+      new Map(),
+      [],
+      [],
+      { monthlyCents: 1000, currency: "usd" },
+      NOW,
+    );
+    expect(summary.monthlyDeltaCents).toBe(500);
+  });
+
+  it("is negative when spend genuinely decreased", () => {
+    const summary = computeWeeklyDigestSummary(
+      [sub({ amountCents: 500, billingCycle: "monthly", currency: "usd" })],
+      new Map(),
+      [],
+      [],
+      { monthlyCents: 1000, currency: "usd" },
+      NOW,
+    );
+    expect(summary.monthlyDeltaCents).toBe(-500);
+  });
+
+  it("is null when the portfolio's primary currency changed since the previous digest — never a cross-currency delta", () => {
+    const summary = computeWeeklyDigestSummary(
+      [sub({ amountCents: 1000, billingCycle: "monthly", currency: "gbp" })],
+      new Map(),
+      [],
+      [],
+      { monthlyCents: 1000, currency: "usd" },
+      NOW,
+    );
+    expect(summary.monthlyDeltaCents).toBeNull();
+  });
+});
+
+describe("computeWeeklyDigestSummary — potentialSavingsYearlyCents", () => {
+  it("is 0, with a null currency, with no savings recommendations", () => {
+    const summary = computeWeeklyDigestSummary([], new Map(), [], [], null, NOW);
+    expect(summary.potentialSavingsYearlyCents).toBe(0);
+    expect(summary.potentialSavingsCurrency).toBeNull();
+  });
+
+  it("reflects a real confirmed-duplicate recommendation's own yearly figure and currency", () => {
+    const duplicateRec = {
+      id: "duplicate-a-b",
+      type: "duplicate" as const,
+      title: "Two Netflix subscriptions look like duplicates",
+      description: "test",
+      actionLabel: "Review",
+      monthlySavingsCents: 1000,
+      annualSavingsCents: 12000,
+      impactCents: 1000,
+      evidenceTier: "confirmed" as const,
+      urgencyDays: 30,
+      targetSubscriptionId: "sub-b",
+      involvedSubscriptionIds: ["sub-a", "sub-b"],
+      currency: "usd",
+    };
+    const summary = computeWeeklyDigestSummary([], new Map(), [], [duplicateRec], null, NOW);
+    expect(summary.potentialSavingsYearlyCents).toBe(12000);
+    expect(summary.potentialSavingsCurrency).toBe("usd");
+  });
+
+  it("tracks its own currency separately from the portfolio's primary currency — never mislabels a gbp saving as usd", () => {
+    // Every active subscription (and so the portfolio's own primary
+    // currency, `summary.currency`) is usd; the one real duplicate found is
+    // priced in gbp. Before this was tracked separately, formatting this
+    // total with `summary.currency` would have silently mislabeled a real
+    // £100.00/yr figure as "$100.00/yr".
+    const usdSubs = [
+      sub({ amountCents: 1000, currency: "usd" }),
+      sub({ amountCents: 1000, currency: "usd" }),
+      sub({ amountCents: 1000, currency: "usd" }),
+    ];
+    const gbpDuplicateRec = {
+      id: "duplicate-gbp",
+      type: "duplicate" as const,
+      title: "Two gbp subscriptions look like duplicates",
+      description: "test",
+      actionLabel: "Review",
+      monthlySavingsCents: 1000,
+      annualSavingsCents: 10000,
+      impactCents: 1000,
+      evidenceTier: "confirmed" as const,
+      urgencyDays: 30,
+      targetSubscriptionId: "sub-gbp-b",
+      involvedSubscriptionIds: ["sub-gbp-a", "sub-gbp-b"],
+      currency: "gbp",
+    };
+    const summary = computeWeeklyDigestSummary(usdSubs, new Map(), [], [gbpDuplicateRec], null, NOW);
+    expect(summary.currency).toBe("usd");
+    expect(summary.potentialSavingsCurrency).toBe("gbp");
+    expect(summary.potentialSavingsYearlyCents).toBe(10000);
   });
 });
 
@@ -157,17 +263,17 @@ describe("computeMonthlyTotal", () => {
 
 describe("isDigestWorthSending", () => {
   it("is true whenever there's at least one genuinely new notification", () => {
-    const summary = computeWeeklyDigestSummary([], new Map(), [notif()], NOW);
+    const summary = computeWeeklyDigestSummary([], new Map(), [notif()], [], null, NOW);
     expect(isDigestWorthSending(summary)).toBe(true);
   });
 
   it("is false when there's real spend but nothing new happened — no 'here's what you already saw' digest", () => {
-    const summary = computeWeeklyDigestSummary([sub({ amountCents: 500 })], new Map(), [], NOW);
+    const summary = computeWeeklyDigestSummary([sub({ amountCents: 500 })], new Map(), [], [], null, NOW);
     expect(isDigestWorthSending(summary)).toBe(false);
   });
 
   it("is false for a totally empty portfolio", () => {
-    const summary = computeWeeklyDigestSummary([], new Map(), [], NOW);
+    const summary = computeWeeklyDigestSummary([], new Map(), [], [], null, NOW);
     expect(isDigestWorthSending(summary)).toBe(false);
   });
 });

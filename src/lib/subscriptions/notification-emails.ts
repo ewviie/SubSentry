@@ -179,9 +179,33 @@ function buildDigestLines(
     rows.push({ html: line, text: line });
   }
 
+  // Retention pass: "You could potentially save $X/year" — the same total
+  // /savings' own "Potential savings from duplicates" callout shows
+  // (computeTotalPotentialSavingsYearlyCents, savings.ts), read here rather
+  // than a second estimate. Zero is a real, common answer (no confirmed
+  // duplicate found) and isn't worth a line — this only appears when
+  // there's a real, checkable number behind it.
+  if (summary.potentialSavingsYearlyCents > 0 && summary.potentialSavingsCurrency) {
+    const savings = formatCents(summary.potentialSavingsYearlyCents, summary.potentialSavingsCurrency);
+    const line = `You could potentially save ${savings}/yr — see Savings for the details`;
+    rows.push({ html: line, text: line });
+  }
+
   if (summary.currency) {
     const spend = formatCents(summary.monthlyCents, summary.currency);
-    rows.push({ html: `<strong>${spend}</strong>/mo in recurring spend, total`, text: `${spend}/mo in recurring spend, total` });
+    // Retention pass: "changed by $Y" appended right onto the total-spend
+    // line it's about, not a separate bullet — reads as one fact ("here's
+    // your total, and here's how it moved") rather than two disconnected
+    // ones. Absent entirely on a user's first-ever digest (monthlyDeltaCents
+    // is null — nothing to compare against yet), and silent on an exact
+    // $0.00 move (a real, common, uninteresting outcome not worth a line).
+    const deltaCents = summary.monthlyDeltaCents;
+    const deltaSuffix =
+      deltaCents !== null && deltaCents !== 0
+        ? ` (${deltaCents > 0 ? "+" : "-"}${formatCents(Math.abs(deltaCents), summary.currency)} vs. last time)`
+        : "";
+    const line = `${spend}/mo in recurring spend, total${deltaSuffix}`;
+    rows.push({ html: `<strong>${spend}</strong>/mo in recurring spend, total${deltaSuffix}`, text: line });
   }
 
   const htmlItems = rows.map((r) => `<li style="margin:0 0 8px;">${r.html}</li>`).join("");

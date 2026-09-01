@@ -1,4 +1,4 @@
-import { and, asc, count, eq, ne, sql } from "drizzle-orm";
+import { and, asc, count, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { subscriptions, subscriptionPriceHistory, type Subscription, type SubscriptionPriceHistory, type User } from "@/lib/db/schema";
 import { MAX_ACTIVE_SUBSCRIPTIONS } from "@/lib/billing/plan";
@@ -382,6 +382,34 @@ export async function getAllPriceHistoryForUser(userId: string): Promise<Map<str
     .orderBy(asc(subscriptionPriceHistory.observedAt));
 
   const bySubscriptionId = new Map<string, SubscriptionPriceHistory[]>();
+  for (const row of rows) {
+    const existing = bySubscriptionId.get(row.subscriptionId);
+    if (existing) existing.push(row);
+    else bySubscriptionId.set(row.subscriptionId, [row]);
+  }
+  return bySubscriptionId;
+}
+
+// Retention pass: the renewal-reminders job's own bulk lookup — that job
+// iterates candidate subscriptions spanning many different users (unlike
+// getAllPriceHistoryForUser above, which is already scoped to one), so
+// there's no single userId to key this by. One IN(...) query for the
+// whole candidate batch (bounded the same way the candidates themselves
+// are — see renewal-reminders.ts's own MAX_LEAD_DAYS/cap reasoning), not
+// one query per subscription: the exact N+1 this app's own conventions
+// already avoid everywhere else (see getAllPriceHistoryForUser's own
+// comment). An empty input returns an empty map without a wasted round
+// trip.
+export async function getPriceHistoryForSubscriptionIds(subscriptionIds: string[]): Promise<Map<string, SubscriptionPriceHistory[]>> {
+  const bySubscriptionId = new Map<string, SubscriptionPriceHistory[]>();
+  if (subscriptionIds.length === 0) return bySubscriptionId;
+
+  const rows = await db
+    .select()
+    .from(subscriptionPriceHistory)
+    .where(inArray(subscriptionPriceHistory.subscriptionId, subscriptionIds))
+    .orderBy(asc(subscriptionPriceHistory.observedAt));
+
   for (const row of rows) {
     const existing = bySubscriptionId.get(row.subscriptionId);
     if (existing) existing.push(row);

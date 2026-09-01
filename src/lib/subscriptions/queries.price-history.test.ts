@@ -306,6 +306,51 @@ describe.skipIf(!hasDb)("subscription price history", () => {
     expect([...grouped.values()].flat().every((row) => row.userId === userA)).toBe(true);
   });
 
+  it("getPriceHistoryForSubscriptionIds: one bulk query across specific subscription ids, spanning multiple users", async () => {
+    const subA = await queries.createSubscription(userA, {
+      name: "Cross-User Bulk A",
+      amount: "10.00",
+      currency: "usd",
+      billingCycle: "monthly",
+      category: "other",
+      nextRenewalDate: "2099-01-01",
+      status: "active",
+    });
+    await queries.updateSubscription(userA, subA.id, "free", { amount: "12.00" }); // a genuine second row
+    const subB = await queries.createSubscription(userB, {
+      name: "Cross-User Bulk B",
+      amount: "5.00",
+      currency: "usd",
+      billingCycle: "monthly",
+      category: "other",
+      nextRenewalDate: "2099-01-01",
+      status: "active",
+    });
+    // A third subscription NOT included in the requested id list — proves
+    // this is scoped to the exact ids asked for, not "every subscription
+    // either user happens to own" (unlike getAllPriceHistoryForUser above,
+    // this function has no userId scope of its own at all).
+    const subAExcluded = await queries.createSubscription(userA, {
+      name: "Cross-User Bulk A Excluded",
+      amount: "1.00",
+      currency: "usd",
+      billingCycle: "monthly",
+      category: "other",
+      nextRenewalDate: "2099-01-01",
+      status: "active",
+    });
+
+    const result = await queries.getPriceHistoryForSubscriptionIds([subA.id, subB.id]);
+    expect(result.get(subA.id)).toHaveLength(2);
+    expect(result.get(subB.id)).toHaveLength(1);
+    expect(result.has(subAExcluded.id)).toBe(false);
+  });
+
+  it("getPriceHistoryForSubscriptionIds: returns an empty map for an empty input, with no query round trip", async () => {
+    const result = await queries.getPriceHistoryForSubscriptionIds([]);
+    expect(result.size).toBe(0);
+  });
+
   // Import price-reconciliation: "Update price" (review-table.tsx) reuses
   // the exact same updateSubscription/PATCH path a manual edit does, tagged
   // with an optional priceHistorySource for provenance only — these prove
