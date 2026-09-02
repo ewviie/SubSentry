@@ -21,7 +21,7 @@ import {
   subscriptionToFormValues,
   type SubscriptionFormValues,
 } from "@/components/subscriptions/subscription-form";
-import { amountStringToCents, formatCents, monthlyCents } from "@/lib/subscriptions/money";
+import { amountStringToCents, annualCents, formatCents } from "@/lib/subscriptions/money";
 import type { Subscription } from "@/lib/db/schema";
 
 // A real, always-working search link, never a claimed direct cancellation
@@ -64,9 +64,14 @@ export function EditSubscriptionForm({ subscription }: { subscription: Subscript
         toast.error(data?.message ?? "Couldn't cancel that. Try again.");
         return;
       }
-      const monthly = monthlyCents(subscription.amountCents, subscription.billingCycle);
+      // Annual, not monthly — matches what actually got recorded to the
+      // realized-savings ledger this same PATCH just wrote a row to
+      // (queries.ts's updateSubscription; schema.ts's realizedSavings), and
+      // the "$X/year" framing /savings' own "Money saved so far" card now
+      // leads with (savings/page.tsx).
+      const annual = annualCents(subscription.amountCents, subscription.billingCycle);
       toast.success("Canceled", {
-        description: `You'll save ${formatCents(monthly, subscription.currency)}/mo.`,
+        description: `You'll save about ${formatCents(annual, subscription.currency)}/year.`,
       });
       router.push("/dashboard");
       router.refresh();
@@ -98,9 +103,9 @@ export function EditSubscriptionForm({ subscription }: { subscription: Subscript
     // mistake rather than a real cancellation. See handleDelete's own
     // comment for why that one stays a neutral toast.
     if (subscription.status === "active" && values.status === "canceled") {
-      const monthly = monthlyCents(amountStringToCents(values.amount), values.billingCycle);
+      const annual = annualCents(amountStringToCents(values.amount), values.billingCycle);
       toast.success("Canceled", {
-        description: `You'll save ${formatCents(monthly, values.currency)}/mo.`,
+        description: `You'll save about ${formatCents(annual, values.currency)}/year.`,
       });
     } else {
       toast.success("Changes saved");
@@ -194,16 +199,15 @@ export function EditSubscriptionForm({ subscription }: { subscription: Subscript
             <AlertDialogHeader>
               <AlertDialogTitle>Delete {subscription.name}?</AlertDialogTitle>
               <AlertDialogDescription>
+                {/* Deliberately no mention of "Money saved so far" here,
+                    even for an already-canceled subscription — unlike this
+                    dialog's old copy. That total now reads from the
+                    persisted realizedSavings ledger (schema.ts), written
+                    once at the moment of cancellation, not from this row's
+                    own current state — deleting a subscription (canceled or
+                    not) no longer changes it, so saying otherwise would be
+                    stale, false guidance now. */}
                 This removes it and its history permanently. This can&apos;t be undone.
-                {/* "Money saved so far" on /savings (see savings.ts's
-                    computeRealizedSavings) is a live total over currently-
-                    canceled rows, not a ledger. Deleting one lowers that
-                    total the same way it removes everything else about this
-                    row. Only shown for a subscription that's already
-                    canceled (the only case where this delete actually
-                    changes that other number) so this doesn't add noise to
-                    the far more common "delete a duplicate/mistake" case. */}
-                {subscription.status === "canceled" ? " It'll also come off your “Money saved so far” total on Savings." : ""}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>

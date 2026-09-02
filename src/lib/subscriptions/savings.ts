@@ -1,4 +1,4 @@
-import type { Subscription } from "@/lib/db/schema";
+import type { Subscription, RealizedSavingsRecord } from "@/lib/db/schema";
 import { monthlyCents, annualCents, formatCents, splitByPrimaryCurrency } from "./money";
 import { forEachLikelyDuplicatePair, computeFunctionalOverlapGroups, findSmallSubscriptionsCluster, smallSubscriptionsClusterTitle } from "./insights";
 import { findStaleSubscriptions } from "./staleness";
@@ -360,11 +360,16 @@ export function computeTotalPotentialSavings(recommendations: SavingsRecommendat
 
 // The other half of "potential vs. actually happened" — everything above
 // this point in the file answers "what could you save"; this answers "what
-// have you actually stopped paying for." A canceled subscription's row is
-// never deleted on cancel (only status flips — see queries.ts's
-// updateSubscription; deleteSubscription is a separate, explicit action),
-// so its amountCents/billingCycle are still real, readable data, not
-// something this needs a new table to compute.
+// have you actually stopped paying for." Phase 8 Intelligence, opportunity
+// #2: reads from the persisted `realizedSavings` ledger (schema.ts —
+// queries.ts's getRealizedSavings), NOT from a live scan of
+// `subscriptions WHERE status = 'canceled'` the way this function used to
+// work. Every row it's given is already a snapshot taken at the exact
+// moment a subscription was genuinely canceled (see schema.ts's own header
+// comment on `realizedSavings` for the full write-side reasoning); editing
+// or deleting that subscription afterward cannot change or erase what this
+// function reports, by construction, not by convention this function has to
+// re-enforce itself.
 //
 // Deliberately NOT called "confirmed savings" anywhere in this app's UI —
 // "confirmed" already means something specific and different here
@@ -374,12 +379,7 @@ export function computeTotalPotentialSavings(recommendations: SavingsRecommendat
 // concepts a user has no way to tell apart from the word alone. Callers
 // should use "realized" / "money saved" in copy instead.
 //
-// Three things this number is honest about, on purpose:
-// - It's a live read of current status, not a ledger. Deleting a canceled
-//   subscription (the existing "danger zone" action) removes it from this
-//   total too, same as it removes everything else about that row — callers
-//   should say so in the surrounding copy rather than let the number
-//   silently drop with no explanation.
+// Two things this number stays honest about, on purpose:
 // - It counts "you marked this canceled in SubSentry," not "SubSentry
 //   verified you stopped paying the merchant" (no billing-API integration
 //   exists to confirm that, and Phase 6's cancellation guidance is explicit
@@ -392,9 +392,9 @@ export function computeTotalPotentialSavings(recommendations: SavingsRecommendat
 //   canceled subscriptions could genuinely be in different currencies), and
 //   adding raw cents across currencies together would produce a number
 //   wearing a real one's formatting. monthlyCents/yearlyCents/currency are
-//   all null when the canceled set spans more than one currency — an honest
-//   gap, not a wrong number — leaving canceledCount (currency-independent)
-//   as the only thing still shown in that case.
+//   all null when the ledger spans more than one currency — an honest gap,
+//   not a wrong number — leaving canceledCount (currency-independent) as
+//   the only thing still shown in that case.
 export interface RealizedSavings {
   monthlyCents: number | null;
   yearlyCents: number | null;
@@ -402,25 +402,25 @@ export interface RealizedSavings {
   canceledCount: number;
 }
 
-export function computeRealizedSavings(allSubscriptions: Subscription[]): RealizedSavings {
-  const canceled = allSubscriptions.filter((s) => s.status === "canceled");
-  if (canceled.length === 0) return { monthlyCents: null, yearlyCents: null, currency: null, canceledCount: 0 };
+export function computeRealizedSavings(records: RealizedSavingsRecord[]): RealizedSavings {
+  if (records.length === 0) return { monthlyCents: null, yearlyCents: null, currency: null, canceledCount: 0 };
 
-  // Case-insensitive on purpose (CodeRabbit review) — validation.ts already
-  // lowercases currency for every subscription created/edited through the
-  // app's own form, so this is defense-in-depth rather than a reachable bug
-  // today, but this function's whole job is refusing to silently sum
-  // mismatched currencies; comparing "usd" and "USD" as different ones
-  // would produce exactly the false "mixed currency, no total" gap this
-  // function exists to avoid.
-  const currency = canceled[0].currency.toLowerCase();
-  const singleCurrency = canceled.every((s) => s.currency.toLowerCase() === currency);
-  if (!singleCurrency) return { monthlyCents: null, yearlyCents: null, currency: null, canceledCount: canceled.length };
+  // Case-insensitive on purpose (CodeRabbit review, originally against this
+  // function's own live-scan predecessor) — validation.ts already lowercases
+  // currency for every subscription created/edited through the app's own
+  // form, so this is defense-in-depth rather than a reachable bug today, but
+  // this function's whole job is refusing to silently sum mismatched
+  // currencies; comparing "usd" and "USD" as different ones would produce
+  // exactly the false "mixed currency, no total" gap this function exists
+  // to avoid.
+  const currency = records[0].currency.toLowerCase();
+  const singleCurrency = records.every((r) => r.currency.toLowerCase() === currency);
+  if (!singleCurrency) return { monthlyCents: null, yearlyCents: null, currency: null, canceledCount: records.length };
 
-  const totalMonthlyCents = canceled.reduce((sum, s) => sum + monthlyCents(s.amountCents, s.billingCycle), 0);
+  const totalMonthlyCents = records.reduce((sum, r) => sum + monthlyCents(r.amountCents, r.billingCycle), 0);
   // Not totalMonthlyCents * 12 — see money.ts's own annualCents comment.
-  const totalYearlyCents = canceled.reduce((sum, s) => sum + annualCents(s.amountCents, s.billingCycle), 0);
-  return { monthlyCents: totalMonthlyCents, yearlyCents: totalYearlyCents, currency, canceledCount: canceled.length };
+  const totalYearlyCents = records.reduce((sum, r) => sum + annualCents(r.amountCents, r.billingCycle), 0);
+  return { monthlyCents: totalMonthlyCents, yearlyCents: totalYearlyCents, currency, canceledCount: records.length };
 }
 
 export type SavingsPriority = "high" | "medium" | "low";

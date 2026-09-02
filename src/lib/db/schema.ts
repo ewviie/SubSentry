@@ -743,6 +743,104 @@ export const notifications = pgTable(
   ],
 );
 
+// Phase 8 Intelligence, opportunity #2: the permanent "money SubSentry
+// actually helped you save" ledger — distinct from savings.ts's
+// computeSavingsRecommendations (a live, opportunity-tier detection over
+// still-active subscriptions, "potential," not "happened yet"). One row per
+// genuine active-to-canceled transition (see queries.ts's updateSubscription
+// — the only write path for this table), written inside the same
+// advisory-locked transaction as the status change itself, never
+// reconstructed later from a subscription's current (mutable, possibly
+// since-edited-or-deleted) row.
+//
+// Every money/identity column here is a SNAPSHOT taken at the moment of
+// cancellation, not a live reference: subscriptionName/amountCents/
+// billingCycle/currency/subscriptionSource are copied in at insert and never
+// updated again. This is the entire point of this table existing — before
+// it, /savings' "Money saved so far" total (savings.ts's old
+// computeRealizedSavings) was computed by re-scanning `subscriptions WHERE
+// status = 'canceled'` on every page load, which meant editing a canceled
+// subscription's price silently rewrote history, and deleting one erased it
+// from the total entirely. subscriptionId is kept for the deep link and for
+// idempotency (below), but nothing this table displays is ever read back
+// through it.
+//
+// subscriptionId -> onDelete "set null", not "cascade" (unlike the FK on
+// `subscriptions` itself in every other table that references it) —
+// deliberately, and unlike every other subscriptions-referencing FK's own
+// "cascade" default in this file. The whole reason this table exists is
+// that "you deleted the row" must never mean "the saving un-happened" (see
+// this table's own header paragraph above); a cascade delete would silently
+// contradict that on the one write this table promises never to make.
+// Mirrors notifications.subscriptionId's identical tradeoff/reasoning (see
+// its own comment) for the same "a historical fact outlives the row it was
+// about" reason.
+//
+// Idempotency: the unique index on subscriptionId below is what makes
+// inserting this row safe to run inside the same transaction as every
+// active->canceled PATCH, unconditionally, via onConflictDoNothing — a
+// retried request, a double-submit, or a second PATCH after the
+// subscription is already canceled can never produce a second row for the
+// same subscription. queries.ts additionally only ever attempts the insert
+// when the pre-write row's own status was genuinely "active" (not "paused"
+// — see edit-subscription-form.tsx's own identical "not paused, suspended
+// isn't actually saved yet" reasoning for the client-side toast this
+// mirrors), so a paused->canceled transition — which was never costing
+// anything the moment it paused, per staleness.ts's own "a paused/canceled
+// one isn't costing anything" comment — doesn't fabricate a saving event
+// either. Both guards are defense in depth for each other: the status check
+// stops a false event from ever being attempted; the unique index stops a
+// true event from ever being recorded twice.
+//
+// No exchange-rate conversion, ever — same "this app has no exchange-rate
+// source, never fabricate one" rule money.ts's splitByPrimaryCurrency
+// already documents. currency is stored per row exactly as the canceled
+// subscription's own was; realized-savings.ts's own summary function
+// refuses to sum across rows that don't share one currency, the same
+// "honest gap, not a wrong number" convention the old
+// computeRealizedSavings already established (see that file's comment).
+export const realizedSavings = pgTable(
+  "realized_savings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    subscriptionId: uuid("subscription_id").references(() => subscriptions.id, { onDelete: "set null" }),
+    subscriptionName: text("subscription_name").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    billingCycle: text("billing_cycle", {
+      enum: ["monthly", "yearly", "weekly", "quarterly"],
+    }).notNull(),
+    currency: text("currency").notNull(),
+    // Snapshot of subscriptions.source at the moment of cancellation (see
+    // source.ts) — real, already-stored provenance, not a fabricated
+    // "reason." subscriptions.source is never user-editable after creation
+    // (see validation.ts's subscriptionUpdateSchema — `source` isn't a
+    // field on it), so this is stable, honest context for why/how this
+    // subscription entered the app in the first place, shown alongside the
+    // cancellation record rather than a guessed cancellation reason this
+    // app has no way to actually know.
+    subscriptionSource: text("subscription_source").notNull(),
+    canceledAt: timestamp("canceled_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // The idempotency guarantee this table's own header comment documents —
+    // onConflictDoNothing's target in queries.ts. Nullable-safe: Postgres
+    // treats every NULL in a unique index as distinct from every other, so
+    // this never blocks a real insert; it only ever blocks a second insert
+    // for the same still-live subscriptionId, which is the one case that
+    // must be blocked.
+    uniqueIndex("realized_savings_subscription_idx").on(table.subscriptionId),
+    index("realized_savings_user_canceled_idx").on(table.userId, table.canceledAt),
+    check("realized_savings_amount_cents_non_negative", sql`${table.amountCents} >= 0`),
+    check(
+      "realized_savings_billing_cycle_valid",
+      sql`${table.billingCycle} in ('monthly', 'yearly', 'weekly', 'quarterly')`,
+    ),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
@@ -764,3 +862,5 @@ export type NewSubscriptionPriceHistory = typeof subscriptionPriceHistory.$infer
 export type DismissedSavingsRecommendation = typeof dismissedSavingsRecommendations.$inferSelect;
 export type Notification = typeof notifications.$inferSelect;
 export type NewNotification = typeof notifications.$inferInsert;
+export type RealizedSavingsRecord = typeof realizedSavings.$inferSelect;
+export type NewRealizedSavingsRecord = typeof realizedSavings.$inferInsert;

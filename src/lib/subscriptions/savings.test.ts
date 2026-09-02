@@ -9,7 +9,7 @@ import {
   splitSavingsRecommendationsByPlan,
   type SavingsRecommendation,
 } from "./savings";
-import type { Subscription } from "@/lib/db/schema";
+import type { Subscription, RealizedSavingsRecord } from "@/lib/db/schema";
 
 let nextId = 1;
 function sub(overrides: Partial<Subscription>): Subscription {
@@ -28,6 +28,22 @@ function sub(overrides: Partial<Subscription>): Subscription {
     lastReviewedAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),
+    ...overrides,
+  };
+}
+
+let nextRealizedSavingsId = 1;
+function realizedSavingsRecord(overrides: Partial<RealizedSavingsRecord>): RealizedSavingsRecord {
+  return {
+    id: `realized-${nextRealizedSavingsId++}`,
+    userId: "user-1",
+    subscriptionId: `sub-${nextRealizedSavingsId}`,
+    subscriptionName: "Test Sub",
+    amountCents: 999,
+    billingCycle: "monthly",
+    currency: "usd",
+    subscriptionSource: "manual",
+    canceledAt: new Date(),
     ...overrides,
   };
 }
@@ -487,23 +503,20 @@ describe("computeTotalPotentialSavings", () => {
 });
 
 describe("computeRealizedSavings", () => {
-  it("returns null totals and 0 count for no subscriptions", () => {
+  it("returns null totals and 0 count for no ledger rows", () => {
     expect(computeRealizedSavings([])).toEqual({ monthlyCents: null, yearlyCents: null, currency: null, canceledCount: 0 });
   });
 
-  it("ignores active and paused subscriptions", () => {
+  // Distinct from the old (pre-ledger) version's own "ignores active and
+  // paused subscriptions" test — there's no `status` filter to test at all
+  // anymore. Every row in the ledger already represents a genuine
+  // cancellation by construction (queries.ts only ever writes one on a real
+  // active->canceled transition); this function no longer filters anything,
+  // it only sums and currency-checks what it's given.
+  it("sums monthly-equivalent cost across every ledger row, mixed billing cycles, same currency", () => {
     const result = computeRealizedSavings([
-      sub({ status: "active", amountCents: 1000 }),
-      sub({ status: "paused", amountCents: 1000 }),
-    ]);
-    expect(result).toEqual({ monthlyCents: null, yearlyCents: null, currency: null, canceledCount: 0 });
-  });
-
-  it("sums monthly-equivalent cost across every canceled subscription, mixed billing cycles, same currency", () => {
-    const result = computeRealizedSavings([
-      sub({ status: "canceled", amountCents: 1000, billingCycle: "monthly", currency: "usd" }), // 1000/mo
-      sub({ status: "canceled", amountCents: 12000, billingCycle: "yearly", currency: "usd" }), // 1000/mo
-      sub({ status: "active", amountCents: 99999 }), // excluded
+      realizedSavingsRecord({ amountCents: 1000, billingCycle: "monthly", currency: "usd" }), // 1000/mo
+      realizedSavingsRecord({ amountCents: 12000, billingCycle: "yearly", currency: "usd" }), // 1000/mo
     ]);
     expect(result.monthlyCents).toBe(2000);
     expect(result.yearlyCents).toBe(24000);
@@ -518,14 +531,14 @@ describe("computeRealizedSavings", () => {
   // what monthlyCents(9999,"yearly")=833 summed twice then *12 would give).
   it("reports the exact annual total for canceled yearly subscriptions, not a double-rounded one", () => {
     const result = computeRealizedSavings([
-      sub({ status: "canceled", amountCents: 9999, billingCycle: "yearly", currency: "usd" }),
-      sub({ status: "canceled", amountCents: 9999, billingCycle: "yearly", currency: "usd" }),
+      realizedSavingsRecord({ amountCents: 9999, billingCycle: "yearly", currency: "usd" }),
+      realizedSavingsRecord({ amountCents: 9999, billingCycle: "yearly", currency: "usd" }),
     ]);
     expect(result.yearlyCents).toBe(19998);
   });
 
-  it("counts every canceled subscription toward canceledCount, including a $0 one", () => {
-    const result = computeRealizedSavings([sub({ status: "canceled", amountCents: 0, currency: "usd" })]);
+  it("counts every ledger row toward canceledCount, including a $0 one", () => {
+    const result = computeRealizedSavings([realizedSavingsRecord({ amountCents: 0, currency: "usd" })]);
     expect(result.canceledCount).toBe(1);
     expect(result.monthlyCents).toBe(0);
   });
@@ -536,10 +549,10 @@ describe("computeRealizedSavings", () => {
   // currencies would produce a number wearing a real one's formatting.
   // canceledCount still reflects both (currency-independent), but no dollar
   // total is claimed.
-  it("returns null totals (never a fabricated cross-currency sum) when canceled subscriptions span more than one currency", () => {
+  it("returns null totals (never a fabricated cross-currency sum) when the ledger spans more than one currency", () => {
     const result = computeRealizedSavings([
-      sub({ status: "canceled", amountCents: 1000, currency: "usd" }),
-      sub({ status: "canceled", amountCents: 1000, currency: "eur" }),
+      realizedSavingsRecord({ amountCents: 1000, currency: "usd" }),
+      realizedSavingsRecord({ amountCents: 1000, currency: "eur" }),
     ]);
     expect(result.monthlyCents).toBeNull();
     expect(result.yearlyCents).toBeNull();
@@ -552,11 +565,26 @@ describe("computeRealizedSavings", () => {
   // return a null total for what's actually a single-currency case.
   it("treats differently-cased currency codes as the same currency", () => {
     const result = computeRealizedSavings([
-      sub({ status: "canceled", amountCents: 1000, currency: "usd" }),
-      sub({ status: "canceled", amountCents: 1000, currency: "USD" }),
+      realizedSavingsRecord({ amountCents: 1000, currency: "usd" }),
+      realizedSavingsRecord({ amountCents: 1000, currency: "USD" }),
     ]);
     expect(result.monthlyCents).toBe(2000);
     expect(result.currency).toBe("usd");
+  });
+
+  // The whole point of the ledger over the old live-scan version: this
+  // function never re-derives anything from `Subscription` at all anymore —
+  // it only ever reads the snapshot columns already on each row. A
+  // subscription's current (possibly since-edited, or deleted-and-gone) row
+  // is never consulted, so there is nothing here to mutate or delete out
+  // from under this total. Nothing to actually assert on this pure function
+  // beyond its own input type no longer being `Subscription[]` — the real
+  // guarantee is enforced at the write side (queries.realized-savings.test.ts)
+  // and the schema's own onDelete: "set null" (schema.ts).
+  it("still reports a real total from a row whose subscriptionId is null (the original subscription was later deleted)", () => {
+    const result = computeRealizedSavings([realizedSavingsRecord({ subscriptionId: null, amountCents: 1500 })]);
+    expect(result.monthlyCents).toBe(1500);
+    expect(result.canceledCount).toBe(1);
   });
 });
 

@@ -1,6 +1,14 @@
-import { and, asc, count, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { subscriptions, subscriptionPriceHistory, type Subscription, type SubscriptionPriceHistory, type User } from "@/lib/db/schema";
+import {
+  subscriptions,
+  subscriptionPriceHistory,
+  realizedSavings,
+  type Subscription,
+  type SubscriptionPriceHistory,
+  type RealizedSavingsRecord,
+  type User,
+} from "@/lib/db/schema";
 import { MAX_ACTIVE_SUBSCRIPTIONS } from "@/lib/billing/plan";
 import { resolveHasReachedSubscriptionLimit } from "@/lib/dev/plan-preview";
 import { amountStringToCents, monthlyCents, annualCents, splitByPrimaryCurrency } from "./money";
@@ -247,15 +255,22 @@ export async function updateSubscription(
   const mayActivate = input.status === "active";
 
   // Only pay for the extra read/transaction when this edit could possibly
-  // touch price or reactivate a subscription — the common edits (rename,
-  // recategorize, change renewal date, cancelling) never need either.
-  // billingCycle is included, not just amount/currency: amountCents is
-  // unit-less on its own ("$10" means something very different at monthly
-  // vs. yearly cadence), so a cycle-only change (same amountCents,
-  // different cadence) is just as real a price change as an amount edit —
-  // see schema.ts's subscriptionPriceHistory comment.
+  // touch price, reactivate a subscription, or cancel one — the common
+  // edits (rename, recategorize, change renewal date, pausing) never need
+  // any of the three. billingCycle is included, not just amount/currency:
+  // amountCents is unit-less on its own ("$10" means something very
+  // different at monthly vs. yearly cadence), so a cycle-only change (same
+  // amountCents, different cadence) is just as real a price change as an
+  // amount edit — see schema.ts's subscriptionPriceHistory comment.
   const touchesPrice = input.amount !== undefined || input.currency !== undefined || input.billingCycle !== undefined;
-  if (!touchesPrice && !mayActivate) {
+  // A genuine cancellation is the one other edit (besides a price change or
+  // reactivation) that needs the pre-write "before" row — realizedSavings
+  // (schema.ts) is only ever written on a real active->canceled transition,
+  // which this flag alone can't tell from "already canceled, PATCHed
+  // again" without reading `before` first. See the transaction branch below
+  // for the actual gate.
+  const cancels = input.status === "canceled";
+  if (!touchesPrice && !mayActivate && !cancels) {
     const [row] = await db
       .update(subscriptions)
       .set(values)
@@ -306,6 +321,36 @@ export async function updateSubscription(
       .returning();
 
     if (!row) return { kind: "not_found" };
+
+    // The realized-savings write (schema.ts's own header comment on
+    // `realizedSavings` carries the full reasoning) — gated strictly to a
+    // genuine active->canceled transition, the same "not paused, suspended
+    // isn't actually saved yet" distinction edit-subscription-form.tsx's
+    // own toast-copy comment already draws for this exact transition.
+    // `before.status !== "active"` covers both "was already canceled" (a
+    // retried/duplicate PATCH — before.status is already "canceled") and
+    // "was paused" (never a real new saving, since a paused subscription
+    // wasn't costing anything the moment it paused — see staleness.ts's own
+    // comment) in one check. onConflictDoNothing on subscriptionId is the
+    // second, DB-enforced layer of the same idempotency guarantee: even a
+    // race between two concurrent cancel requests for the same subscription
+    // (both reading the same "before" state under this transaction's own
+    // advisory lock, which already serializes them, but defense in depth
+    // costs nothing here) can never insert two rows.
+    if (cancels && before.status === "active") {
+      await tx
+        .insert(realizedSavings)
+        .values({
+          userId,
+          subscriptionId: row.id,
+          subscriptionName: row.name,
+          amountCents: row.amountCents,
+          billingCycle: row.billingCycle,
+          currency: row.currency,
+          subscriptionSource: row.source,
+        })
+        .onConflictDoNothing({ target: realizedSavings.subscriptionId });
+    }
 
     let priceChange: SubscriptionPriceChange | null = null;
     if (
@@ -416,6 +461,22 @@ export async function getPriceHistoryForSubscriptionIds(subscriptionIds: string[
     else bySubscriptionId.set(row.subscriptionId, [row]);
   }
   return bySubscriptionId;
+}
+
+// One query, scoped by this table's own userId index (realized_savings_
+// user_canceled_idx, schema.ts) — every row this user has ever genuinely
+// canceled, newest first. Never joined against `subscriptions`: every
+// column /savings needs (name, amount, billing cycle, currency, source) is
+// already snapshotted on this row itself (see schema.ts's own comment on
+// why), so reading it back through subscriptionId would defeat the entire
+// point of this table — a since-edited or deleted subscription would
+// silently change or vanish from its own history.
+export async function getRealizedSavings(userId: string): Promise<RealizedSavingsRecord[]> {
+  return db
+    .select()
+    .from(realizedSavings)
+    .where(eq(realizedSavings.userId, userId))
+    .orderBy(desc(realizedSavings.canceledAt));
 }
 
 export async function deleteSubscription(userId: string, id: string): Promise<boolean> {

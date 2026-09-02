@@ -1,5 +1,5 @@
 import { requireUser } from "@/lib/auth/session";
-import { listSubscriptions } from "@/lib/subscriptions/queries";
+import { listSubscriptions, getRealizedSavings } from "@/lib/subscriptions/queries";
 import {
   computeSavingsRecommendations,
   computeTotalPotentialSavingsMonthlyCents,
@@ -25,9 +25,10 @@ export default async function SavingsPage() {
   // Independent reads, fetched in parallel — same reasoning every other
   // Promise.all in this app gives (see subscriptions/[id]/page.tsx's own
   // comment): neither depends on the other's result.
-  const [subscriptions, dismissedIds] = await Promise.all([
+  const [subscriptions, dismissedIds, realizedSavingsRecords] = await Promise.all([
     listSubscriptions(user.id),
     getDismissedRecommendationIds(user.id),
+    getRealizedSavings(user.id),
   ]);
   const allRecommendations = computeSavingsRecommendations(subscriptions);
   // Dismissal is scoped to this page's own review list, not the underlying
@@ -41,7 +42,7 @@ export default async function SavingsPage() {
   // are visible together.
   const recommendations = allRecommendations.filter((r) => !dismissedIds.has(r.id));
   const totalMonthlyCents = computeTotalPotentialSavingsMonthlyCents(recommendations);
-  const realized = computeRealizedSavings(subscriptions);
+  const realized = computeRealizedSavings(realizedSavingsRecords);
   // Monetization Council P0: "gate savings-opportunity list depth by plan."
   // Every confirmed duplicate always stays fully visible here too, on the
   // same principle SavingsOpportunitiesCard's own comment documents — this
@@ -68,7 +69,13 @@ export default async function SavingsPage() {
           it here would conflate the two. Shown whenever there's history,
           independent of whether there's anything to flag right now. A
           clean account with zero current opportunities can still have real
-          past savings to show. */}
+          past savings to show.
+          Yearly is the headline figure (not monthly, unlike this page's own
+          "Potential savings" card below) — this is a cumulative, permanent
+          record (realizedSavings, schema.ts), so the number that best
+          conveys "here's the real benefit so far" is the annual one, same
+          framing the cancellation toast itself now uses (see
+          edit-subscription-form.tsx's handleQuickCancel). */}
       {realized.canceledCount > 0 ? (
         <MotionCard className="mt-6">
           <div className="rounded-xl border border-border bg-muted/30 p-4">
@@ -78,25 +85,25 @@ export default async function SavingsPage() {
               </div>
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Money saved so far</p>
-                {/* monthlyCents/yearlyCents are null when canceled
-                    subscriptions span more than one currency, currency is
-                    unvalidated free text on this schema, so summing raw cents
-                    across two of them would produce a number wearing a real
-                    one's formatting (see computeRealizedSavings' own comment,
-                    same rule money.ts's sumMonthlyCentsIfSingleCurrency
-                    already enforces elsewhere). An honest gap, not a wrong
-                    number: still names the real, currency-independent count. */}
+                {/* monthlyCents/yearlyCents are null when the canceled ledger
+                    spans more than one currency, currency is unvalidated
+                    free text on this schema, so summing raw cents across two
+                    of them would produce a number wearing a real one's
+                    formatting (see computeRealizedSavings' own comment, same
+                    rule money.ts's sumMonthlyCentsIfSingleCurrency already
+                    enforces elsewhere). An honest gap, not a wrong number:
+                    still names the real, currency-independent count. */}
                 {realized.monthlyCents !== null && realized.yearlyCents !== null ? (
                   <>
                     <p className="font-financial text-2xl leading-none font-semibold text-emerald">
-                      {formatCents(realized.monthlyCents, realized.currency ?? undefined)}/mo
+                      {formatCents(realized.yearlyCents, realized.currency ?? undefined)}/yr
                     </p>
                     <p className="mt-1.5 text-xs text-muted-foreground">
                       {realized.canceledCount === 1
                         ? "From 1 subscription you've canceled here"
                         : `From ${realized.canceledCount} subscriptions you've canceled here`}
-                      , that&apos;s {formatCents(realized.yearlyCents, realized.currency ?? undefined)}/yr. This reflects each
-                      subscription&apos;s current details. Editing or deleting a canceled one changes this total too.
+                      , that&apos;s {formatCents(realized.monthlyCents, realized.currency ?? undefined)}/mo. A permanent
+                      record — editing or deleting one of those subscriptions later won&apos;t change this total.
                     </p>
                   </>
                 ) : (
