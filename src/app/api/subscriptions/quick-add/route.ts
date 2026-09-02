@@ -1,16 +1,17 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
-import { quickAddSubscription } from "@/lib/ai/parse-subscription";
+import { quickAddSubscription, quickAddLineSchema } from "@/lib/ai/parse-subscription";
 import { checkQuickAddRateLimit, quickAddRateLimitMessage } from "@/lib/ai/rate-limit";
 import { getUpgradeUrl, isBetaAllAccess } from "@/lib/billing/plan";
 import { resolveHasPaidAccess } from "@/lib/dev/plan-preview";
 import { readJsonBody, MAX_JSON_BODY_BYTES } from "@/lib/http/request-size";
 
-// Capped well above any real "Netflix £10.99 monthly"-style input, but far
-// below what would let someone stuff a large payload into the AI call.
+// The single line of text, wrapped as this route's request body — same
+// bound bulk quick-add's own per-line check reuses directly (see
+// quickAddLineSchema's own comment in parse-subscription.ts).
 const quickAddInputSchema = z.object({
-  text: z.string().trim().min(3, "Tell me a bit more").max(280, "Keep it under 280 characters"),
+  text: quickAddLineSchema,
 });
 
 export async function POST(request: Request) {

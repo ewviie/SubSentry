@@ -18,6 +18,7 @@ import {
   type SubscriptionFormValues,
 } from "@/components/subscriptions/subscription-form";
 import { QuickAddSummary } from "@/components/subscriptions/quick-add-summary";
+import { BulkQuickAddDialog } from "@/components/subscriptions/bulk-quick-add-dialog";
 import { UpgradeInline } from "@/components/billing/upgrade-prompt";
 import { amountStringToCents, formatCents, monthlyCents, annualCents } from "@/lib/subscriptions/money";
 import type { SubscriptionInput } from "@/lib/subscriptions/validation";
@@ -37,7 +38,10 @@ interface RateLimitPrompt {
 
 type Confidence = "high" | "medium" | "low";
 
-function toFormValues(input: SubscriptionInput): SubscriptionFormValues {
+// Exported for bulk-quick-add-review-table.tsx, which needs the exact same
+// SubscriptionInput -> SubscriptionFormValues mapping for each parsed line
+// — one shared conversion rather than a second copy that could drift.
+export function toFormValues(input: SubscriptionInput): SubscriptionFormValues {
   return {
     name: input.name,
     amount: input.amount,
@@ -175,6 +179,17 @@ export function QuickAddBar({ isFirstSubscription = false }: { isFirstSubscripti
           )}
         </Button>
       </form>
+      {/* User Value Journey Audit, opportunity #1: this bar handled one
+          subscription at a time only, the single biggest gap the audit
+          found — reaching a portfolio big enough for duplicate detection,
+          Health Score, or the savings/spend-trend surfaces to say anything
+          real meant repeating this same type-wait-confirm loop 8-15+
+          times, with no bank-export-free bulk path at all. Placed directly
+          under the bar itself (not a separate page) so it's visible at the
+          exact moment a new account would otherwise start that loop. */}
+      <div className="mt-1.5">
+        <BulkQuickAddDialog />
+      </div>
       {error ? (
         <p role="alert" className="mt-2 text-sm text-destructive">
           {error}

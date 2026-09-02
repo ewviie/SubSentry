@@ -88,6 +88,33 @@ export const subscriptionUpdateSchema = z.object(baseFields).partial().extend({
 });
 export type SubscriptionUpdate = z.infer<typeof subscriptionUpdateSchema>;
 
+// Bulk quick-add (User Value Journey Audit, opportunity #1): the same
+// per-line cap a single quick-add line gets — see lib/ai/parse-subscription.ts's
+// own quickAddLineSchema, which this bound is shared with — times a real,
+// bounded batch size. 20 is generous for a real household's subscription
+// list (the audit's own worked example was "8-15 subscriptions") while
+// staying small enough that one request can't queue an unbounded number of
+// AI parse calls (see lib/ai/bulk-quick-add.ts's own concurrency-bounded
+// orchestration) or, at confirm time, an unbounded insert batch. Distinct
+// from MAX_IMPORT_ROWS (200, lib/imports/validation.ts) — that bound exists
+// for a bank-CSV/transaction-clustering batch, a genuinely different scale
+// and cost shape (no AI call per row) than a hand-pasted list of lines a
+// human is expected to have actually typed or copied themselves.
+export const MAX_BULK_QUICK_ADD_LINES = 20;
+
+// The confirm endpoint's request body (api/subscriptions/quick-add/bulk/confirm)
+// — every row re-validated through the exact same subscriptionInputSchema
+// the manual form, single quick-add, and CSV import confirm all use.
+// Nothing from the bulk-parse response is trusted here: the client's review
+// step may have edited any field before this ever posts. No `source`
+// field, unlike importConfirmSchema's own — this endpoint always tags rows
+// "ai_parsed" itself (see the route), never client-supplied, so there's no
+// enum to restrict against smuggling.
+export const bulkQuickAddConfirmSchema = z.object({
+  rows: z.array(subscriptionInputSchema).min(1, "Nothing to add").max(MAX_BULK_QUICK_ADD_LINES),
+});
+export type BulkQuickAddConfirmInput = z.infer<typeof bulkQuickAddConfirmSchema>;
+
 // subscriptions.id is a Postgres `uuid` column — a malformed string (or
 // anything that isn't a UUID at all) makes the driver throw "invalid input
 // syntax for type uuid" instead of the query just matching zero rows. Every
