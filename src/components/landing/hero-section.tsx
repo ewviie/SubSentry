@@ -95,12 +95,18 @@ export function HeroSection() {
           initial="hidden"
           animate="visible"
         >
+          {/* ASO/SEO pass: reordered from "AI-powered subscription tracking"
+              — the first thing on the page, before the H1 itself, was
+              leading with the mechanism instead of the category a visitor
+              is actually searching for. Same words, same icon/color, value
+              noun first, AI now the trailing qualifier — not removed
+              (there's a real AI parser behind it), just no longer first. */}
           <motion.p
             variants={fadeInUp}
             className="inline-flex items-center gap-1.5 rounded-full bg-ai-muted px-3 py-1 text-xs font-medium text-ai"
           >
             <Sparkles className="size-3.5" aria-hidden="true" />
-            AI-powered subscription tracking
+            Subscription tracking — AI-powered
           </motion.p>
 
           <h1 className="mt-6 text-balance text-4xl font-semibold tracking-tight sm:text-display">

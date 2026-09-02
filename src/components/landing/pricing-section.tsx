@@ -28,6 +28,12 @@ const TIERS = [
       "Spend insights and category breakdown",
       "Dashboard with monthly and annual costs",
       "Every confirmed duplicate",
+      // ASO/SEO pass, Priority 5: the permanent realized-savings ledger
+      // (schema.ts's realizedSavings table) is genuinely free on every
+      // plan today — never gated, same "confirmed duplicates always free"
+      // principle the entry right above already lists. Not a new Free
+      // feature, just the first time this existing one is named here.
+      "Permanent record of what you've canceled and saved",
     ],
     cta: "Start free",
     popular: false,

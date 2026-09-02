@@ -24,7 +24,14 @@ const spaceGrotesk = Space_Grotesk({
 // papered over with a fabricated domain. Set NEXT_PUBLIC_APP_URL once a
 // real domain exists.
 const SITE_TITLE = "SubSentry";
-const SITE_DESCRIPTION = "AI-powered subscription management";
+// ASO/SEO pass: outcome-first, not mechanism-first — this is the fallback
+// every page without its own metadata inherits (every auth page sets its
+// own; this is what a future page that forgets to would show). "AI-powered
+// subscription management" led with the mechanism (AI) over what a visitor
+// actually gets; leads with tracking + the realized-savings proof point now
+// instead, matching the homepage's own real copy rather than describing the
+// product differently in the one place most likely to go stale.
+const SITE_DESCRIPTION = "Track your subscriptions and see what you've actually saved.";
 
 // generateMetadata (a function), not a static `export const metadata`
 // object: metadataBase needs process.env.NEXT_PUBLIC_APP_URL read fresh

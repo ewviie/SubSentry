@@ -37,4 +37,23 @@ export const FAQS = [
     answer:
       "No. SubSentry doesn't use advertising trackers, doesn't resell analytics data, and doesn't sell data to anyone, for any reason.",
   },
+  // ASO/SEO pass: the two questions the audit found genuinely missing —
+  // "does this save me money" and "does it cancel things for me" — added
+  // here because this is the one array both the visible accordion
+  // (faq-section.tsx) and this page's FAQPage structured data already
+  // build from; a new FAQ here is real, visible content, never markup
+  // added only for search engines. "Realized savings" (the internal name
+  // for the permanent record) never appears in the answer — same "plain
+  // language, not internal jargon" rule every other user-facing string in
+  // this app already follows.
+  {
+    question: "How much can SubSentry actually save me?",
+    answer:
+      "There's no guessed percentage. SubSentry only ever surfaces real findings, each with the actual dollar amount behind it: confirmed duplicate subscriptions, overlapping services, and subscriptions you haven't reviewed in months. Once you cancel something, SubSentry keeps a permanent record of what it saved you, even if you later edit or delete that subscription.",
+  },
+  {
+    question: "Does SubSentry cancel my subscriptions for me?",
+    answer:
+      "No. SubSentry can't cancel anything on your behalf. When you're ready to cancel a subscription, it gives you a real search link to that service's own cancellation process, and once you mark it canceled, the saving is recorded permanently.",
+  },
 ];

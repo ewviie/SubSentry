@@ -110,12 +110,24 @@ export default function ForgottenSubscriptionsGuidePage() {
             ))}
           </div>
 
+          {/* ASO/SEO pass: strengthened per the audit's own recommendation —
+              step 5 above already tells the reader to decide "keep,
+              downgrade, or cancel," but until now nothing on this page
+              followed through on the "cancel" branch, or on what happens
+              after. Two precise additions, both honest about what SubSentry
+              actually does: a real per-service cancellation search link
+              (never a claimed direct cancel action — same distinction the
+              in-app cancellation guidance itself makes), and the permanent
+              realized-savings record once something's actually canceled. */}
           <section className="mt-12 rounded-xl border border-border bg-card p-6">
             <h2 className="font-heading text-lg font-semibold">Once you&apos;ve found them</h2>
             <p className="mt-2 text-muted-foreground">
-              The hard part usually isn&apos;t finding them once, it&apos;s remembering to check again next
-              month. SubSentry keeps the list you just built, adds up the monthly and annual totals
-              automatically, and flags likely duplicates the next time you add something. You can also just{" "}
+              The hard part usually isn&apos;t finding them once, it&apos;s following through: remembering
+              to check again next month, and actually canceling the ones you decide you don&apos;t need.
+              SubSentry keeps the list you just built, adds up the totals automatically, flags likely
+              duplicates, and gives you a real search link to help you cancel each one when you&apos;re ready
+              (it never cancels anything on your behalf, but it does keep a permanent record of what
+              you&apos;ve actually stopped paying for). You can also just{" "}
               <Link href="/subscription-cost-calculator" className="font-medium text-foreground underline underline-offset-4">
                 total up what you found
               </Link>{" "}

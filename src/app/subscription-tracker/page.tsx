@@ -30,8 +30,8 @@ export const metadata: Metadata = {
     type: "website",
   },
   // Without its own `twitter` block, this page fell back to the root
-  // layout's generic "SubSentry" / "AI-powered subscription management"
-  // pair on Twitter/X specifically, while openGraph above (Facebook,
+  // layout's generic title/description pair (layout.tsx's SITE_TITLE/
+  // SITE_DESCRIPTION) on Twitter/X specifically, while openGraph above (Facebook,
   // LinkedIn, Slack, iMessage…) already correctly showed this page's own
   // title/description. Next only inherits fields a page doesn't set
   // itself, it doesn't derive `twitter` from a sibling `openGraph`. Mirrors
@@ -88,6 +88,15 @@ const FAQS = [
     question: "How does SubSentry calculate monthly vs. annual cost?",
     answer:
       "Every subscription is normalized to a monthly figure regardless of its billing cycle. Yearly, quarterly, and weekly charges are converted using the same math, so totals and comparisons are apples-to-apples.",
+  },
+  // ASO/SEO pass: distinct phrasing from the homepage's own new "How much
+  // can SubSentry actually save me?" FAQ (faq-data.ts) — this page's own
+  // angle ("tracking alone often finds it"), not a copy-pasted duplicate of
+  // the same question on two pages.
+  {
+    question: "Will tracking my subscriptions actually save me money?",
+    answer:
+      "Often, yes, just from the tracking itself: most of what people find are subscriptions they forgot they had, or the same kind of service paid for twice. SubSentry surfaces both automatically, real duplicate matches and subscriptions you haven't looked at in months, each with the dollar amount attached, never a guessed percentage.",
   },
 ];
 

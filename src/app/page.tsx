@@ -14,9 +14,9 @@ import { FinalCtaSection } from "@/components/landing/final-cta-section";
 import { LandingFooter } from "@/components/landing/landing-footer";
 import { absoluteUrl } from "@/lib/seo";
 
-// Previously unset: this page inherited the root layout's bare
-// "SubSentry" / "AI-powered subscription management" fallback verbatim,
-// the exact "generic title on the most important page" gap a crawler (and
+// Previously unset: this page inherited the root layout's bare, generic
+// fallback verbatim (see layout.tsx's own SITE_DESCRIPTION comment), the
+// exact "generic title on the most important page" gap a crawler (and
 // a search-results snippet) sees first. Distinct on purpose from
 // /subscription-tracker's own title ("Subscription Tracker: Track Every
 // Recurring Charge") and the guide's ("How to Find Forgotten
@@ -47,20 +47,30 @@ import { absoluteUrl } from "@/lib/seo";
 // conventionally does (every other page's title puts it last, via the
 // template, once it reaches a descendant segment where the template does
 // apply).
+// ASO/SEO pass: "AI" dropped from the front of the title (was "SubSentry:
+// AI Subscription Tracker & Spend Manager") — real and worth keeping
+// somewhere (the hero's own eyebrow badge still says so), but leading the
+// single most important title tag on the site with the mechanism instead
+// of the category people actually search for ("subscription tracker") was
+// the wrong emphasis. "Spend Manager," not "Subscription Manager," stays
+// deliberate: SubSentry never manages a subscription on a user's behalf
+// (no cancel-for-you, no plan changes) — it manages the number, which
+// "Spend Manager" says without implying a capability the product doesn't
+// have.
 export const metadata: Metadata = {
-  title: { absolute: "SubSentry: AI Subscription Tracker & Spend Manager" },
+  title: { absolute: "SubSentry: Subscription Tracker & Spend Manager" },
   description:
     "Type a subscription in plain English or add it by hand. SubSentry tracks the spend, flags overlaps and overdue renewals, and shows what you're really paying for. No bank connection required.",
   alternates: { canonical: absoluteUrl("/") ?? "/" },
   openGraph: {
-    title: "SubSentry: AI Subscription Tracker & Spend Manager",
+    title: "SubSentry: Subscription Tracker & Spend Manager",
     description: "Know exactly what you're paying for, with no bank connection required.",
     images: [absoluteUrl("/logo-mark.png") ?? "/logo-mark.png"],
     type: "website",
   },
   twitter: {
     card: "summary",
-    title: "SubSentry: AI Subscription Tracker & Spend Manager",
+    title: "SubSentry: Subscription Tracker & Spend Manager",
     description: "Know exactly what you're paying for, with no bank connection required.",
     images: [absoluteUrl("/logo-mark.png") ?? "/logo-mark.png"],
   },
@@ -88,7 +98,7 @@ export default async function Home() {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     name: "SubSentry",
-    description: "AI-powered subscription management. Track what you're actually paying for.",
+    description: "Subscription tracker that shows what you're actually paying for and what you've saved.",
     applicationCategory: "FinanceApplication",
     operatingSystem: "Web",
     ...(homeUrl ? { url: homeUrl } : {}),
