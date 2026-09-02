@@ -143,6 +143,46 @@ for (const vp of VIEWPORTS) {
         await user.page.context().close();
         await deleteTestUser(user.email);
       });
+      // User Value Journey Audit, opportunity #1 revised: the dashboard's
+      // "Needs your attention" panel (attention-panel.tsx) now also states
+      // the realized-savings total and a composed "what changed" sentence
+      // in its own CardDescription — same long-unbroken-name overflow risk
+      // as the two blocks above, on a card rendered on every dashboard
+      // visit rather than gated behind a canceled-subscription check on
+      // /savings alone.
+      test(`Dashboard — a long subscription name doesn't overflow the "Needs your attention" panel's realized-savings line at ${vp.name}`, async ({ browser }) => {
+        const user = await createVerifiedUser(browser, `e2e-mobile-attention-${vp.name.replace("x", "-")}`, {
+          viewport: { width: vp.width, height: vp.height },
+        });
+
+        // AttentionPanel only renders while the portfolio has at least one
+        // active subscription (see dashboard/page.tsx's own hasActive
+        // gate — unrelated to this feature, not something this change
+        // touches) — a second, active subscription keeps the panel itself
+        // on-screen so the realized-savings line has somewhere to render.
+        const longName = "SuperLongStreamingServiceNameWithoutAnySpacesAtAllForTestingPurposesOverflow";
+        const created = await apiFetch(user.page, "/api/subscriptions", {
+          method: "POST",
+          body: { name: longName, amount: "15.99", billingCycle: "monthly", nextRenewalDate: "2030-01-01" },
+        });
+        const subscriptionId = (created.body as { subscription: { id: string } }).subscription.id;
+        await apiFetch(user.page, `/api/subscriptions/${subscriptionId}`, { method: "PATCH", body: { status: "canceled" } });
+        await apiFetch(user.page, "/api/subscriptions", {
+          method: "POST",
+          body: { name: "Spotify", amount: "9.99", billingCycle: "monthly", nextRenewalDate: "2099-01-01" },
+        });
+
+        await user.page.goto("/dashboard");
+        await expect(user.page.getByText(/You've saved/)).toBeVisible();
+        const { innerWidth, scrollWidth } = await user.page.evaluate(() => ({
+          innerWidth: window.innerWidth,
+          scrollWidth: document.documentElement.scrollWidth,
+        }));
+        expect(scrollWidth, `/dashboard must not scroll horizontally at ${vp.name} with realized savings`).toBeLessThanOrEqual(innerWidth);
+
+        await user.page.context().close();
+        await deleteTestUser(user.email);
+      });
     }
 
     test(`account-deletion dialog fits the viewport and buttons stay tappable at ${vp.name}`, async ({ browser }) => {

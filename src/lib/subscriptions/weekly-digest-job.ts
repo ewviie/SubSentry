@@ -3,7 +3,7 @@ import { and, asc, eq, isNull, lt, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { appBaseUrl } from "@/lib/auth/email";
-import { listSubscriptions, getAllPriceHistoryForUser } from "./queries";
+import { listSubscriptions, getAllPriceHistoryForUser, getRealizedSavings } from "./queries";
 import { computeSavingsRecommendations } from "./savings";
 import { getDismissedRecommendationIds } from "./dismissed-recommendations";
 import { computeWeeklyDigestSummary, computeMonthlyTotal, isDigestWorthSending } from "./digest";
@@ -133,10 +133,15 @@ export async function runWeeklyDigestJob(now: Date = new Date()): Promise<Weekly
 
   for (const candidate of candidates) {
     try {
-      const [subscriptions, priceHistoryBySubscriptionId, dismissedRecommendationIds] = await Promise.all([
+      const [subscriptions, priceHistoryBySubscriptionId, dismissedRecommendationIds, realizedSavingsRecords] = await Promise.all([
         listSubscriptions(candidate.userId),
         getAllPriceHistoryForUser(candidate.userId),
         getDismissedRecommendationIds(candidate.userId),
+        // User Value Journey Audit, opportunity #1 revised: the same
+        // permanent ledger /savings reads from — fetched here so
+        // computeWeeklyDigestSummary can state it below, independent of
+        // whether anything else changed this week.
+        getRealizedSavings(candidate.userId),
       ]);
       const isPremium = await resolveHasPaidAccess(candidate.plan);
 
@@ -184,7 +189,15 @@ export async function runWeeklyDigestJob(now: Date = new Date()): Promise<Weekly
         candidate.lastDigestMonthlyCents !== null && candidate.lastDigestCurrency !== null
           ? { monthlyCents: candidate.lastDigestMonthlyCents, currency: candidate.lastDigestCurrency }
           : null;
-      const summary = computeWeeklyDigestSummary(subscriptions, priceHistoryBySubscriptionId, newNotifications, savingsRecommendations, previousTotal, now);
+      const summary = computeWeeklyDigestSummary(
+        subscriptions,
+        priceHistoryBySubscriptionId,
+        newNotifications,
+        savingsRecommendations,
+        previousTotal,
+        now,
+        realizedSavingsRecords,
+      );
 
       // Same snapshot update either way (worth-sending or not) — this
       // user's portfolio total was genuinely observed this run, so next

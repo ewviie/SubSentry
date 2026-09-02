@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { PiggyBank, BarChart3 } from "lucide-react";
 import { requireUser } from "@/lib/auth/session";
-import { getDashboardData, getAllPriceHistoryForUser } from "@/lib/subscriptions/queries";
+import { getDashboardData, getAllPriceHistoryForUser, getRealizedSavings } from "@/lib/subscriptions/queries";
+import { computeRealizedSavings } from "@/lib/subscriptions/savings";
 import { getDismissedRecommendationIds } from "@/lib/subscriptions/dismissed-recommendations";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -68,10 +69,16 @@ export default async function DashboardPage() {
   // what syncNotifications just persisted, so this always reflects the same
   // findings the bell/notifications page would show, never a second
   // detection pass.
-  const [attentionItems, activitySummary] = await Promise.all([
+  const [attentionItems, activitySummary, realizedSavingsRecords] = await Promise.all([
     getAttentionItems(user.id),
     getRecentActivitySummary(user.id),
+    // User Value Journey Audit, opportunity #1 revised: the same permanent
+    // ledger /savings reads from — fetched here so AttentionPanel can state
+    // it unconditionally (no "worth showing" gate the way the digest needs;
+    // this is a page render, not an email that might not otherwise fire).
+    getRealizedSavings(user.id),
   ]);
+  const realizedSavings = computeRealizedSavings(realizedSavingsRecords);
   const creepingCost = computeCreepingCostTrailing12Months(data.subscriptions, priceHistoryBySubscriptionId);
   // Insights and the Savings opportunities section below both ultimately
   // read from the same overlap/duplicate detection, left unfiltered here,
@@ -171,7 +178,7 @@ export default async function DashboardPage() {
             question now. */}
         {hasActive ? (
           <MotionCard>
-            <AttentionPanel items={attentionItems} activitySummary={activitySummary} />
+            <AttentionPanel items={attentionItems} activitySummary={activitySummary} realizedSavings={realizedSavings} />
           </MotionCard>
         ) : null}
         <InsightsSection insights={dashboardInsights} />

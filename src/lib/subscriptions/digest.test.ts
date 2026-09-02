@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { computeWeeklyDigestSummary, computeMonthlyTotal, isDigestWorthSending } from "./digest";
-import type { Subscription, SubscriptionPriceHistory, Notification } from "@/lib/db/schema";
+import type { Subscription, SubscriptionPriceHistory, Notification, RealizedSavingsRecord } from "@/lib/db/schema";
 
 let nextId = 1;
 function sub(overrides: Partial<Subscription> = {}): Subscription {
@@ -53,6 +53,22 @@ function notif(overrides: Partial<Notification> = {}): Notification {
     dedupeKey: `dedupe-${nextNotifId}`,
     readAt: null,
     createdAt: new Date(),
+    ...overrides,
+  };
+}
+
+let nextRealizedSavingsId = 1;
+function realizedSavingsRecord(overrides: Partial<RealizedSavingsRecord> = {}): RealizedSavingsRecord {
+  return {
+    id: `realized-${nextRealizedSavingsId++}`,
+    userId: "user-1",
+    subscriptionId: `sub-realized-${nextRealizedSavingsId}`,
+    subscriptionName: "Canceled Sub",
+    amountCents: 999,
+    billingCycle: "monthly",
+    currency: "usd",
+    subscriptionSource: "manual",
+    canceledAt: new Date(),
     ...overrides,
   };
 }
@@ -133,6 +149,75 @@ describe("computeWeeklyDigestSummary", () => {
     const big = notif({ type: "duplicate_subscription", severity: "warning", impactCents: 5000, title: "Big one" });
     const summary = computeWeeklyDigestSummary([], new Map(), [small, big], [], null, NOW);
     expect(summary.topPriorityNotification?.title).toBe("Big one");
+  });
+});
+
+describe("computeWeeklyDigestSummary — topPriorityNotification.secondary", () => {
+  it("0 candidates: topPriorityNotification is null", () => {
+    const summary = computeWeeklyDigestSummary([], new Map(), [], [], null, NOW);
+    expect(summary.topPriorityNotification).toBeNull();
+  });
+
+  it("1 candidate: secondary is null (preserves the pre-existing single-item shape)", () => {
+    const only = notif({ title: "Only", severity: "warning", impactCents: 500 });
+    const summary = computeWeeklyDigestSummary([], new Map(), [only], [], null, NOW);
+    expect(summary.topPriorityNotification).toEqual({ title: "Only", body: only.body, secondary: null });
+  });
+
+  it("2 candidates: secondary carries the real second-ranked item", () => {
+    const high = notif({ title: "High", severity: "warning", impactCents: 500 });
+    const low = notif({ title: "Low", severity: "info", impactCents: 100 });
+    const summary = computeWeeklyDigestSummary([], new Map(), [low, high], [], null, NOW);
+    expect(summary.topPriorityNotification?.title).toBe("High");
+    expect(summary.topPriorityNotification?.secondary).toEqual({ title: "Low", body: low.body });
+  });
+
+  it("more than 2 candidates: only the top 2 are ever reflected, never a 3rd", () => {
+    const notifs = [
+      notif({ title: "Third", severity: "info", impactCents: 10 }),
+      notif({ title: "First", severity: "warning", impactCents: 900 }),
+      notif({ title: "Second", severity: "warning", impactCents: 400 }),
+    ];
+    const summary = computeWeeklyDigestSummary([], new Map(), notifs, [], null, NOW);
+    expect(summary.topPriorityNotification?.title).toBe("First");
+    expect(summary.topPriorityNotification?.secondary?.title).toBe("Second");
+  });
+});
+
+describe("computeWeeklyDigestSummary — realizedSavings", () => {
+  it("no realized-savings records: an honest zero-state, same shape computeRealizedSavings([]) returns", () => {
+    const summary = computeWeeklyDigestSummary([], new Map(), [], [], null, NOW);
+    expect(summary.realizedSavings).toEqual({ monthlyCents: null, yearlyCents: null, currency: null, canceledCount: 0 });
+  });
+
+  it("realized savings present, single currency: a real total", () => {
+    const records = [
+      realizedSavingsRecord({ amountCents: 1000, billingCycle: "monthly", currency: "usd" }),
+      realizedSavingsRecord({ amountCents: 12000, billingCycle: "yearly", currency: "usd" }), // 1000/mo
+    ];
+    const summary = computeWeeklyDigestSummary([], new Map(), [], [], null, NOW, records);
+    expect(summary.realizedSavings.monthlyCents).toBe(2000);
+    expect(summary.realizedSavings.currency).toBe("usd");
+    expect(summary.realizedSavings.canceledCount).toBe(2);
+  });
+
+  it("realized savings present, mixed currencies: honest null totals, real count — never a fabricated cross-currency sum", () => {
+    const records = [
+      realizedSavingsRecord({ amountCents: 1000, currency: "usd" }),
+      realizedSavingsRecord({ amountCents: 1000, currency: "eur" }),
+    ];
+    const summary = computeWeeklyDigestSummary([], new Map(), [], [], null, NOW, records);
+    expect(summary.realizedSavings.monthlyCents).toBeNull();
+    expect(summary.realizedSavings.yearlyCents).toBeNull();
+    expect(summary.realizedSavings.currency).toBeNull();
+    expect(summary.realizedSavings.canceledCount).toBe(2);
+  });
+
+  it("is computed independently of `subscriptions`/`newNotifications` — an empty portfolio with a quiet week can still have real realized-savings history", () => {
+    const records = [realizedSavingsRecord({ amountCents: 500, currency: "usd" })];
+    const summary = computeWeeklyDigestSummary([], new Map(), [], [], null, NOW, records);
+    expect(summary.realizedSavings.canceledCount).toBe(1);
+    expect(summary.totalNewNotifications).toBe(0);
   });
 });
 
@@ -275,5 +360,23 @@ describe("isDigestWorthSending", () => {
   it("is false for a totally empty portfolio", () => {
     const summary = computeWeeklyDigestSummary([], new Map(), [], [], null, NOW);
     expect(isDigestWorthSending(summary)).toBe(false);
+  });
+
+  // User Value Journey Audit, opportunity #1 revised: realizedSavings is a
+  // standing total, never a new event — restating it every quiet week would
+  // be exactly the "here's what you already saw" spam this gate exists to
+  // prevent, so it must never be able to flip this on by itself.
+  it("realized savings alone (real history, but nothing new this week) never makes a digest worth sending", () => {
+    const records = [realizedSavingsRecord({ amountCents: 999, currency: "usd" })];
+    const summary = computeWeeklyDigestSummary([], new Map(), [], [], null, NOW, records);
+    expect(summary.realizedSavings.canceledCount).toBe(1);
+    expect(isDigestWorthSending(summary)).toBe(false);
+  });
+
+  it("when a digest is already worth sending for a real reason, it correctly still carries the realized-savings total", () => {
+    const records = [realizedSavingsRecord({ amountCents: 999, currency: "usd" })];
+    const summary = computeWeeklyDigestSummary([], new Map(), [notif()], [], null, NOW, records);
+    expect(isDigestWorthSending(summary)).toBe(true);
+    expect(summary.realizedSavings.canceledCount).toBe(1);
   });
 });

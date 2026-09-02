@@ -283,4 +283,151 @@ describe.skipIf(!hasDb)("weekly digest job (DB integration)", () => {
     const [refreshed] = await db.select().from(schema.users).where(eq(schema.users.id, user.id));
     expect(refreshed.lastDigestSentAt).toBeNull();
   });
+
+  // User Value Journey Audit, opportunity #1 revised: the permanent
+  // realized-savings ledger threaded end-to-end through the real job.
+  describe("realized savings", () => {
+    async function cancelSubscription(userId: string, plan: "free" | "pro" = "free") {
+      const sub = await queries.createSubscription(userId, {
+        name: "Canceled Streaming Service",
+        amount: "12.00",
+        currency: "usd",
+        billingCycle: "monthly",
+        category: "streaming",
+        nextRenewalDate: "2099-01-01",
+        status: "active",
+      });
+      const result = await queries.updateSubscription(userId, sub.id, plan, { status: "canceled" });
+      expect(result.kind).toBe("updated");
+    }
+
+    it("realized savings alone (nothing else new this week) never triggers a send — matches isDigestWorthSending's own contract", async () => {
+      const user = await makeUser();
+      await cancelSubscription(user.id);
+
+      const result = await digestJob.runWeeklyDigestJob();
+      expect(result.skippedEmpty).toBeGreaterThanOrEqual(1);
+      expect(sendMailMock).not.toHaveBeenCalled();
+
+      const [refreshed] = await db.select().from(schema.users).where(eq(schema.users.id, user.id));
+      // Still advances the cadence, same as any other quiet week.
+      expect(refreshed.lastDigestSentAt).not.toBeNull();
+    });
+
+    it("a digest already worth sending for a real reason also states the real realized-savings total", async () => {
+      const user = await makeUser();
+      await cancelSubscription(user.id);
+      // A genuine confirmed duplicate — the same trigger the "sends a real
+      // email" test above already uses — makes this digest worth sending
+      // for its own, independent reason.
+      await queries.createSubscription(user.id, {
+        name: "Netflix",
+        amount: "8.00",
+        currency: "usd",
+        billingCycle: "monthly",
+        category: "streaming",
+        nextRenewalDate: "2099-01-01",
+        status: "active",
+      });
+      await queries.createSubscription(user.id, {
+        name: "Netflix Premium",
+        amount: "20.00",
+        currency: "usd",
+        billingCycle: "monthly",
+        category: "streaming",
+        nextRenewalDate: "2099-02-01",
+        status: "active",
+      });
+
+      const result = await digestJob.runWeeklyDigestJob();
+      expect(result.sent).toBeGreaterThanOrEqual(1);
+
+      const emailArgs = sendMailMock.mock.calls.find(([msg]) => msg.to === user.email)?.[0];
+      expect(emailArgs?.html).toContain("You've saved");
+      expect(emailArgs?.html).toContain("$144.00");
+    });
+
+    it("free and pro plans receive identical realized-savings treatment — no plan-based gating", async () => {
+      const freeUser = await makeUser({ plan: "free" });
+      const proUser = await makeUser({ plan: "pro" });
+      for (const user of [freeUser, proUser]) {
+        await cancelSubscription(user.id, user.plan);
+        await queries.createSubscription(user.id, {
+          name: "Netflix",
+          amount: "8.00",
+          currency: "usd",
+          billingCycle: "monthly",
+          category: "streaming",
+          nextRenewalDate: "2099-01-01",
+          status: "active",
+        });
+        await queries.createSubscription(user.id, {
+          name: "Netflix Premium",
+          amount: "20.00",
+          currency: "usd",
+          billingCycle: "monthly",
+          category: "streaming",
+          nextRenewalDate: "2099-02-01",
+          status: "active",
+        });
+      }
+
+      await digestJob.runWeeklyDigestJob();
+
+      const freeHtml = sendMailMock.mock.calls.find(([msg]) => msg.to === freeUser.email)?.[0]?.html;
+      const proHtml = sendMailMock.mock.calls.find(([msg]) => msg.to === proUser.email)?.[0]?.html;
+      expect(freeHtml).toContain("You've saved $144.00/yr so far, from 1 cancellation");
+      expect(proHtml).toContain("You've saved $144.00/yr so far, from 1 cancellation");
+    });
+
+    it("ownership: one user's realized-savings figure never leaks into another user's digest", async () => {
+      const userA = await makeUser();
+      const userB = await makeUser();
+      await cancelSubscription(userA.id);
+      // userB gets a genuine duplicate (so their own digest sends) but no
+      // cancellation of their own.
+      await queries.createSubscription(userB.id, {
+        name: "Netflix",
+        amount: "8.00",
+        currency: "usd",
+        billingCycle: "monthly",
+        category: "streaming",
+        nextRenewalDate: "2099-01-01",
+        status: "active",
+      });
+      await queries.createSubscription(userB.id, {
+        name: "Netflix Premium",
+        amount: "20.00",
+        currency: "usd",
+        billingCycle: "monthly",
+        category: "streaming",
+        nextRenewalDate: "2099-02-01",
+        status: "active",
+      });
+      // Give userA a real reason to send too, so both are comparable.
+      await queries.createSubscription(userA.id, {
+        name: "Hulu",
+        amount: "8.00",
+        currency: "usd",
+        billingCycle: "monthly",
+        category: "streaming",
+        nextRenewalDate: "2099-01-01",
+        status: "active",
+      });
+      await queries.createSubscription(userA.id, {
+        name: "Hulu Plus",
+        amount: "20.00",
+        currency: "usd",
+        billingCycle: "monthly",
+        category: "streaming",
+        nextRenewalDate: "2099-02-01",
+        status: "active",
+      });
+
+      await digestJob.runWeeklyDigestJob();
+
+      const bHtml = sendMailMock.mock.calls.find(([msg]) => msg.to === userB.email)?.[0]?.html;
+      expect(bHtml).not.toContain("You've saved");
+    });
+  });
 });

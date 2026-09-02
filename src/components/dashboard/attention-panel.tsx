@@ -5,8 +5,10 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { formatCents } from "@/lib/subscriptions/money";
 import { formatRelativeTime } from "@/lib/utils";
 import { NOTIFICATION_TYPE_ICON } from "@/components/notifications/type-icon";
+import { summarizeTopChanges } from "@/lib/notifications/ranking";
 import type { Notification } from "@/lib/db/schema";
 import type { RecentActivitySummary } from "@/lib/notifications/queries";
+import type { RealizedSavings } from "@/lib/subscriptions/savings";
 
 const TYPE_LABEL: Record<Notification["type"], string> = {
   price_increase: "price increase",
@@ -20,6 +22,15 @@ const TYPE_LABEL: Record<Notification["type"], string> = {
   price_change_review: "price change to review",
   spend_increased: "spend increased",
 };
+
+// Titles are real notification titles (notifications/generate.ts) — some
+// are phrased as questions ("Still using Hulu?"), most are plain statements
+// with no trailing punctuation. Appends a period only when the title
+// doesn't already end with one of .!? — avoids ever producing "...Hulu?."
+// when composed into the description below.
+function withTerminalPunctuation(title: string): string {
+  return /[.!?]$/.test(title) ? title : `${title}.`;
+}
 
 // The dashboard's "What needs your attention" panel — product-value pass,
 // round 2. Replaces BiggestOpportunityCard's dashboard slot (still real,
@@ -36,13 +47,27 @@ const TYPE_LABEL: Record<Notification["type"], string> = {
 // from a different angle than the ranked list ("what's unresolved right
 // now") — shown together so a returning user gets both "here's what's new"
 // and "here's what to do about it" in one place, not two separate hunts.
+//
+// User Value Journey Audit, opportunity #1 revised: the description now
+// also names the top 1-2 items (summarizeTopChanges, notifications/ranking.ts
+// — the exact same priority order `items` is already sorted by, computed
+// on data already passed in, no new query), and realizedSavings
+// (savings.ts's computeRealizedSavings, over the persisted ledger) gets its
+// own line once there's real history — the permanent "money SubSentry
+// helped you save" fact, previously visible only on /savings. Shown
+// unconditionally whenever this panel renders at all (no "worth showing"
+// gate the digest needs — this is a page render, not an email).
 export function AttentionPanel({
   items,
   activitySummary,
+  realizedSavings,
 }: {
   items: Notification[];
   activitySummary: RecentActivitySummary;
+  realizedSavings: RealizedSavings;
 }) {
+  const topChanges = summarizeTopChanges(items);
+
   return (
     <Card className="shadow-elevation-low">
       <CardHeader>
@@ -51,7 +76,21 @@ export function AttentionPanel({
           {activitySummary.totalCount > 0
             ? `${activitySummary.totalCount} thing${activitySummary.totalCount === 1 ? "" : "s"} detected in the last 30 days.`
             : "Nothing detected in the last 30 days."}
+          {topChanges ? (
+            <>
+              {" "}
+              {withTerminalPunctuation(topChanges.title)}
+              {topChanges.secondary ? ` Also: ${withTerminalPunctuation(topChanges.secondary.title)}` : ""}
+            </>
+          ) : null}
         </CardDescription>
+        {realizedSavings.canceledCount > 0 ? (
+          <p className="text-xs font-medium text-emerald">
+            {realizedSavings.yearlyCents !== null && realizedSavings.currency
+              ? `You've saved ${formatCents(realizedSavings.yearlyCents, realizedSavings.currency)}/yr so far, from ${realizedSavings.canceledCount} cancellation${realizedSavings.canceledCount === 1 ? "" : "s"}.`
+              : `You've saved money from ${realizedSavings.canceledCount} cancellation${realizedSavings.canceledCount === 1 ? "" : "s"} here (spanning more than one currency).`}
+          </p>
+        ) : null}
       </CardHeader>
       <CardContent>
         {items.length === 0 ? (

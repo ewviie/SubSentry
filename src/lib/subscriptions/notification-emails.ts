@@ -178,7 +178,15 @@ export async function sendPlanDowngradedEmail(to: string): Promise<void> {
 // routine-but-useful context (upcoming renewals, creeping cost), then the
 // one clear top action. Every line reads a real count/figure already on
 // `summary`; nothing here invents copy for a zero count.
-function buildDigestLines(
+//
+// Exported (unlike this file's other build* helpers) specifically so a test
+// can assert the rendered html/text directly — same "plain function, no
+// email-sending/component-test harness" reasoning parseSubscriptionSystemPrompt
+// (anthropic-provider.ts) is exported for. This is the one place in the
+// digest that interpolates user-controlled text into HTML (a notification's
+// title/body, which can embed a real subscription name), so it's also the
+// one place worth a direct escaping regression test.
+export function buildDigestLines(
   summary: WeeklyDigestSummary,
   dashboardUrl: string,
   unsubscribeUrl: string | null,
@@ -259,6 +267,29 @@ function buildDigestLines(
     rows.push({ html: line, text: line });
   }
 
+  // User Value Journey Audit, opportunity #1 revised: the permanent
+  // realized-savings total, paired right after "potential" above — same
+  // "here's what you could still save, here's what you've already saved"
+  // pairing /savings itself uses. Yearly, not monthly — the same headline
+  // figure /savings' own "Money saved so far" card and the cancellation
+  // toast ("You'll save about $X/year") already lead with, so this digest
+  // line never disagrees with either. Rendered only when this digest is
+  // already going out for other reasons (isDigestWorthSending gates the
+  // whole send, not this one line) — a nonzero realizedSavings total never
+  // triggers a send on its own, see digest.ts's own comment. No
+  // subscription/category name is ever interpolated here (just a count and
+  // formatCents' own numeric output), so this needs no escapeHtml — unlike
+  // topPriority below, which does.
+  if (summary.realizedSavings.canceledCount > 0) {
+    const { yearlyCents: realizedYearly, currency: realizedCurrency, canceledCount } = summary.realizedSavings;
+    const countLabel = `${canceledCount} cancellation${canceledCount === 1 ? "" : "s"}`;
+    const line =
+      realizedYearly !== null && realizedCurrency
+        ? `You've saved ${formatCents(realizedYearly, realizedCurrency)}/yr so far, from ${countLabel}`
+        : `You've saved money from ${countLabel} here (spanning more than one currency, so no single total)`;
+    rows.push({ html: `<strong>${line}</strong>`, text: line });
+  }
+
   if (summary.currency) {
     const spend = formatCents(summary.monthlyCents, summary.currency);
     // Retention pass: "changed by $Y" appended right onto the total-spend
@@ -279,15 +310,31 @@ function buildDigestLines(
   const htmlItems = rows.map((r) => `<li style="margin:0 0 8px;">${r.html}</li>`).join("");
   const textItems = rows.map((r) => `- ${r.text}`).join("\n");
 
+  // User Value Journey Audit, opportunity #1 revised: `secondary` (a real
+  // second-ranked item, when one exists — same shared priority order as
+  // getAttentionItems, see notifications/ranking.ts's summarizeTopChanges)
+  // is appended as its own "Also: ..." clause, escaped exactly the same way
+  // the primary item already is below. When there's no real second item,
+  // secondaryHtml/secondaryText are both "" and this renders byte-for-byte
+  // what it always has.
   const topPriority = summary.topPriorityNotification
     ? {
-        // escapeHtml on both — title/body are template strings built in
-        // notifications/generate.ts that embed real subscription names
-        // (free text, up to 120 chars — see subscriptionInputSchema), the
-        // same "the one place this app interpolates user-controlled text
-        // into HTML" risk renewal-reminders.ts's own escapeHtml exists for.
-        html: `<p style="margin:16px 0 0;font-size:13px;color:#71717a;">Most worth reviewing: <strong style="color:#18181b;">${escapeHtml(summary.topPriorityNotification.title)}</strong> — ${escapeHtml(summary.topPriorityNotification.body)}</p>`,
-        text: `\nMost worth reviewing: ${summary.topPriorityNotification.title} — ${summary.topPriorityNotification.body}`,
+        // escapeHtml on all four — title/body (primary and secondary) are
+        // template strings built in notifications/generate.ts that embed
+        // real subscription names (free text, up to 120 chars — see
+        // subscriptionInputSchema), the same "the one place this app
+        // interpolates user-controlled text into HTML" risk
+        // renewal-reminders.ts's own escapeHtml exists for.
+        html: `<p style="margin:16px 0 0;font-size:13px;color:#71717a;">Most worth reviewing: <strong style="color:#18181b;">${escapeHtml(summary.topPriorityNotification.title)}</strong> — ${escapeHtml(summary.topPriorityNotification.body)}${
+          summary.topPriorityNotification.secondary
+            ? ` Also: <strong style="color:#18181b;">${escapeHtml(summary.topPriorityNotification.secondary.title)}</strong> — ${escapeHtml(summary.topPriorityNotification.secondary.body)}`
+            : ""
+        }</p>`,
+        text: `\nMost worth reviewing: ${summary.topPriorityNotification.title} — ${summary.topPriorityNotification.body}${
+          summary.topPriorityNotification.secondary
+            ? ` Also: ${summary.topPriorityNotification.secondary.title} — ${summary.topPriorityNotification.secondary.body}`
+            : ""
+        }`,
       }
     : { html: "", text: "" };
 

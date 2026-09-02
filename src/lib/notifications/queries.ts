@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { notifications, type Notification } from "@/lib/db/schema";
 import type { NotificationCandidate } from "./types";
 import { generateNotificationCandidates, type GenerateNotificationsInput } from "./generate";
+import { comparePriority } from "./ranking";
 
 // Bulk insert with onConflictDoNothing on the (userId, dedupeKey) unique
 // index — same idempotent-upsert pattern
@@ -92,7 +93,6 @@ export async function markAllNotificationsRead(userId: string): Promise<void> {
 // uses — this table only ever holds one row per real, deduped finding, so
 // a single user's unread count in practice is nowhere near this cap.
 const ATTENTION_SCAN_LIMIT = 100;
-const SEVERITY_RANK: Record<Notification["severity"], number> = { warning: 1, info: 0 };
 
 export async function getAttentionItems(userId: string, limit = 5): Promise<Notification[]> {
   const unread = await db
@@ -102,13 +102,14 @@ export async function getAttentionItems(userId: string, limit = 5): Promise<Noti
     .orderBy(desc(notifications.createdAt))
     .limit(ATTENTION_SCAN_LIMIT);
 
+  // Same severity + impact-cents priority order as ranking.ts's
+  // comparePriority (now the one shared definition — see its own comment on
+  // why this used to be a second, independently-drifting copy of
+  // digest.ts's identical rule); createdAt is this function's own extra
+  // tiebreak on top of it, not part of the shared rule, since nothing else
+  // that reuses comparePriority needs "most recent first" as a third level.
   return unread
-    .sort(
-      (a, b) =>
-        SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] ||
-        (b.impactCents ?? 0) - (a.impactCents ?? 0) ||
-        b.createdAt.getTime() - a.createdAt.getTime(),
-    )
+    .sort((a, b) => comparePriority(a, b) || b.createdAt.getTime() - a.createdAt.getTime())
     .slice(0, limit);
 }
 
