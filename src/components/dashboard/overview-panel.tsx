@@ -132,6 +132,24 @@ export function OverviewPanel({
                 <div className="min-w-0">
                   <p className="font-heading text-sm font-semibold">{healthScore.rating}</p>
                   <p className="text-xs text-muted-foreground">Subscription health</p>
+                  {/* This score's own trust caveat used to only ever surface
+                      inside ScoreBreakdownCard — Premium-gated, and buried
+                      in the Analytics section below the fold. The overall
+                      score/rating shown here is never gated (see that
+                      card's own comment), so the honesty about how much
+                      data actually backs it shouldn't be either: a
+                      free-plan user seeing "47/100 Fair" deserves the same
+                      "this is based on limited history" caveat a Pro user
+                      gets a fuller version of further down. Only rendered
+                      for medium/low (health-score.ts's computeConfidence
+                      leaves `reason` unset for high) — a trustworthy score
+                      needs no disclaimer. */}
+                  {healthScore.confidence.level !== "high" && healthScore.confidence.reason ? (
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {healthScore.confidence.level === "medium" ? "Medium" : "Low"} confidence:{" "}
+                      {healthScore.confidence.reason}
+                    </p>
+                  ) : null}
                 </div>
               </div>
             ) : null}

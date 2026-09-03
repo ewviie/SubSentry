@@ -162,10 +162,22 @@ export function computeInsights(allSubscriptions: Subscription[]): ComputedInsig
     )[0];
     const share = topEntry.cents / monthlyTotal;
     if (byCategory.size > 1 && share >= 0.4) {
+      // "Other" winning this comparison isn't really a spending finding —
+      // it's a categorization gap (subscription-form.tsx's category field
+      // defaults to "other" and plenty of users never touch it). Presenting
+      // it with the same "X is your biggest expense" phrasing as a real
+      // category implies SubSentry learned something about where the money
+      // goes, when it actually didn't. Named honestly instead, with the
+      // actionable fix (set a category) rather than a vague "worth a look."
+      const isUncategorized = topCategory === "other";
       insights.push({
         type: "expensive_category",
-        title: `${CATEGORY_LABELS[topCategory]} is your biggest expense`,
-        description: `${CATEGORY_LABELS[topCategory]} makes up ${Math.round(share * 100)}% of your monthly spend (${formatCents(topEntry.cents, primaryCurrency)}/mo). Worth a look if that's higher than expected.`,
+        title: isUncategorized
+          ? "Most of your spend isn't categorized"
+          : `${CATEGORY_LABELS[topCategory]} is your biggest expense`,
+        description: isUncategorized
+          ? `${Math.round(share * 100)}% of your monthly spend (${formatCents(topEntry.cents, primaryCurrency)}/mo) is filed under "Other." Set a category on those subscriptions for a clearer breakdown.`
+          : `${CATEGORY_LABELS[topCategory]} makes up ${Math.round(share * 100)}% of your monthly spend (${formatCents(topEntry.cents, primaryCurrency)}/mo). Worth a look if that's higher than expected.`,
         severity: "info",
         subscriptionIds: topEntry.ids,
       });
@@ -218,14 +230,30 @@ export function computeInsights(allSubscriptions: Subscription[]): ComputedInsig
     const meanAnnual = annualCosts.reduce((sum, c) => sum + c.annual, 0) / annualCosts.length;
     const outliers = annualCosts
       .filter((c) => c.annual >= meanAnnual * 2 && c.annual >= 3000)
-      .sort((a, b) => b.annual - a.annual);
-    for (const { sub, annual } of outliers.slice(0, 2)) {
+      .sort((a, b) => b.annual - a.annual)
+      .slice(0, 2);
+    // Same "one card, not one per subscription" fix as overdue renewals
+    // above: two outliers used to each get their own "X adds up fast" card
+    // with identical phrasing and nothing to tell them apart except the
+    // name, which reads as the same finding repeated rather than two
+    // distinct ones. A single outlier keeps its own specific sentence.
+    if (outliers.length === 1) {
+      const { sub, annual } = outliers[0];
       insights.push({
         type: "high_yearly_spend",
         title: `${sub.name} adds up fast`,
         description: `${sub.name} costs ${formatCents(annual, sub.currency)}/year, more than double what you spend on a typical subscription here.`,
         severity: "info",
         subscriptionIds: [sub.id],
+      });
+    } else if (outliers.length === 2) {
+      const [first, second] = outliers;
+      insights.push({
+        type: "high_yearly_spend",
+        title: `${first.sub.name} and ${second.sub.name} add up fast`,
+        description: `${first.sub.name} (${formatCents(first.annual, first.sub.currency)}/year) and ${second.sub.name} (${formatCents(second.annual, second.sub.currency)}/year) both cost more than double what you spend on a typical subscription here.`,
+        severity: "info",
+        subscriptionIds: [first.sub.id, second.sub.id],
       });
     }
   }

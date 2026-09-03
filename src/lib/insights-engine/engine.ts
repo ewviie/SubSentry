@@ -131,6 +131,18 @@ export interface EngineOutput {
     yearlySavingsCents: number;
   };
   estimatedYearlySavingsCents: number;
+  // Product-language pass: the "Unrealized savings" card used to fold this
+  // straight into optimizationScore.unrealizedYearlySavingsCents with no way
+  // for a consumer to show it separately from the confirmed-duplicates
+  // figure (savingsForecast.yearlySavingsCents) — one combined number
+  // wearing the confidence of its most certain half. Exposed here so the UI
+  // can show "confirmed" and "estimated" as two distinct figures instead of
+  // one. Same monthlySavingsCents-then-*12 basis optimizationScore already
+  // uses for this same rule set (see the comment on totalUnrealizedMonthlyCents
+  // below) — deliberately not re-derived a different way, so this number and
+  // the "estimated" half of unrealizedYearlySavingsCents can never quietly
+  // disagree.
+  estimatedOptimizationYearlyCents: number;
 }
 
 function todayIso(): string {
@@ -325,6 +337,7 @@ export function runInsightsEngine(
       yearlySavingsCents,
     },
     estimatedYearlySavingsCents: yearlySavingsCents,
+    estimatedOptimizationYearlyCents: optimizationRuleSavingsCents * 12,
   };
 }
 

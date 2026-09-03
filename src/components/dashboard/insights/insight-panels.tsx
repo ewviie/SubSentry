@@ -442,13 +442,26 @@ export function ScoreBreakdownCard({
 // changed — optimization-score.ts's `score` is still 100 minus the
 // unrealized/annual-spend ratio; only which of its two existing outputs is
 // the visual headline changed.
+//
+// Dashboard UX refinement pass: this card used to lead with ONE combined
+// figure (confirmed duplicates + estimated optimizations added together)
+// with no visual distinction between the two — a $3,791.88 fact and a
+// $4,399.20 estimate, summed into a single number that reads as more
+// certain than either half actually is. Split into two labeled rows below,
+// same "Confirmed"/"Possible" evidence-tier language savings-recommendation-
+// card.tsx already established on /savings, so the vocabulary means the
+// same thing everywhere it appears. The combined total still exists (some
+// users do want "the whole opportunity" as one number) but is demoted to a
+// small caption, explicit that it's an identified opportunity, not money
+// already saved — see AttentionPanel's realized-savings line for what
+// actually-saved language looks like in this app.
 export function UnrealizedSavingsCard({ output, isPremium, upgradeUrl }: { output: EngineOutput; isPremium: boolean; upgradeUrl: string | null }) {
   if (!isPremium) {
     return (
       <UpgradeCard
         icon={Gauge}
         title="Unrealized savings"
-        description="See how much you could potentially save across your subscriptions, combining confirmed duplicates with estimated optimizations."
+        description="See how much you could potentially save across your subscriptions, split into confirmed duplicates and estimated optimizations."
         beta={isBetaAllAccess()}
         upgradeUrl={upgradeUrl}
       />
@@ -457,41 +470,44 @@ export function UnrealizedSavingsCard({ output, isPremium, upgradeUrl }: { outpu
   if (!output.optimizationScore) return null;
   const { score, unrealizedYearlySavingsCents } = output.optimizationScore;
   const unrecoveredPct = 100 - score;
+  const currency = output.stats.currency ?? undefined;
+  const confirmedYearlyCents = output.savingsForecast.yearlySavingsCents;
+  const estimatedYearlyCents = output.estimatedOptimizationYearlyCents;
   return (
     <Card size="sm" className="shadow-elevation-low">
       <CardHeader>
         <CardTitle>Unrealized savings</CardTitle>
         <CardDescription>
-          A narrower, dollar-specific signal than your Health score above — confirmed duplicates plus estimated
-          optimizations, as a share of current spend.
+          What you could still save — not what you&apos;ve saved. Two different confidence levels, shown separately.
         </CardDescription>
       </CardHeader>
-      <CardContent>
-        {/* font-financial/text-2xl/text-emerald matches every other real $
-            savings figure on this dashboard (see OverviewPanel's own
-            savings callout) — this card now reads as "a savings figure,"
-            not "a second score," on first glance. */}
-        <p className="font-financial text-2xl font-semibold text-emerald">
-          {formatCents(unrealizedYearlySavingsCents, output.stats.currency ?? undefined)}/yr
-        </p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          identified: confirmed duplicates (Savings opportunities) plus estimates from Optimization recommendations
-          below — {unrecoveredPct}% of your current spend still unrecovered.
-          {/* This now folds in every optimization-category rule's
-              monthlySavingsCents (see engine.ts), not just confirmed
-              duplicates, so it can no longer read 0%-unrecovered "nothing
-              found" while Optimization recommendations still shows a real
-              dollar figure underneath it. Savings opportunities above stays
-              duplicates-only on purpose (see its own comment); this card is
-              the one place the two signals are meant to combine. */}
-        </p>
+      <CardContent className="space-y-3">
+        {unrealizedYearlySavingsCents > 0 ? (
+          <>
+            <div className="flex items-baseline justify-between gap-3 text-sm">
+              <span className="text-muted-foreground">Confirmed opportunity</span>
+              <span className="font-financial font-semibold text-emerald">{formatCents(confirmedYearlyCents, currency)}/yr</span>
+            </div>
+            <div className="flex items-baseline justify-between gap-3 text-sm">
+              <span className="text-muted-foreground">Estimated opportunity</span>
+              <span className="font-financial font-semibold">{formatCents(estimatedYearlyCents, currency)}/yr</span>
+            </div>
+            <p className="border-t border-border pt-2 text-xs text-muted-foreground">
+              {formatCents(unrealizedYearlySavingsCents, currency)}/yr combined ({unrecoveredPct}% of your current
+              spend) — confirmed comes from duplicates you&apos;re paying for twice (Savings opportunities);
+              estimated comes from Optimization recommendations below. Neither is money you&apos;ve saved yet.
+            </p>
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground">Nothing identified to recover right now.</p>
+        )}
         {/* This card's "confirmed duplicates" half only shows its biggest
             few on the dashboard (Savings opportunities above); /savings has
             the full, ranked list plus each one's own Review link. A number
             with no way to see the findings behind it is exactly the
             "here's something, figure out what to do" gap this pass is
             about closing. */}
-        <Link href="/savings" className="mt-2 inline-block text-xs font-medium text-foreground hover:underline">
+        <Link href="/savings" className="inline-block text-xs font-medium text-foreground hover:underline">
           View savings →
         </Link>
       </CardContent>

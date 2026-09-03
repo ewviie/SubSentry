@@ -157,6 +157,42 @@ describe("computeInsights", () => {
     expect(insight?.description).toContain("$1,200.00/year");
   });
 
+  // Dashboard UX refinement pass: two outliers used to each get their own
+  // near-identical "X adds up fast" card — the same repetitive-insight
+  // pattern already fixed once for overdue renewals. Combined into one.
+  it("combines two yearly-spend outliers into one card instead of one per subscription", () => {
+    // Two equally-priced outliers plus two $0 filler subs pulls the mean
+    // down to exactly half of either outlier's annual cost, clearing the
+    // ">= 2x mean" bar for both at once (the scenario that used to produce
+    // two near-identical "X adds up fast" cards).
+    const chatgpt = sub({ name: "ChatGPT", amountCents: 2000, billingCycle: "monthly" });
+    const claude = sub({ name: "Claude", amountCents: 2000, billingCycle: "monthly" });
+    const subs = [chatgpt, claude, sub({ name: "Filler A", amountCents: 0 }), sub({ name: "Filler B", amountCents: 0 })];
+    const insights = computeInsights(subs);
+    const outlierInsights = insights.filter((i) => i.type === "high_yearly_spend");
+    expect(outlierInsights).toHaveLength(1);
+    expect(outlierInsights[0].title).toBe("ChatGPT and Claude add up fast");
+    expect(outlierInsights[0].subscriptionIds).toEqual([chatgpt.id, claude.id]);
+    expect(outlierInsights[0].description).toContain("ChatGPT");
+    expect(outlierInsights[0].description).toContain("Claude");
+  });
+
+  // Dashboard UX refinement pass: "Other" winning the expensive-category
+  // comparison is a categorization gap (the add-subscription form defaults
+  // to "other"), not a real spending finding — must be named honestly
+  // rather than phrased like every other category.
+  it("names an uncategorized-spend finding honestly instead of as a real category", () => {
+    const subs = [
+      sub({ category: "other", amountCents: 5000, name: "Uncategorized thing" }),
+      sub({ category: "software", amountCents: 1000, name: "Small Tool" }),
+    ];
+    const insights = computeInsights(subs);
+    const category = insights.find((i) => i.type === "expensive_category");
+    expect(category?.title).toBe("Most of your spend isn't categorized");
+    expect(category?.title).not.toContain("Other is your biggest expense");
+    expect(category?.description).toContain("Other");
+  });
+
   it("flags likely duplicate names", () => {
     const a = sub({ name: "Netflix" });
     const b = sub({ name: "Netflix Premium" });

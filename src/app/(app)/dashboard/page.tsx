@@ -185,6 +185,62 @@ export default async function DashboardPage() {
       </section>
       ) : null}
 
+      {/* Moved ahead of Subscription Management (dashboard UX refinement
+          pass): "potential savings" is one of the questions this dashboard
+          exists to answer, and used to sit below an entire unrelated
+          add-a-subscription section — real content, but it pushed the
+          dashboard's actual value (what could I save) below the fold on a
+          typical viewport for no reason tied to how important either
+          section is. Pulled out of the old flat 8-card grid so the
+          highest-intent content (real dollar recs) stops competing for
+          attention with informational panels. */}
+      {hasActive ? (
+        <section className="space-y-5">
+          <SectionHeading
+            weight="secondary"
+            title="Savings opportunities"
+            description="The biggest wins, ranked by real dollar impact."
+            icon={PiggyBank}
+            iconClassName="text-emerald"
+          />
+          {/* 3-wide, not the 2-wide grid every other section uses.
+              Unrealized savings is one short figure next to three cards
+              that are each a short list, so a uniform 2-column split kept
+              leaving one side of the row visually heavier than the other.
+              3 columns lets it sit on its own instead of stretching to
+              match a list card's height.
+              items-start (not the grid default stretch): the third column
+              now stacks Unrealized savings with Optimization recommendations
+              underneath it, so it's naturally taller than the single cards
+              in the other two columns. Without items-start, grid's default
+              row-stretch would force those two shorter columns to grow to
+              match, leaving visible empty space at the bottom of each. */}
+          <StaggerSection className="grid items-start gap-4 lg:grid-cols-3" staggerChildren={0.07}>
+            <MotionCard>
+              <SavingsOpportunitiesCard output={engineOutput} isPremium={isPremium} upgradeUrl={upgradeUrl} />
+            </MotionCard>
+            <MotionCard>
+              <QuickWinsCard output={engineOutput} />
+            </MotionCard>
+            {/* Optimization recommendations sits directly under Unrealized
+                savings, same column, instead of wrapping to its own row
+                below the other two cards (a flat 4th item in a 3-col grid
+                lands alone in column 1 of a second row) — keeps the
+                recommendation paired with the figure it elaborates on, and
+                visually secondary to it (smaller, second in the stack)
+                rather than reading as its own separate section. */}
+            <div className="space-y-4">
+              <MotionCard>
+                <UnrealizedSavingsCard output={engineOutput} isPremium={isPremium} upgradeUrl={upgradeUrl} />
+              </MotionCard>
+              <MotionCard>
+                <AiRecommendationsCard output={engineOutput} isPremium={isPremium} upgradeUrl={upgradeUrl} />
+              </MotionCard>
+            </div>
+          </StaggerSection>
+        </section>
+      ) : null}
+
       <section className="space-y-5">
         <SectionHeading
           weight="secondary"
@@ -243,56 +299,6 @@ export default async function DashboardPage() {
           </MotionCard>
         ) : null}
       </section>
-
-      {/* Pulled out of the old flat 8-card grid so the highest-intent
-          content (real dollar recs) stops competing for attention with
-          informational panels. */}
-      {hasActive ? (
-        <section className="space-y-5">
-          <SectionHeading
-            weight="secondary"
-            title="Savings opportunities"
-            description="The biggest wins, ranked by real dollar impact."
-            icon={PiggyBank}
-            iconClassName="text-emerald"
-          />
-          {/* 3-wide, not the 2-wide grid every other section uses.
-              Unrealized savings is one short figure next to three cards
-              that are each a short list, so a uniform 2-column split kept
-              leaving one side of the row visually heavier than the other.
-              3 columns lets it sit on its own instead of stretching to
-              match a list card's height.
-              items-start (not the grid default stretch): the third column
-              now stacks Unrealized savings with Optimization recommendations
-              underneath it, so it's naturally taller than the single cards
-              in the other two columns. Without items-start, grid's default
-              row-stretch would force those two shorter columns to grow to
-              match, leaving visible empty space at the bottom of each. */}
-          <StaggerSection className="grid items-start gap-4 lg:grid-cols-3" staggerChildren={0.07}>
-            <MotionCard>
-              <SavingsOpportunitiesCard output={engineOutput} isPremium={isPremium} upgradeUrl={upgradeUrl} />
-            </MotionCard>
-            <MotionCard>
-              <QuickWinsCard output={engineOutput} />
-            </MotionCard>
-            {/* Optimization recommendations sits directly under Unrealized
-                savings, same column, instead of wrapping to its own row
-                below the other two cards (a flat 4th item in a 3-col grid
-                lands alone in column 1 of a second row) — keeps the
-                recommendation paired with the figure it elaborates on, and
-                visually secondary to it (smaller, second in the stack)
-                rather than reading as its own separate section. */}
-            <div className="space-y-4">
-              <MotionCard>
-                <UnrealizedSavingsCard output={engineOutput} isPremium={isPremium} upgradeUrl={upgradeUrl} />
-              </MotionCard>
-              <MotionCard>
-                <AiRecommendationsCard output={engineOutput} isPremium={isPremium} upgradeUrl={upgradeUrl} />
-              </MotionCard>
-            </div>
-          </StaggerSection>
-        </section>
-      ) : null}
 
       {/* "Spending trend" used to render its own full GrowthChart card here,
           the exact same chart, over the exact same data, as /analytics'

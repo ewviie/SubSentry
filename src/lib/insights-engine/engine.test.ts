@@ -207,6 +207,9 @@ describe("runInsightsEngine", () => {
     const free = runInsightsEngine(subs, false);
     expect(free.savingsForecast.monthlySavingsCents).toBe(1500);
     expect(free.optimizationScore?.unrealizedYearlySavingsCents).toBe(1500 * 12);
+    // No optimization-category rule ran (not premium) — the estimated half
+    // is honestly zero, not a fallback to the confirmed figure.
+    expect(free.estimatedOptimizationYearlyCents).toBe(0);
 
     // Premium: the same duplicate is still confirmed (still 1500/mo), but
     // premium.annual_switch_savings now also fires on both monthly-billed
@@ -217,6 +220,15 @@ describe("runInsightsEngine", () => {
     expect(premium.optimizationScore?.unrealizedYearlySavingsCents).toBe((1500 + 375) * 12);
     expect(premium.optimizationScore!.unrealizedYearlySavingsCents).toBeGreaterThan(
       free.optimizationScore!.unrealizedYearlySavingsCents,
+    );
+    // Dashboard UX refinement pass: confirmed (savingsForecast) and
+    // estimated (this field) must sum back to exactly the combined
+    // unrealizedYearlySavingsCents above — the whole point of exposing this
+    // field is so the UI can show the two halves separately without them
+    // ever silently disagreeing with the combined total.
+    expect(premium.estimatedOptimizationYearlyCents).toBe(375 * 12);
+    expect(premium.savingsForecast.yearlySavingsCents + premium.estimatedOptimizationYearlyCents).toBe(
+      premium.optimizationScore!.unrealizedYearlySavingsCents,
     );
   });
 

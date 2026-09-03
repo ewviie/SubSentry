@@ -39,6 +39,7 @@ function baseOutput(): EngineOutput {
     premiumInsights: [],
     savingsForecast: { recommendations: [], monthlySavingsCents: 0, yearlySavingsCents: 0 },
     estimatedYearlySavingsCents: 0,
+    estimatedOptimizationYearlyCents: 0,
   };
 }
 
