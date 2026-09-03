@@ -2,7 +2,7 @@ import { requireUser } from "@/lib/auth/session";
 import { listSubscriptions, getRealizedSavings } from "@/lib/subscriptions/queries";
 import {
   computeSavingsRecommendations,
-  computeTotalPotentialSavingsMonthlyCents,
+  computeTotalPotentialSavings,
   computeRealizedSavings,
   splitSavingsRecommendationsByPlan,
 } from "@/lib/subscriptions/savings";
@@ -41,7 +41,15 @@ export default async function SavingsPage() {
   // contains whatever the figure is counting, on this one page where both
   // are visible together.
   const recommendations = allRecommendations.filter((r) => !dismissedIds.has(r.id));
-  const totalMonthlyCents = computeTotalPotentialSavingsMonthlyCents(recommendations);
+  // Trust audit finding: this used to be computeTotalPotentialSavingsMonthlyCents
+  // alone, then formatted with formatCents(totalMonthlyCents) — no currency
+  // argument at all, silently defaulting to "usd" (formatCents' own fallback
+  // for genuinely unknown currency, not a safe assumption here). A GBP- or
+  // EUR-only account's real confirmed-duplicate total rendered with a "$"
+  // sign. computeTotalPotentialSavings already exists and is currency-safe
+  // (digest.ts's weekly-digest email already uses it for this exact figure)
+  // — this page just hadn't been switched to it.
+  const { monthlyCents: totalMonthlyCents, currency: totalCurrency } = computeTotalPotentialSavings(recommendations);
   const realized = computeRealizedSavings(realizedSavingsRecords);
   // Monetization Council P0: "gate savings-opportunity list depth by plan."
   // Every confirmed duplicate always stays fully visible here too, on the
@@ -153,7 +161,7 @@ export default async function SavingsPage() {
                   <div>
                     <p className="text-sm font-medium text-muted-foreground">Potential savings from duplicates</p>
                     <p className="font-financial text-2xl leading-none font-semibold text-emerald">
-                      {formatCents(totalMonthlyCents)}/mo
+                      {formatCents(totalMonthlyCents, totalCurrency ?? undefined)}/mo
                     </p>
                   </div>
                 </div>
